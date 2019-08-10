@@ -13,3 +13,6 @@
 [submodule ".vim/pack/plugins/start/tagbar"]
 	path = .vim/pack/plugins/start/tagbar
 	url = git@github.com:majutsushi/tagbar.git
+[submodule ".vim/pack/plugins/start/editorconfig-vim"]
+	path = .vim/pack/plugins/start/editorconfig-vim
+	url = git@github.com:editorconfig/editorconfig-vim.git
