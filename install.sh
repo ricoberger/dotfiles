@@ -1,5 +1,6 @@
 # Copy ZSH configuration
 cp -r $(pwd)/.oh-my-zsh ~/
+cp -r $(pwd)/powerlevel10k ~/.oh-my-zsh/themes/
 cp $(pwd)/.zshrc ~/.zshrc
 
 # Copy SSH configuration
