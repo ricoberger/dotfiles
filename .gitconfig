@@ -1,0 +1,25 @@
+[user]
+  name = ricoberger
+  email = mail@ricoberger.de
+
+[url "git@github.com:"]
+  insteadOf = https://github.com/
+
+[color]
+  diff = auto
+  status = auto
+[color "branch"]
+  current = cyan
+  local = green
+  remote = red
+[color "diff"]
+  meta = yellow
+  frag = magenta
+  old = red
+  new = green
+[color "status"]
+  added = cyan
+  branch = cyan
+  changed = magenta
+  deleted = red
+  untracked = yellow
