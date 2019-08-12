@@ -4,27 +4,23 @@
 
 ## Usage
 
-### Requirements
-
-```sh
-# Install the 'Source Code Pro for Powerline' font
-
-# Install Homebrew and the dependencies
-/usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-brew bundle
-
-# Set ZSH as default shell
-sudo sh -c "echo $(which zsh) >> /etc/shells"
-chsh -s $(which zsh)
-```
-
-### Installation
-
-```sh
-git clone --recurse-submodules
-cd dotfiles
-./install.sh && source ~/.zshrc
-```
+- Install the `Source Code Pro for Powerline` font
+- Install Homebrew and the Brewfile
+  ```sh
+  /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+  brew bundle
+  ```
+- Set ZSH as default shell
+  ```sh
+  sudo sh -c "echo $(which zsh) >> /etc/shells"
+  chsh -s $(which zsh)
+  ```
+- Clone and install the dotfiles
+  ```sh
+  git clone --recurse-submodules git@github.com:ricoberger/dotfiles.git
+  cd dotfiles
+  ./install.sh && source ~/.zshrc
+  ```
 
 ## Features
 
