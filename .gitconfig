@@ -5,6 +5,9 @@
 [url "git@github.com:"]
   insteadOf = https://github.com/
 
+[core]
+  excludesfile = ~/.gitignore
+
 [color]
   diff = auto
   status = auto
