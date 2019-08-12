@@ -1,6 +1,6 @@
 # Taps
 tap "homebrew/cask"
-tap universal-ctags/universal-ctags
+tap "universal-ctags/universal-ctags"
 
 # Languages
 brew "go"
@@ -18,7 +18,7 @@ brew "reattach-to-user-namespace"
 brew "tmux"
 brew "tree"
 brew "typescript"
-brew universal-ctags, args: ['HEAD']
+brew "universal-ctags", args: ['HEAD']
 brew "watch"
 brew "wget"
 brew "zsh"
