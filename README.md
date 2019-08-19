@@ -24,6 +24,24 @@
 
 ## Features
 
+### Custom Aliases and Functions
+
+| Command     | Description                                                                    |
+| ----------- | ------------------------------------------------------------------------------ |
+|             | **Aliases**                                                                    |
+| `chrome`    | Open chrome with remote debugging port enabled                                 |
+| `kssw`      | Port forward the sealed secrets web service                                    |
+|             | **Functions**                                                                  |
+| `killport`  | Kill a process running on port xxxx `killport 8080`                            |
+| `listtargz` | List content of .tar.gz archive `listtargz archive.tar.gz`                     |
+| `mkcd`      | Make a new folder and cd into it `mkcd test`                                   |
+| `numfiles`  | Get number of files in a directory `numfiles folder`                           |
+| `targz`     | Create .tar.gz file `targz archive file*` or `targz archive file1 file2 file3` |
+| `ts`        | Attach to / create tmux session                                                |
+| `up`        | Preserve your fingers from cd ..; cd ..; cd..; cd..; `up 3`                    |
+| `untargz`   | Extract .tar.gz file `untargz archive.tar.gz`                                  |
+| `webshare`  | Start a webserver in the current directory                                     |
+
 ### macOS
 
 | Command         | Description                                           |
@@ -42,7 +60,7 @@
 | `hidefiles`     | Hide the hidden files                                 |
 | `itunes`        | Control iTunes. Use `itunes -h` for usage details     |
 | `spotify`       | Control Spotify and search by artist, album, track... |
-| `rmdsstore`     | Remove .DS\_Store files recursively in a directory  |
+| `rmdsstore`     | Remove .DS\_Store files recursively in a directory    |
 
 ### VS Code
 
@@ -118,7 +136,7 @@
 | kdeld   | `kubectl delete deployment`         | Delete the deployment                                                                            |
 | ksd     | `kubectl scale deployment`          | Scale a deployment                                                                               |
 | krsd    | `kubectl rollout status deployment` | Check the rollout status of a deployment                                                         |
-| kres    | `kubectl set env $@ REFRESHED_AT=`  | Recreate all pods in deployment with zero-downtime                                             |
+| kres    | `kubectl set env $@ REFRESHED_AT=`  | Recreate all pods in deployment with zero-downtime                                               |
 |         |                                     | **Rollout management**                                                                           |
 | kgrs    | `kubectl get rs`                    | To see the ReplicaSet `rs` created by the deployment                                             |
 | krh     | `kubectl rollout history`           | Check the revisions of this deployment                                                           |

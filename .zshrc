@@ -138,51 +138,15 @@ POWERLEVEL9K_CUSTOM_KUBE_PS1_FOREGROUND="white"
 
 # Custom aliases and functions
 
-# Open chrome with remote debugging port enabled
 alias chrome='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222'
+alias kssw='kubectl port-forward --namespace sealed-secrets svc/sealed-secrets-web 8080:80'
 
-# Kill a process running on port xxxx
-# Usage: killport 8080
 killport() { lsof -i :$1 | awk '{print $2}' | tail -n 1 | xargs kill; }
-
-# List content of .tar.gz archive
-# Usage: listtargz archive.tar.gz
 listtargz() { tar -ztvf $1; }
-
-# Make a new folder and cd into it
-# Usage: mkcd test
 mkcd() { NAME=$1; mkdir -p "$NAME"; cd "$NAME"; }
-
-# Display process complete message (for long running processes)
-notify() {
-  cmd=$@ # Somehow interpolate $@ directly doesn't work.
-  $@ && say 'Process Completed!' && osascript -e "display notification \"$cmd\" with title \"Process Completed!\""
-}
-
-# Get number of files in a directory
-# Usage: numfiles folder
 numfiles() { N="$(ls $@ | wc -l)"; echo "$N files in ${@: -1}"; }
-
-# Attach to / create tmux session
 ts() { tmux attach -t main || tmux new -s main; }
-
-# Create .tar.gz file
-# Usage: targz archive file*
-# Usage: targz archive file1 file2 file3
 targz() { tar -zcvf $1.tar.gz ${@:2}; rm -r ${@:2}; }
-
-# Extract .tar.gz file
-# Usage: untargz archive.tar.gz
 untargz() { tar -zxvf $1; rm -r $1; }
-
-# Preserve your fingers from cd ..; cd ..; cd..; cd..;
-# Usage: up 3
 up() { DEEP=$1; for i in $(seq 1 ${DEEP:-"1"}); do cd ../; done; }
-
-webshare() {
-  if [[ $(python --version 2>&1) == *2\.* ]]; then
-    python -m SimpleHTTPServer $@
-  else
-    python -m http.server $@
-  fi
-}
+webshare() { if [[ $(python --version 2>&1) == *2\.* ]]; then python -m SimpleHTTPServer $@; else python -m http.server $@; fi; }
