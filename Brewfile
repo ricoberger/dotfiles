@@ -21,6 +21,7 @@ brew "tmux"
 brew "tree"
 brew "typescript"
 brew "universal-ctags", args: ['HEAD']
+brew "vault"
 brew "watch"
 brew "wget"
 brew "zsh"

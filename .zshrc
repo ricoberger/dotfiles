@@ -1,14 +1,15 @@
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
 
-# Go
+# Environment
 export GOROOT=/usr/local/opt/go/libexec
 export GOPATH=$HOME/go
 export GO111MODULE=on
 
-# Java
 export JAVA_HOME=$(/usr/libexec/java_home)
 export ANDROID_HOME=/Users/ricoberger/Library/Android/sdk
+
+export VAULT_ADDR=http://127.0.0.1:8200
 
 # Path
 export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$HOME/Library/Trigger\ Toolkit/
