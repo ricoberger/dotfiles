@@ -27,6 +27,7 @@ brew "universal-ctags", args: ['HEAD']
 brew "vault"
 brew "watch"
 brew "wget"
+brew "yamllint"
 brew "zsh"
 brew "zsh-completions"
 
