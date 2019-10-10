@@ -1,11 +1,14 @@
 # Taps
 tap "homebrew/cask"
+tap "AdoptOpenJDK/openjdk"
 tap "universal-ctags/universal-ctags"
 
 # Languages
+cask "adoptopenjdk11"
 brew "go"
 brew "node"
 brew "python"
+brew "typescript"
 
 # Tools
 brew "htop"
@@ -19,10 +22,9 @@ brew "mercurial"
 brew "nmap"
 brew "octant"
 brew "operator-sdk"
-brew "reattach-to-user-namespace"
+brew "terraform"
 brew "tmux"
 brew "tree"
-brew "typescript"
 brew "universal-ctags", args: ['HEAD']
 brew "vault"
 brew "watch"
@@ -32,7 +34,19 @@ brew "zsh"
 brew "zsh-completions"
 
 # Desktop Applications
+cask "1password"
+cask "alfred"
 cask "appcleaner"
 cask "docker"
+cask "forklift"
+cask "google-chrome"
+cask "intellij-idea"
+cask "iterm2"
+cask "mongodb-compass-community"
+cask "postman"
+cask "slack"
 cask "spotify"
-cask "virtualbox"
+cask "the-unarchiver"
+cask "tunnelblick"
+cask "visual-studio-code"
+cask "zoomus"
