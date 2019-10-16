@@ -11,6 +11,7 @@ brew "python"
 brew "typescript"
 
 # Tools
+brew "fluxctl"
 brew "htop"
 brew "jq"
 brew "kube-ps1"
