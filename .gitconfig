@@ -2,9 +2,6 @@
   name = ricoberger
   email = mail@ricoberger.de
 
-[url "git@github.com:"]
-  insteadOf = https://github.com/
-
 [core]
   excludesfile = ~/.gitignore
 
