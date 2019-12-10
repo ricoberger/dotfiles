@@ -32,6 +32,7 @@ brew "vault"
 brew "watch"
 brew "wget"
 brew "yamllint"
+brew "yarn"
 brew "zsh"
 brew "zsh-completions"
 
