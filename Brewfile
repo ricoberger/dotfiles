@@ -11,6 +11,7 @@ brew "python"
 brew "typescript"
 
 # Tools
+brew "derailed/popeye/popeye"
 brew "fluxctl"
 brew "htop"
 brew "jq"
