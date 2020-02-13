@@ -13,6 +13,7 @@ brew "typescript"
 # Tools
 brew "derailed/popeye/popeye"
 brew "fluxctl"
+brew "github/gh/gh"
 brew "htop"
 brew "jq"
 brew "kube-ps1"
