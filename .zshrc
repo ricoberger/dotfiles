@@ -14,6 +14,11 @@ export VAULT_ADDR=http://127.0.0.1:8200
 
 # Path
 export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$HOME/Library/Trigger\ Toolkit/
+export PATH=$PATH:$HOME/Library/Python/3.7/bin
+
+# Set Python3 as default
+alias python=/usr/local/bin/python3
+alias pip=/usr/local/bin/pip3
 
 # Path to your oh-my-zsh installation.
 export ZSH="/Users/ricoberger/.oh-my-zsh"
