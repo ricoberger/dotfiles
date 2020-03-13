@@ -57,6 +57,11 @@ let NERDTreeShowHidden=1
 " tagbar
 map <silent> <C-t> :TagbarToggle<CR>
 
+" ctrlp.vim
+let g:ctrlp_map = '<c-p>'
+let g:ctrlp_cmd = 'CtrlP'
+let g:ctrlp_custom_ignore = '\v[\/]\.(git|hg|svn|node_modules)$'
+
 " Autocompletion
 " https://vim.fandom.com/wiki/Omni_completion
 " https://vim.fandom.com/wiki/Smart_mapping_for_tab_completion
