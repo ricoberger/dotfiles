@@ -46,3 +46,6 @@
 [submodule ".vim/pack/plugins/start/nerdcommenter"]
 	path = .vim/pack/plugins/start/nerdcommenter
 	url = https://github.com/preservim/nerdcommenter.git
+[submodule ".vim/pack/plugins/start/ack.vim"]
+	path = .vim/pack/plugins/start/ack.vim
+	url = https://github.com/mileszs/ack.vim.git

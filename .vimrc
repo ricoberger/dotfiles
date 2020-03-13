@@ -54,13 +54,18 @@ map <silent> <C-n> :NERDTreeToggle<CR>
 
 let NERDTreeShowHidden=1
 
-" tagbar
+" tagbar settings
 map <silent> <C-t> :TagbarToggle<CR>
 
-" ctrlp.vim
+" ctrlp.vim settings
 let g:ctrlp_map = '<c-p>'
 let g:ctrlp_cmd = 'CtrlP'
 let g:ctrlp_custom_ignore = '\v[\/]\.(git|hg|svn|node_modules)$'
+
+" ack.vim settings
+if executable('ag')
+  let g:ackprg = 'ag --vimgrep'
+endif
 
 " Autocompletion
 " https://vim.fandom.com/wiki/Omni_completion
