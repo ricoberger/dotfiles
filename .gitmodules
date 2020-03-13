@@ -49,3 +49,6 @@
 [submodule ".vim/pack/plugins/start/ack.vim"]
 	path = .vim/pack/plugins/start/ack.vim
 	url = https://github.com/mileszs/ack.vim.git
+[submodule ".vim/pack/plugins/start/vim-multiple-cursors"]
+	path = .vim/pack/plugins/start/vim-multiple-cursors
+	url = https://github.com/terryma/vim-multiple-cursors.git

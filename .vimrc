@@ -55,7 +55,7 @@ map <silent> <C-n> :NERDTreeToggle<CR>
 let NERDTreeShowHidden=1
 
 " tagbar settings
-map <silent> <C-t> :TagbarToggle<CR>
+map <silent> <C-m> :TagbarToggle<CR>
 
 " ctrlp.vim settings
 let g:ctrlp_map = '<c-p>'
@@ -66,6 +66,12 @@ let g:ctrlp_custom_ignore = '\v[\/]\.(git|hg|svn|node_modules)$'
 if executable('ag')
   let g:ackprg = 'ag --vimgrep'
 endif
+
+" vim-multiple-cursors settings
+let g:multi_cursor_use_default_mapping = 0
+let g:multi_cursor_start_word_key      = '<C-g>'
+let g:multi_cursor_next_key            = '<C-g>'
+let g:multi_cursor_quit_key            = '<Esc>'
 
 " Autocompletion
 " https://vim.fandom.com/wiki/Omni_completion
