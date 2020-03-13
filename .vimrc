@@ -9,9 +9,10 @@ set shiftwidth=2                                  " width for autoindents
 set autoindent                                    " indent a new line the same amount as the line just typed
 set number                                        " add line numbers
 set wildmode=longest,list                         " get bash-like tab completions
-set cc=0                                          " set an 80 column border for good coding style
+set cc=120                                        " set an 120 column border for good coding style
 set noshowmode                                    " disable status line
 set list listchars=tab:▸\ ,trail:·,eol:¬,nbsp:_   " show "invisible" characters
+set updatetime=1000                               " reducing update time to 1s
 
 " nord theme
 syntax on
