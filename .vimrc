@@ -13,6 +13,7 @@ set cc=120                                        " set an 120 column border for
 set noshowmode                                    " disable status line
 set list listchars=tab:▸\ ,trail:·,eol:¬,nbsp:_   " show "invisible" characters
 set updatetime=1000                               " reducing update time to 1s
+set clipboard=unnamed                             " clipboard sharing
 
 " nord theme
 syntax on

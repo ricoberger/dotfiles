@@ -20,6 +20,10 @@ export PATH=$PATH:$HOME/Library/Python/3.7/bin
 alias python=/usr/local/bin/python3
 alias pip=/usr/local/bin/pip3
 
+# Use Vim from brew
+alias vim="/usr/local/bin/vim"
+alias vi="/usr/local/bin/vim"
+
 # Path to your oh-my-zsh installation.
 export ZSH="/Users/ricoberger/.oh-my-zsh"
 
