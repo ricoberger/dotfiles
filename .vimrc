@@ -94,7 +94,7 @@ autocmd BufEnter * if (winnr("$") == 1 && exists("b:NERDTree") && b:NERDTree.isT
 autocmd BufEnter * if bufname('#') =~# "^NERD_tree_" && winnr('$') > 1 | b# | endif
 
 " Tagbar
-map <silent> <C-t> :TagbarToggle<CR>
+map <silent> <C-m> :TagbarToggle<CR>
 
 " ctrlp.vim
 let g:ctrlp_map = '<c-p>'
