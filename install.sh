@@ -8,7 +8,7 @@ mkdir -p ~/.ssh
 cp -r $(pwd)/.ssh/config ~/.ssh/config
 
 # Copy Vim configuration
-cp -r $(pwd)/.vim ~/
+# cp -r $(pwd)/.vim ~/
 cp $(pwd)/.vimrc ~/.vimrc
 
 # Copy tmux configuration

@@ -1,3 +1,30 @@
+" Vundle
+set nocompatible
+filetype off
+set rtp+=~/.vim/bundle/Vundle.vim
+call vundle#begin()
+
+Plugin 'VundleVim/Vundle.vim'
+
+Plugin 'arcticicestudio/nord-vim'
+Plugin 'vim-airline/vim-airline'
+Plugin 'tpope/vim-fugitive'
+Plugin 'scrooloose/nerdtree'
+Plugin 'preservim/nerdcommenter'
+Plugin 'majutsushi/tagbar'
+Plugin 'editorconfig/editorconfig-vim'
+Plugin 'jiangmiao/auto-pairs'
+Plugin 'fatih/vim-go'
+Plugin 'peitalin/vim-jsx-typescript'
+Plugin 'leafgarland/typescript-vim'
+Plugin 'airblade/vim-gitgutter'
+Plugin 'ctrlpvim/ctrlp.vim'
+Plugin 'mileszs/ack.vim'
+Plugin 'terryma/vim-multiple-cursors'
+
+call vundle#end()
+filetype plugin indent on
+
 " basics
 set showmatch                                     " show matching brackets.
 set ignorecase                                    " do case insensitive matching
@@ -55,8 +82,15 @@ map <silent> <C-n> :NERDTreeToggle<CR>
 
 let NERDTreeShowHidden=1
 
+autocmd StdinReadPre * let s:std_in=1
+autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
+
+autocmd BufEnter * if (winnr("$") == 1 && exists("b:NERDTree") && b:NERDTree.isTabTree()) | q | endif
+
+autocmd BufEnter * if bufname('#') =~# "^NERD_tree_" && winnr('$') > 1 | b# | endif
+
 " tagbar settings
-map <silent> <C-m> :TagbarToggle<CR>
+map <silent> <C-t> :TagbarToggle<CR>
 
 " ctrlp.vim settings
 let g:ctrlp_map = '<c-p>'

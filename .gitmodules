@@ -1,21 +1,3 @@
-[submodule ".vim/pack/plugins/start/vim-airline"]
-	path = .vim/pack/plugins/start/vim-airline
-	url = git@github.com:vim-airline/vim-airline.git
-[submodule ".vim/pack/plugins/start/nord-vim"]
-	path = .vim/pack/plugins/start/nord-vim
-	url = git@github.com:arcticicestudio/nord-vim.git
-[submodule ".vim/pack/plugins/start/vim-fugitive"]
-	path = .vim/pack/plugins/start/vim-fugitive
-	url = git@github.com:tpope/vim-fugitive.git
-[submodule ".vim/pack/plugins/start/nerdtree"]
-	path = .vim/pack/plugins/start/nerdtree
-	url = git@github.com:scrooloose/nerdtree.git
-[submodule ".vim/pack/plugins/start/tagbar"]
-	path = .vim/pack/plugins/start/tagbar
-	url = git@github.com:majutsushi/tagbar.git
-[submodule ".vim/pack/plugins/start/editorconfig-vim"]
-	path = .vim/pack/plugins/start/editorconfig-vim
-	url = git@github.com:editorconfig/editorconfig-vim.git
 [submodule ".oh-my-zsh"]
 	path = .oh-my-zsh
 	url = git@github.com:robbyrussell/oh-my-zsh.git
@@ -25,30 +7,3 @@
 [submodule "powerlevel10k"]
 	path = powerlevel10k
 	url = git@github.com:romkatv/powerlevel10k.git
-[submodule ".vim/pack/plugins/start/auto-pairs"]
-	path = .vim/pack/plugins/start/auto-pairs
-	url = git@github.com:jiangmiao/auto-pairs.git
-[submodule ".vim/pack/plugins/start/vim-go"]
-	path = .vim/pack/plugins/start/vim-go
-	url = git@github.com:fatih/vim-go.git
-[submodule ".vim/pack/plugins/start/vim-jsx-typescript"]
-	path = .vim/pack/plugins/start/vim-jsx-typescript
-	url = https://github.com/peitalin/vim-jsx-typescript.git
-[submodule ".vim/pack/plugins/start/typescript-vim"]
-	path = .vim/pack/plugins/start/typescript-vim
-	url = https://github.com/leafgarland/typescript-vim.git
-[submodule ".vim/pack/plugins/start/vim-gitgutter"]
-	path = .vim/pack/plugins/start/vim-gitgutter
-	url = https://github.com/airblade/vim-gitgutter.git
-[submodule ".vim/pack/plugins/start/ctrlp.vim"]
-	path = .vim/pack/plugins/start/ctrlp.vim
-	url = https://github.com/ctrlpvim/ctrlp.vim.git
-[submodule ".vim/pack/plugins/start/nerdcommenter"]
-	path = .vim/pack/plugins/start/nerdcommenter
-	url = https://github.com/preservim/nerdcommenter.git
-[submodule ".vim/pack/plugins/start/ack.vim"]
-	path = .vim/pack/plugins/start/ack.vim
-	url = https://github.com/mileszs/ack.vim.git
-[submodule ".vim/pack/plugins/start/vim-multiple-cursors"]
-	path = .vim/pack/plugins/start/vim-multiple-cursors
-	url = https://github.com/terryma/vim-multiple-cursors.git
