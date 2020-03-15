@@ -25,7 +25,7 @@ Plugin 'terryma/vim-multiple-cursors'
 call vundle#end()
 filetype plugin indent on
 
-" basics
+" Basics
 set showmatch                                     " show matching brackets.
 set ignorecase                                    " do case insensitive matching
 set hlsearch                                      " highlight search results
@@ -42,12 +42,12 @@ set list listchars=tab:▸\ ,trail:·,eol:¬,nbsp:_   " show "invisible" charact
 set updatetime=1000                               " reducing update time to 1s
 set clipboard=unnamed                             " clipboard sharing
 
-" nord theme
+" Nord Theme
 syntax on
 colorscheme nord
 set background=dark
 
-" airline settings
+" Airline
 let g:airline_powerline_fonts = 1
 let g:airline_skip_empty_sections = 1
 let g:airline#extensions#tabline#enabled = 1
@@ -77,7 +77,7 @@ let g:airline_symbols.branch = ''
 let g:airline_symbols.readonly = ''
 let g:airline_symbols.linenr = ''
 
-" nerdtree settings
+" NERDTree
 map <silent> <C-n> :NERDTreeToggle<CR>
 
 let NERDTreeShowHidden=1
@@ -89,20 +89,20 @@ autocmd BufEnter * if (winnr("$") == 1 && exists("b:NERDTree") && b:NERDTree.isT
 
 autocmd BufEnter * if bufname('#') =~# "^NERD_tree_" && winnr('$') > 1 | b# | endif
 
-" tagbar settings
+" Tagbar
 map <silent> <C-t> :TagbarToggle<CR>
 
-" ctrlp.vim settings
+" ctrlp.vim
 let g:ctrlp_map = '<c-p>'
 let g:ctrlp_cmd = 'CtrlP'
 let g:ctrlp_custom_ignore = '\v[\/]\.(git|hg|svn|node_modules)$'
 
-" ack.vim settings
+" ack.vim
 if executable('ag')
   let g:ackprg = 'ag --vimgrep'
 endif
 
-" vim-multiple-cursors settings
+" vim-multiple-cursors
 let g:multi_cursor_use_default_mapping = 0
 let g:multi_cursor_start_word_key      = '<C-g>'
 let g:multi_cursor_next_key            = '<C-g>'
