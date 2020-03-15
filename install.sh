@@ -18,6 +18,7 @@ cp $(pwd)/.tmux.conf ~/.tmux.conf
 # Copy Git configuration
 cp $(pwd)/.gitconfig ~/.gitconfig
 cp $(pwd)/.gitignore ~/.gitignore
+cp $(pwd)/bin/diff-so-fancy /usr/local/bin/diff-so-fancy
 
 # Copy Xcode configuration
 mkdir -p ~/Library/Developer/Xcode/UserData/FontAndColorThemes/

@@ -21,6 +21,8 @@ Plugin 'airblade/vim-gitgutter'
 Plugin 'ctrlpvim/ctrlp.vim'
 Plugin 'mileszs/ack.vim'
 Plugin 'terryma/vim-multiple-cursors'
+Plugin 'mattn/webapi-vim'
+Plugin 'rust-lang/rust.vim'
 
 call vundle#end()
 filetype plugin indent on
@@ -42,6 +44,10 @@ set list listchars=tab:▸\ ,trail:·,eol:¬,nbsp:_   " show "invisible" charact
 set updatetime=1000                               " reducing update time to 1s
 set clipboard=unnamed                             " clipboard sharing
 set cursorline                                    " highlight the line containing the cursor
+set backspace=2                                   " make backspace work like most other programs
+
+let showmarks_include = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+let g:showmarks_enable = 1
 
 " Nord Theme
 let g:nord_cursor_line_number_background = 1
@@ -111,6 +117,17 @@ let g:multi_cursor_use_default_mapping = 0
 let g:multi_cursor_start_word_key      = '<C-g>'
 let g:multi_cursor_next_key            = '<C-g>'
 let g:multi_cursor_quit_key            = '<Esc>'
+
+" rust.vim
+let g:rustfmt_autosave = 1
+
+if has('unix')
+  if has('mac')
+    let g:rust_clip_command = 'pbcopy'
+  else
+    let g:rust_clip_command = 'xclip -selection clipboard'
+  endif
+endif
 
 " Autocompletion
 " https://vim.fandom.com/wiki/Omni_completion
