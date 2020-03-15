@@ -41,8 +41,12 @@ set noshowmode                                    " disable status line
 set list listchars=tab:▸\ ,trail:·,eol:¬,nbsp:_   " show "invisible" characters
 set updatetime=1000                               " reducing update time to 1s
 set clipboard=unnamed                             " clipboard sharing
+set cursorline                                    " highlight the line containing the cursor
 
 " Nord Theme
+let g:nord_cursor_line_number_background = 1
+let g:nord_bold_vertical_split_line = 1
+
 syntax on
 colorscheme nord
 set background=dark
