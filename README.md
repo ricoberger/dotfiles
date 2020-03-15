@@ -30,7 +30,6 @@
 | ----------- | ------------------------------------------------------------------------------ |
 |             | **Aliases**                                                                    |
 | `chrome`    | Open chrome with remote debugging port enabled                                 |
-| `kssw`      | Port forward the sealed secrets web service                                    |
 |             | **Functions**                                                                  |
 | `killport`  | Kill a process running on port xxxx `killport 8080`                            |
 | `listtargz` | List content of .tar.gz archive `listtargz archive.tar.gz`                     |

@@ -32,6 +32,7 @@ brew "the_silver_searcher"
 brew "tree"
 brew "universal-ctags", args: ['HEAD']
 brew "vault"
+brew "vim"
 brew "watch"
 brew "wget"
 brew "yamllint"
