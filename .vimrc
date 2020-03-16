@@ -23,6 +23,7 @@ Plugin 'mileszs/ack.vim'
 Plugin 'terryma/vim-multiple-cursors'
 Plugin 'mattn/webapi-vim'
 Plugin 'rust-lang/rust.vim'
+Plugin 'racer-rust/vim-racer'
 
 call vundle#end()
 filetype plugin indent on
@@ -131,6 +132,9 @@ if has('unix')
   endif
 endif
 
+" Vim Racer Plugin
+let g:racer_experimental_completer = 1
+
 " Autocompletion
 " https://vim.fandom.com/wiki/Omni_completion
 " https://vim.fandom.com/wiki/Smart_mapping_for_tab_completion
@@ -148,7 +152,8 @@ function! Smart_TabComplete()
   endif
   let has_period = match(substr, '\.') != -1
   let has_slash = match(substr, '\/') != -1
-  if (!has_period && !has_slash)
+  let has_colon = match(substr, ':') != -1
+  if (!has_period && !has_slash && !has_colon)
     return "\<C-X>\<C-P>"
   elseif ( has_slash )
     return "\<C-X>\<C-F>"

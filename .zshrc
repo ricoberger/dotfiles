@@ -12,6 +12,8 @@ export ANDROID_NDK_HOME=/Users/ricoberger/Library/Android/sdk/ndk/20.1.5948944
 
 export VAULT_ADDR=http://127.0.0.1:8200
 
+export RUST_SRC_PATH=/Users/ricoberger/.rustup/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src
+
 # Path
 export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$HOME/Library/Trigger\ Toolkit/
 export PATH=$PATH:$HOME/Library/Python/3.7/bin
