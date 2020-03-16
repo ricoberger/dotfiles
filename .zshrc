@@ -147,6 +147,10 @@ POWERLEVEL9K_TIME_FORMAT="%D{%Y-%m-%d %H:%M:%S}"
 POWERLEVEL9K_CUSTOM_KUBE_PS1_BACKGROUND="black"
 POWERLEVEL9K_CUSTOM_KUBE_PS1_FOREGROUND="white"
 
+# Unbind keys
+bindkey -r "^A"
+bindkey -r "^E"
+
 # Custom aliases and functions
 
 alias chrome='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222'
