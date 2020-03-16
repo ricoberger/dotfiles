@@ -254,8 +254,8 @@
       "Action" : 10
     },
     "0xf703-0x280000" : {
-      "Action" : 10,
-      "Text" : "f"
+      "Text" : "f",
+      "Action" : 10
     },
     "0xf700-0x240000" : {
       "Text" : "[1;5A",
@@ -286,8 +286,8 @@
       "Action" : 10
     },
     "0xf702-0x280000" : {
-      "Action" : 10,
-      "Text" : "b"
+      "Text" : "b",
+      "Action" : 10
     },
     "0xf72b-0x20000" : {
       "Text" : "[1;2F",
@@ -341,8 +341,7 @@
         "class" : "iTermStatusBarCPUUtilizationComponent",
         "configuration" : {
           "knobs" : {
-            "base: priority" : 5,
-            "base: compression resistance" : 1
+            "base: priority" : 5
           },
           "layout advanced configuration dictionary value" : {
             "font" : ".AppleSystemUIFont 12",
@@ -354,8 +353,7 @@
         "class" : "iTermStatusBarMemoryUtilizationComponent",
         "configuration" : {
           "knobs" : {
-            "base: priority" : 5,
-            "base: compression resistance" : 1
+            "base: priority" : 5
           },
           "layout advanced configuration dictionary value" : {
             "font" : ".AppleSystemUIFont 12",
@@ -367,8 +365,7 @@
         "class" : "iTermStatusBarNetworkUtilizationComponent",
         "configuration" : {
           "knobs" : {
-            "base: priority" : 5,
-            "base: compression resistance" : 1
+            "base: priority" : 5
           },
           "layout advanced configuration dictionary value" : {
             "font" : ".AppleSystemUIFont 12",
@@ -381,7 +378,8 @@
         "configuration" : {
           "knobs" : {
             "base: priority" : 5,
-            "base: compression resistance" : 1
+            "ShowPercentage" : 1,
+            "ShowTime" : 0
           },
           "layout advanced configuration dictionary value" : {
             "font" : ".AppleSystemUIFont 12",
@@ -390,14 +388,15 @@
         }
       },
       {
-        "class" : "iTermStatusBarComposerComponent",
+        "class" : "iTermStatusBarClockComponent",
         "configuration" : {
           "knobs" : {
+            "localize" : 0,
             "base: priority" : 5,
-            "base: compression resistance" : 1
+            "base: compression resistance" : 1,
+            "format" : "YYYY-MM-dd hh:mm:ss"
           },
           "layout advanced configuration dictionary value" : {
-            "font" : ".AppleSystemUIFont 12",
             "algorithm" : 0
           }
         }
