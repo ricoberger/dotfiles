@@ -88,14 +88,16 @@ let g:airline_symbols.readonly = ''
 let g:airline_symbols.linenr = ''
 
 " NERDTree
+" - Mapping
+" - Show hidden files
+" - Open NERDTree automatically when vim starts up and no file were specified
+" - Make sure vim does not open files and other buffers on NerdTree window
 map <silent> <C-n> :NERDTreeToggle<CR>
 
 let NERDTreeShowHidden=1
 
 autocmd StdinReadPre * let s:std_in=1
 autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
-
-autocmd BufEnter * if (winnr("$") == 1 && exists("b:NERDTree") && b:NERDTree.isTabTree()) | q | endif
 
 autocmd BufEnter * if bufname('#') =~# "^NERD_tree_" && winnr('$') > 1 | b# | endif
 
