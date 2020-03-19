@@ -102,6 +102,9 @@ autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
 
 autocmd BufEnter * if bufname('#') =~# "^NERD_tree_" && winnr('$') > 1 | b# | endif
 
+" NERDCommenter
+let g:NERDSpaceDelims = 1
+
 " Tagbar
 map <silent> <C-m> :TagbarToggle<CR>
 

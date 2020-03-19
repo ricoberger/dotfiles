@@ -149,9 +149,19 @@ POWERLEVEL9K_TIME_FORMAT="%D{%Y-%m-%d %H:%M:%S}"
 POWERLEVEL9K_CUSTOM_KUBE_PS1_BACKGROUND="black"
 POWERLEVEL9K_CUSTOM_KUBE_PS1_FOREGROUND="white"
 
-# Unbind keys
-bindkey -r "^A"
-bindkey -r "^E"
+# Key bindings
+bindkey -v
+bindkey "^[OA" up-line-or-beginning-search
+bindkey "^[OB" down-line-or-beginning-search
+bindkey "^[OC" forward-char
+bindkey "^[OD" backward-char
+bindkey "^[[A" up-line-or-beginning-search
+bindkey "^[[B" down-line-or-beginning-search
+bindkey "^R" history-incremental-search-backward
+bindkey "^[[1;3C" forward-word
+bindkey "^[[1;3D" backward-word
+bindkey "^[[1;3A" beginning-of-line
+bindkey "^[[1;3B" end-of-line
 
 # Custom aliases and functions
 
