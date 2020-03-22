@@ -1,33 +1,31 @@
-" Vundle
-set nocompatible
-filetype off
-set rtp+=~/.vim/bundle/Vundle.vim
-call vundle#begin()
+" vim-plug
+if empty(glob('~/.vim/autoload/plug.vim'))
+  silent !curl -fLo ~/.vim/autoload/plug.vim --create-dirs
+    \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+  autocmd VimEnter * PlugInstall --sync | source $MYVIMRC
+endif
 
-Plugin 'VundleVim/Vundle.vim'
+call plug#begin('~/.vim/plugged')
+Plug 'VundleVim/Vundle.vim'
 
-Plugin 'arcticicestudio/nord-vim'
-Plugin 'vim-airline/vim-airline'
-Plugin 'tpope/vim-fugitive'
-Plugin 'scrooloose/nerdtree'
-Plugin 'preservim/nerdcommenter'
-Plugin 'majutsushi/tagbar'
-Plugin 'editorconfig/editorconfig-vim'
-Plugin 'jiangmiao/auto-pairs'
-Plugin 'fatih/vim-go'
-Plugin 'peitalin/vim-jsx-typescript'
-Plugin 'leafgarland/typescript-vim'
-Plugin 'Quramy/tsuquyomi'
-Plugin 'airblade/vim-gitgutter'
-Plugin 'ctrlpvim/ctrlp.vim'
-Plugin 'mileszs/ack.vim'
-Plugin 'terryma/vim-multiple-cursors'
-Plugin 'mattn/webapi-vim'
-Plugin 'rust-lang/rust.vim'
-Plugin 'racer-rust/vim-racer'
+Plug 'arcticicestudio/nord-vim'
+Plug 'vim-airline/vim-airline'
+Plug 'tpope/vim-fugitive'
+Plug 'scrooloose/nerdtree'
+Plug 'preservim/nerdcommenter'
+Plug 'majutsushi/tagbar'
+Plug 'editorconfig/editorconfig-vim'
+Plug 'jiangmiao/auto-pairs'
+Plug 'airblade/vim-gitgutter'
+Plug 'ctrlpvim/ctrlp.vim'
 
-call vundle#end()
-filetype plugin indent on
+Plug 'fatih/vim-go'
+Plug 'peitalin/vim-jsx-typescript'
+Plug 'leafgarland/typescript-vim'
+Plug 'rust-lang/rust.vim'
+
+Plug 'neoclide/coc.nvim', {'branch': 'release'}
+call plug#end()
 
 " Basics
 set showmatch                                     " show matching brackets.
@@ -47,9 +45,6 @@ set updatetime=1000                               " reducing update time to 1s
 set clipboard=unnamed                             " clipboard sharing
 set cursorline                                    " highlight the line containing the cursor
 set backspace=2                                   " make backspace work like most other programs
-
-let showmarks_include = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-let g:showmarks_enable = 1
 
 " Nord Theme
 let g:nord_cursor_line_number_background = 1
@@ -112,18 +107,18 @@ map <silent> <C-m> :TagbarToggle<CR>
 " ctrlp.vim
 let g:ctrlp_map = '<c-p>'
 let g:ctrlp_cmd = 'CtrlP'
-let g:ctrlp_custom_ignore = '\v[\/]\.(git|hg|svn|node_modules)$'
-
-" ack.vim
-if executable('ag')
-  let g:ackprg = 'ag --vimgrep'
-endif
+let g:ctrlp_custom_ignore = '\v[\/]\.(git|hg|svn|node_modules|dist|build)$'
 
 " vim-multiple-cursors
 let g:multi_cursor_use_default_mapping = 0
 let g:multi_cursor_start_word_key      = '<C-g>'
 let g:multi_cursor_next_key            = '<C-g>'
 let g:multi_cursor_quit_key            = '<Esc>'
+
+" vim-go
+let g:go_def_mode='gopls'
+let g:go_info_mode='gopls'
+let g:go_def_mapping_enabled = 0
 
 " rust.vim
 let g:rustfmt_autosave = 1
@@ -136,34 +131,61 @@ if has('unix')
   endif
 endif
 
-" Vim Racer Plugin
-let g:racer_experimental_completer = 1
+" coc.nvim
+let g:coc_global_extensions = ['coc-tslint-plugin', 'coc-tsserver', 'coc-css', 'coc-html', 'coc-json', 'coc-prettier', 'coc-rls']
 
-" Autocompletion
-" https://vim.fandom.com/wiki/Omni_completion
-" https://vim.fandom.com/wiki/Smart_mapping_for_tab_completion
+set hidden
+set nobackup
+set nowritebackup
+set cmdheight=2
+set updatetime=300
+set shortmess+=c
+set signcolumn=yes
 
-filetype plugin on
-set omnifunc=syntaxcomplete#Complete
+inoremap <silent><expr> <TAB>
+      \ pumvisible() ? "\<C-n>" :
+      \ <SID>check_back_space() ? "\<TAB>" :
+      \ coc#refresh()
+inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
 
-function! Smart_TabComplete()
-  let line = getline('.')
+function! s:check_back_space() abort
+  let col = col('.') - 1
+  return !col || getline('.')[col - 1]  =~# '\s'
+endfunction
 
-  let substr = strpart(line, -1, col('.')+1)
-  let substr = matchstr(substr, "[^ \t]*$")
-  if (strlen(substr)==0)
-    return "\<tab>"
-  endif
-  let has_period = match(substr, '\.') != -1
-  let has_slash = match(substr, '\/') != -1
-  let has_colon = match(substr, ':') != -1
-  if (!has_period && !has_slash && !has_colon)
-    return "\<C-X>\<C-P>"
-  elseif ( has_slash )
-    return "\<C-X>\<C-F>"
+inoremap <silent><expr> <c-space> coc#refresh()
+
+if has('patch8.1.1068')
+  inoremap <expr> <cr> complete_info()["selected"] != "-1" ? "\<C-y>" : "\<C-g>u\<CR>"
+else
+  imap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
+endif
+
+nmap <silent> [g <Plug>(coc-diagnostic-prev)
+nmap <silent> ]g <Plug>(coc-diagnostic-next)
+nmap <silent> gd <Plug>(coc-definition)
+nmap <silent> gy <Plug>(coc-type-definition)
+nmap <silent> gi <Plug>(coc-implementation)
+nmap <silent> gr <Plug>(coc-references)
+
+nnoremap <silent> K :call <SID>show_documentation()<CR>
+
+function! s:show_documentation()
+  if (index(['vim','help'], &filetype) >= 0)
+    execute 'h '.expand('<cword>')
   else
-    return "\<C-X>\<C-O>"
+    call CocAction('doHover')
   endif
 endfunction
 
-inoremap <tab> <c-r>=Smart_TabComplete()<CR>
+nmap <leader>rn <Plug>(coc-rename)
+xmap <leader>f  <Plug>(coc-format-selected)
+nmap <leader>f  <Plug>(coc-format-selected)
+nnoremap <silent> <space>a  :<C-u>CocList diagnostics<cr>
+nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
+nnoremap <silent> <space>c  :<C-u>CocList commands<cr>
+nnoremap <silent> <space>o  :<C-u>CocList outline<cr>
+nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
+nnoremap <silent> <space>j  :<C-u>CocNext<CR>
+nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
+nnoremap <silent> <space>p  :<C-u>CocListResume<CR>

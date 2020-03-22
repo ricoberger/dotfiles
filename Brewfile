@@ -28,7 +28,6 @@ brew "operator-sdk"
 brew "terraform"
 brew "tmux"
 brew "telnet"
-brew "the_silver_searcher"
 brew "tree"
 brew "universal-ctags", args: ['HEAD']
 brew "vault"
