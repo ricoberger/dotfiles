@@ -109,12 +109,6 @@ let g:ctrlp_map = '<c-p>'
 let g:ctrlp_cmd = 'CtrlP'
 let g:ctrlp_custom_ignore = '\v[\/]\.(git|hg|svn|node_modules|dist|build)$'
 
-" vim-multiple-cursors
-let g:multi_cursor_use_default_mapping = 0
-let g:multi_cursor_start_word_key      = '<C-g>'
-let g:multi_cursor_next_key            = '<C-g>'
-let g:multi_cursor_quit_key            = '<Esc>'
-
 " vim-go
 let g:go_def_mode='gopls'
 let g:go_info_mode='gopls'
