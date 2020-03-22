@@ -183,3 +183,6 @@ nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
 nnoremap <silent> <space>j  :<C-u>CocNext<CR>
 nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
 nnoremap <silent> <space>p  :<C-u>CocListResume<CR>
+
+" Make enter to work in quickfix window
+autocmd BufReadPost quickfix nnoremap <buffer> <CR> <CR>
