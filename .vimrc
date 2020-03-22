@@ -126,7 +126,7 @@ if has('unix')
 endif
 
 " coc.nvim
-let g:coc_global_extensions = ['coc-tslint-plugin', 'coc-tsserver', 'coc-css', 'coc-html', 'coc-json', 'coc-prettier', 'coc-rls']
+let g:coc_global_extensions = ['coc-tslint-plugin', 'coc-tsserver', 'coc-css', 'coc-html', 'coc-json', 'coc-prettier', 'coc-go', 'coc-rls']
 
 set hidden
 set nobackup
