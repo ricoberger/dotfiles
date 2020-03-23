@@ -162,6 +162,8 @@ bindkey "^[[1;3C" forward-word
 bindkey "^[[1;3D" backward-word
 bindkey "^[[1;3A" beginning-of-line
 bindkey "^[[1;3B" end-of-line
+bindkey "^[[3~" delete-char
+bindkey "^[^?" backward-kill-word
 
 # Custom aliases and functions
 
