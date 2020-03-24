@@ -87,11 +87,13 @@ let g:airline_symbols.linenr = ''
 " NERDTree
 " - Mapping
 " - Show hidden files
+" - Increase default size
 " - Open NERDTree automatically when vim starts up and no file were specified
 " - Make sure vim does not open files and other buffers on NerdTree window
 map <silent> <C-n> :NERDTreeToggle<CR>
 
-let NERDTreeShowHidden=1
+let NERDTreeShowHidden = 1
+let g:NERDTreeWinSize = 45
 
 autocmd StdinReadPre * let s:std_in=1
 autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
@@ -103,6 +105,8 @@ let g:NERDSpaceDelims = 1
 
 " Tagbar
 map <silent> <C-m> :TagbarToggle<CR>
+
+let g:Tlist_WinWidth = 30
 
 " ctrlp.vim
 let g:ctrlp_map = '<c-p>'
