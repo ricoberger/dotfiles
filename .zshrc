@@ -181,3 +181,11 @@ targz() { tar -zcvf $1.tar.gz ${@:2}; rm -r ${@:2}; }
 untargz() { tar -zxvf $1; rm -r $1; }
 up() { DEEP=$1; for i in $(seq 1 ${DEEP:-"1"}); do cd ../; done; }
 webshare() { if [[ $(python --version 2>&1) == *2\.* ]]; then python -m SimpleHTTPServer $@; else python -m http.server $@; fi; }
+
+vaultedit() {
+  TMPFILE=`mktemp /tmp/vaultsecret.XXXXXXXXX`
+  vault kv get -format=json $@ | jq .data.data > ${TMPFILE};
+  vim -c 'set ft=json' ${TMPFILE} < /dev/tty > /dev/tty
+  vault kv put $@ @${TMPFILE}
+  rm ${TMPFILE}
+}
