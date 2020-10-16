@@ -189,3 +189,10 @@ vaultedit() {
   vault kv put $@ @${TMPFILE}
   rm ${TMPFILE}
 }
+
+vaultcreate() {
+  TMPFILE=`mktemp /tmp/vaultsecret.XXXXXXXXX`
+  vim -c 'set ft=json' ${TMPFILE} < /dev/tty > /dev/tty
+  vault kv put $@ @${TMPFILE}
+  rm ${TMPFILE}
+}
