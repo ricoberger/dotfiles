@@ -17,6 +17,7 @@ export RUST_SRC_PATH=/Users/ricoberger/.rustup/toolchains/stable-x86_64-apple-da
 # Path
 export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$HOME/Library/Trigger\ Toolkit/
 export PATH=$PATH:$HOME/Library/Python/3.7/bin
+export PATH=$PATH:$HOME/.krew/bin
 
 # Set Python3 as default
 alias python=/usr/local/bin/python3
