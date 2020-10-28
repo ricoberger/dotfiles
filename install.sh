@@ -23,3 +23,6 @@ cp $(pwd)/bin/diff-so-fancy /usr/local/bin/diff-so-fancy
 # Copy Xcode configuration
 mkdir -p ~/Library/Developer/Xcode/UserData/FontAndColorThemes/
 cp $(pwd)/Xcode/Nord.xccolortheme ~/Library/Developer/Xcode/UserData/FontAndColorThemes/Nord.xccolortheme
+
+# Copy additional binaries
+cp $(pwd)/bin/kubectl-ssh /usr/local/bin/kubectl-ssh
