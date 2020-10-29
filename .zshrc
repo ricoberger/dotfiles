@@ -8,7 +8,7 @@ export GO111MODULE=on
 
 export JAVA_HOME=$(/usr/libexec/java_home)
 export ANDROID_HOME=/Users/ricoberger/Library/Android/sdk
-export ANDROID_NDK_HOME=/Users/ricoberger/Library/Android/sdk/ndk/20.1.5948944
+export ANDROID_NDK_HOME=/Users/ricoberger/Library/Android/sdk/ndk/21.1.6352462
 
 export VAULT_ADDR=http://127.0.0.1:8200
 
