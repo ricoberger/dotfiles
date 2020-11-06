@@ -14,6 +14,7 @@ brew "typescript"
 # Tools
 brew "argocd"
 brew "derailed/popeye/popeye"
+brew "fluxcd/tap/flux"
 brew "fluxctl"
 brew "github/gh/gh"
 brew "helm"
