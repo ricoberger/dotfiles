@@ -173,18 +173,20 @@
 	AAAZAAAAAAAAAAAAAAAAAAAA2Q==
 	</data>
 	<key>CursorType</key>
-	<integer>2</integer>
+	<integer>0</integer>
 	<key>Font</key>
 	<data>
 	YnBsaXN0MDDUAQIDBAUGBwpYJHZlcnNpb25ZJGFyY2hpdmVyVCR0b3BYJG9iamVjdHMS
 	AAGGoF8QD05TS2V5ZWRBcmNoaXZlctEICVRyb290gAGkCwwVFlUkbnVsbNQNDg8QERIT
-	FFZOU1NpemVYTlNmRmxhZ3NWTlNOYW1lViRjbGFzcyNAKAAAAAAAABAQgAKAA18QIVNv
-	dXJjZUNvZGVQcm9Gb3JQb3dlcmxpbmUtUmVndWxhctIXGBkaWiRjbGFzc25hbWVYJGNs
-	YXNzZXNWTlNGb250ohkbWE5TT2JqZWN0CBEaJCkyN0lMUVNYXmdud36FjpCSlLi9yNHY
-	2wAAAAAAAAEBAAAAAAAAABwAAAAAAAAAAAAAAAAAAADk
+	FFZOU1NpemVYTlNmRmxhZ3NWTlNOYW1lViRjbGFzcyNAKAAAAAAAABAQgAKAA1xIYWNr
+	LVJlZ3VsYXLSFxgZGlokY2xhc3NuYW1lWCRjbGFzc2VzVk5TRm9udKIZG1hOU09iamVj
+	dAgRGiQpMjdJTFFTWF5nbnd+hY6QkpShprG6wcQAAAAAAAABAQAAAAAAAAAcAAAAAAAA
+	AAAAAAAAAAAAzQ==
 	</data>
 	<key>ProfileCurrentVersion</key>
 	<real>2.0699999999999998</real>
+	<key>ScrollAlternateScreen</key>
+	<false/>
 	<key>SelectionColor</key>
 	<data>
 	YnBsaXN0MDDUAQIDBAUGBwpYJHZlcnNpb25ZJGFyY2hpdmVyVCR0b3BYJG9iamVjdHMS
@@ -194,6 +196,8 @@
 	amVjdAgRGiQpMjdJTFFTV11kand+n6GjqLO8xMcAAAAAAAABAQAAAAAAAAAZAAAAAAAA
 	AAAAAAAAAAAA0A==
 	</data>
+	<key>StrictVTKeypad</key>
+	<false/>
 	<key>TextBoldColor</key>
 	<data>
 	YnBsaXN0MDDUAQIDBAUGBwpYJHZlcnNpb25ZJGFyY2hpdmVyVCR0b3BYJG9iamVjdHMS
@@ -216,8 +220,15 @@
 	<false/>
 	<key>WindowTitle</key>
 	<string>Nord</string>
+	<key>keyMapBoundKeys</key>
+	<dict>
+		<key>#F739</key>
+		<string>toggleNumLock:</string>
+	</dict>
 	<key>name</key>
 	<string>Nord</string>
+	<key>scrollOnInput</key>
+	<false/>
 	<key>type</key>
 	<string>Window Settings</string>
 </dict>

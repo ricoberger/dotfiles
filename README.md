@@ -4,7 +4,7 @@
 
 ## Usage
 
-- Install the `Source Code Pro for Powerline` font
+- Install the `Hack` font: [https://sourcefoundry.org/hack/](https://sourcefoundry.org/hack/)
 - Install Homebrew and the Brewfile
   ```sh
   /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
