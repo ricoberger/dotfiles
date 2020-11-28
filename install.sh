@@ -1,3 +1,6 @@
+# Copy Alacritty configuration
+cp $(pwd)/.alacritty.yml ~/.alacritty.yml
+
 # Copy ZSH configuration
 cp -r $(pwd)/.oh-my-zsh ~/
 cp -r $(pwd)/powerlevel10k ~/.oh-my-zsh/themes/
