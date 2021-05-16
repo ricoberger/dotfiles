@@ -33,3 +33,5 @@
   prompt = false
 [mergetool]
   prompt = false
+[pull]
+  rebase = false

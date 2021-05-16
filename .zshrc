@@ -15,13 +15,11 @@ export VAULT_ADDR=http://127.0.0.1:8200
 export RUST_SRC_PATH=/Users/ricoberger/.rustup/toolchains/stable-x86_64-apple-darwin/lib/rustlib/src/rust/src
 
 # Path
-export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$HOME/Library/Trigger\ Toolkit/
-export PATH=$PATH:$HOME/Library/Python/3.7/bin
-export PATH=$PATH:$HOME/.krew/bin
+export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$HOME/.krew/bin
 
 # Set Python3 as default
-alias python=/usr/local/bin/python3
-alias pip=/usr/local/bin/pip3
+alias python=/usr/local/opt/python@3/bin/python3
+alias pip=/usr/local/opt/python@3/bin/pip3
 
 # Use Vim from brew
 alias vim="/usr/local/bin/vim"
@@ -94,7 +92,7 @@ ZSH_THEME="powerlevel10k/powerlevel10k"
 # Custom plugins may be added to ~/.oh-my-zsh/custom/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git helm kube-ps1 kubectl minikube osx vscode)
+plugins=(git helm kube-ps1 kubectl minikube osx vscode zsh-autosuggestions)
 
 source $ZSH/oh-my-zsh.sh
 

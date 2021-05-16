@@ -29,3 +29,6 @@ cp $(pwd)/Xcode/Nord.xccolortheme ~/Library/Developer/Xcode/UserData/FontAndColo
 
 # Copy additional binaries
 cp $(pwd)/bin/kubectl-ssh /usr/local/bin/kubectl-ssh
+
+# Install additional ZSH plugins
+git -C ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions pull || git clone git@github.com:zsh-users/zsh-autosuggestions.git ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
