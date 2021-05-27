@@ -27,6 +27,11 @@ cp $(pwd)/bin/diff-so-fancy /usr/local/bin/diff-so-fancy
 mkdir -p ~/Library/Developer/Xcode/UserData/FontAndColorThemes/
 cp $(pwd)/Xcode/Nord.xccolortheme ~/Library/Developer/Xcode/UserData/FontAndColorThemes/Nord.xccolortheme
 
+# k9s
+mkdir -p ~/.k9s
+# cp $(pwd)/.k9s/config.yml ~/.k9s/config.yml
+cp $(pwd)/.k9s/skin.yml ~/.k9s/skin.yml
+
 # Copy additional binaries
 cp $(pwd)/bin/kubectl-ssh /usr/local/bin/kubectl-ssh
 
