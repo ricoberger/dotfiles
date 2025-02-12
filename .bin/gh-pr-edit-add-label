@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -e
+
+gh pr edit $1 --add-label "$(gh label list --json name --jq ".[].name" | fzf)"

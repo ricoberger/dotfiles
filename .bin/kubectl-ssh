@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+set -e
+
+node=$1
+if [ "$node" = "" ]; then
+  node=$(kubectl get node -o name | sed 's/node\///' | tr '\n' ' ')
+  node=${node::-1}
+
+  if [[ "$node" =~ " " ]]; then
+    echo "Node name must be specified. Choose one of: [$node]"
+    exit 1
+  else
+    echo "Single-node cluster detected. Defaulting to node $node"
+  fi
+fi
+
+pod=$(
+  kubectl create -o name -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  generateName: ssh-node-
+  labels:
+    plugin: ssh-node
+spec:
+  nodeName: $node
+  containers:
+  - name: ssh-node
+    image: busybox
+    imagePullPolicy: IfNotPresent
+    command: ["chroot", "/host"]
+    tty: true
+    stdin: true
+    stdinOnce: true
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: host
+      mountPath: /host
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+  hostNetwork: true
+  hostIPC: true
+  hostPID: true
+  restartPolicy: Never
+  tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/master
+  - effect: NoExecute
+    operator: Exists
+EOF
+)
+
+deletePod() {
+  kubectl delete $pod --wait=false
+}
+trap deletePod EXIT
+
+echo "Created $pod"
+echo "Waiting for container to start..."
+kubectl wait --for=condition=Ready --timeout=120s $pod >/dev/null
+kubectl attach -it $pod -c ssh-node

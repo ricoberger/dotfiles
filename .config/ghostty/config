@@ -1,0 +1,96 @@
+# Theme
+theme = catppuccin-macchiato
+font-family = "Cascadia Mono NF"
+font-synthetic-style = false
+font-size = 12
+
+# Window
+window-height = 45
+window-width = 180
+
+# Cursor
+cursor-style = block
+cursor-style-blink = false
+shell-integration-features = no-cursor
+
+# Quick Terminal
+quick-terminal-position = center
+quick-terminal-animation-duration = 0
+
+# Misc
+confirm-close-surface = true
+macos-option-as-alt = false
+clipboard-paste-protection = false
+clipboard-paste-bracketed-safe = true
+
+# Keybindings
+keybind = clear
+
+keybind = super+n=new_window
+keybind = super+q=quit
+keybind = super+w=close_surface
+keybind = super+shift+w=close_window
+keybind = super+alt+shift+w=close_all_windows
+keybind = super+ctrl+f=toggle_fullscreen
+
+keybind = super+t=new_tab
+keybind = ctrl+tab=next_tab
+keybind = ctrl+shift+tab=previous_tab
+
+keybind = super+physical:one=goto_tab:1
+keybind = super+physical:two=goto_tab:2
+keybind = super+physical:three=goto_tab:3
+keybind = super+physical:four=goto_tab:4
+keybind = super+physical:five=goto_tab:5
+keybind = super+physical:six=goto_tab:6
+keybind = super+physical:seven=goto_tab:7
+keybind = super+physical:eight=goto_tab:8
+keybind = super+physical:nine=goto_tab:9
+keybind = super+physical:zero=last_tab
+
+keybind = super+d=new_split:right
+keybind = super+shift+d=new_split:down
+keybind = super+shift+enter=toggle_split_zoom
+
+keybind = super+alt+left=goto_split:left
+keybind = super+alt+right=goto_split:right
+keybind = super+alt+up=goto_split:top
+keybind = super+alt+down=goto_split:bottom
+
+keybind = super+ctrl+left=resize_split:left,10
+keybind = super+ctrl+right=resize_split:right,10
+keybind = super+ctrl+up=resize_split:up,10
+keybind = super+ctrl+down=resize_split:down,10
+
+keybind = super+home=scroll_to_top
+keybind = super+end=scroll_to_bottom
+keybind = super+page_up=scroll_page_up
+keybind = super+page_down=scroll_page_down
+
+keybind = super+plus=increase_font_size:1
+keybind = super+minus=decrease_font_size:1
+keybind = super+zero=reset_font_size
+
+keybind = super+v=paste_from_clipboard
+keybind = super+c=copy_to_clipboard
+keybind = super+a=select_all
+
+keybind = super+k=clear_screen
+
+keybind = super+shift+left=adjust_selection:left
+keybind = super+shift+right=adjust_selection:right
+keybind = super+shift+up=adjust_selection:up
+keybind = super+shift+down=adjust_selection:down
+keybind = super+shift+page_up=adjust_selection:page_up
+keybind = super+shift+page_down=adjust_selection:page_down
+keybind = super+shift+end=adjust_selection:end
+keybind = super+shift+home=adjust_selection:home
+
+keybind = global:super+#=toggle_quick_terminal
+
+# The following keybindings are required to make "Options / Alt + j" and
+# "Options / Alt + k" work as expected on macOS. They are not required when
+# using the "macos-option-as-alt" option.
+keybind = alt+j=esc:j
+keybind = alt+k=esc:k
+# keybind = alt+n=text:~

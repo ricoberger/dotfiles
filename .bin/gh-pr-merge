@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -e
+
+gh pr merge $1 --squash --delete-branch --admin

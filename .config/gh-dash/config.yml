@@ -1,0 +1,85 @@
+---
+prSections:
+  - title: Created
+    filters: is:open author:ricoberger
+  - title: Assigned
+    filters: is:open assignee:ricoberger
+  - title: Mentioned
+    filters: is:open mentions:ricoberger
+  - title: Review Requested
+    filters: is:open review-requested:ricoberger
+  - title: FeedDeck
+    filters: owner:feeddeck
+  - title: kubenav
+    filters: owner:kubenav
+  - title: kobs
+    filters: owner:kobsio
+  - title: ricoberger
+    filters: owner:ricoberger
+
+issuesSections:
+  - title: Created
+    filters: is:open author:ricoberger
+  - title: Assigned
+    filters: is:open assignee:ricoberger
+  - title: Mentioned
+    filters: is:open mentions:ricoberger
+  - title: FeedDeck
+    filters: owner:feeddeck
+  - title: kubenav
+    filters: owner:kubenav
+  - title: kobs
+    filters: owner:kobsio
+  - title: ricoberger
+    filters: owner:ricoberger
+
+defaults:
+  prsLimit: 25
+  issuesLimit: 25
+  preview:
+    open: true
+    width: 120
+  refetchIntervalMinutes: 1440
+
+repoPaths:
+  feeddeck/*: ~/Documents/GitHub/feeddeck/*
+  kobsio/*: ~/Documents/GitHub/kobsio/*
+  kubenav/*: ~/Documents/GitHub/kubenav/*
+  ricoberger/*: ~/Documents/GitHub/*
+  Staffbase/*: ~/Documents/GitHub/*
+
+keybindings:
+  issues:
+    # - key: O
+    #   # command: tmux new-window -n "{{.RepoName}}/{{.IssueNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo issue edit {{.IssueNumber}}"'
+    #   command: cd {{.RepoPath}} && nvim -c ":GHOpenIssue {{.IssueNumber}}"
+  prs:
+    - key: D
+      # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen main...{{.HeadRefName}}"'
+      command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"
+    # - key: O
+    #   # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo pr edit {{.PrNumber}}"'
+    #   command: cd {{.RepoPath}} && nvim -c ":GHOpenPR {{.PrNumber}}"
+    - key: M
+      command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
+    - key: ctrl+l
+      command: cd {{.RepoPath}} && gh-pr-edit-add-label {{.PrNumber}}
+    - key: ctrl+k
+      command: cd {{.RepoPath}} && gh-pr-edit-remove-label {{.PrNumber}}
+
+theme:
+  colors:
+    text:
+      primary: "#cad3f5"
+      secondary: "#8aadf4"
+      inverted: "#181926"
+      faint: "#b8c0e0"
+      warning: "#ed8796"
+      error: "#ed8796"
+      success: "#a6da95"
+    background:
+      selected: "#363a4f"
+    border:
+      primary: "#8aadf4"
+      secondary: "#494d64"
+      faint: "#363a4f"
