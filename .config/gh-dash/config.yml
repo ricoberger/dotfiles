@@ -42,23 +42,19 @@ defaults:
   refetchIntervalMinutes: 1440
 
 repoPaths:
-  feeddeck/*: ~/Documents/GitHub/feeddeck/*
-  kobsio/*: ~/Documents/GitHub/kobsio/*
-  kubenav/*: ~/Documents/GitHub/kubenav/*
-  ricoberger/*: ~/Documents/GitHub/*
-  Staffbase/*: ~/Documents/GitHub/*
+  :owner/:repo: ~/Documents/GitHub/:owner/:repo
 
 keybindings:
   issues:
-    # - key: O
-    #   # command: tmux new-window -n "{{.RepoName}}/{{.IssueNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo issue edit {{.IssueNumber}}"'
-    #   command: cd {{.RepoPath}} && nvim -c ":GHOpenIssue {{.IssueNumber}}"
+  # - key: O
+  #   command: tmux new-window -n "{{.RepoName}}/{{.IssueNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo issue edit {{.IssueNumber}}"'
+  #   command: cd {{.RepoPath}} && nvim -c ":GHOpenIssue {{.IssueNumber}}"
   prs:
     - key: D
       # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen main...{{.HeadRefName}}"'
       command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"
     # - key: O
-    #   # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo pr edit {{.PrNumber}}"'
+    #   command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo pr edit {{.PrNumber}}"'
     #   command: cd {{.RepoPath}} && nvim -c ":GHOpenPR {{.PrNumber}}"
     - key: M
       command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
