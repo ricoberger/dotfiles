@@ -389,6 +389,7 @@ return {
             { icon = " ", key = "n", desc = "New File", action = ":ene | startinsert" },
             { icon = " ", key = "s", desc = "Find Text", action = "<leader>fs" },
             { icon = " ", key = "r", desc = "Recent Files", action = "<leader>fr" },
+            { icon = " ", key = "g", desc = "Git Status", action = "<leader>fgs" },
             { icon = "󰙅 ", key = "e", desc = "Explorer", action = "<leader>e" },
             { icon = " ", key = "q", desc = "Quit", action = ":qa" },
           },
@@ -402,16 +403,28 @@ return {
         },
         sections = {
           { section = "header" },
-          { section = "keys", gap = 1, padding = 3 },
-          {
-            icon = " ",
-            title = "Recent Files",
-            section = "recent_files",
-            cwd = true,
-            gap = 0,
-            indent = 1,
-            padding = 3,
-          },
+          { icon = " ", title = "Keymaps", section = "keys", indent = 2, padding = 1 },
+          { icon = " ", title = "Recent Files", section = "recent_files", indent = 2, padding = 1, cwd = true },
+          function()
+            local in_git = Snacks.git.get_root() ~= nil
+            local cmds = {
+              {
+                icon = " ",
+                title = "Git Status",
+                cmd = "git --no-pager diff --stat -B -M -C",
+                height = 10,
+              },
+            }
+            return vim.tbl_map(function(cmd)
+              return vim.tbl_extend("force", {
+                section = "terminal",
+                enabled = in_git,
+                padding = 1,
+                ttl = 60,
+                indent = 2,
+              }, cmd)
+            end, cmds)
+          end,
           { section = "startup" },
         },
       },
@@ -421,8 +434,12 @@ return {
           enabled = false,
         },
       },
+      input = {
+        enabled = true,
+      },
       picker = {
         enabled = true,
+        ui_select = true,
         icons = {
           git = {
             enabled = true,
