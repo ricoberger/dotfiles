@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -e
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+workflow=$(gh run list --branch $branch --json databaseId,workflowName,createdAt,status --template '{{range .}}{{printf "%.0f" .databaseId}}{{"\t"}}{{.status}}{{"\t"}}{{.createdAt}}{{"\t"}}{{.workflowName}}{{"\n"}}{{end}}' | fzf)
+gh run view "$(echo $workflow | awk '{print $1}')" --log

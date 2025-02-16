@@ -62,6 +62,8 @@ keybindings:
       command: cd {{.RepoPath}} && gh-pr-edit-add-label {{.PrNumber}}
     - key: ctrl+k
       command: cd {{.RepoPath}} && gh-pr-edit-remove-label {{.PrNumber}}
+    - key: ctrl+w
+      command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && gh-run | less
 
 theme:
   colors:
