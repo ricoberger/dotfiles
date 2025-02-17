@@ -403,28 +403,40 @@ return {
         },
         sections = {
           { section = "header" },
-          { icon = " ", title = "Keymaps", section = "keys", indent = 2, padding = 1 },
-          { icon = " ", title = "Recent Files", section = "recent_files", indent = 2, padding = 1, cwd = true },
-          function()
-            local in_git = Snacks.git.get_root() ~= nil
-            local cmds = {
-              {
-                icon = " ",
-                title = "Git Status",
-                cmd = "git --no-pager diff --stat -B -M -C",
-                height = 10,
-              },
-            }
-            return vim.tbl_map(function(cmd)
-              return vim.tbl_extend("force", {
-                section = "terminal",
-                enabled = in_git,
-                padding = 1,
-                ttl = 60,
-                indent = 2,
-              }, cmd)
-            end, cmds)
-          end,
+          {
+            icon = " ",
+            title = "Keymaps",
+            section = "keys",
+            enabled = function()
+              return vim.o.lines >= 25
+            end,
+            indent = 2,
+            padding = 1,
+          },
+          {
+            icon = " ",
+            title = "Recent Files",
+            section = "recent_files",
+            enabled = function()
+              return vim.o.lines >= 35
+            end,
+            indent = 2,
+            padding = 1,
+            cwd = true,
+          },
+          {
+            icon = " ",
+            title = "Git Status",
+            section = "terminal",
+            enabled = function()
+              return Snacks.git.get_root() ~= nil and vim.o.lines >= 45
+            end,
+            cmd = "git --no-pager diff --stat -B -M -C",
+            indent = 2,
+            padding = 1,
+            height = 10,
+            ttl = 60,
+          },
           { section = "startup" },
         },
       },
