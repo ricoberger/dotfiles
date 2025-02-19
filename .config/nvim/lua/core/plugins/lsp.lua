@@ -62,12 +62,11 @@ return {
       end
 
       vim.keymap.set("n", "<leader>lr", vim.lsp.buf.rename, { desc = "Rename" })
-      vim.keymap.set("n", "<leader>la", vim.lsp.buf.code_action, { desc = "Actions" })
+      vim.keymap.set("n", "<leader>lca", vim.lsp.buf.code_action, { desc = "Code Actions" })
       vim.keymap.set("n", "<leader>lf", vim.lsp.buf.format, { desc = "Format" })
       vim.keymap.set("n", "<leader>lq", vim.diagnostic.setqflist, { desc = "Quickfix List" })
       vim.keymap.set("n", "<leader>lL", vim.diagnostic.setloclist, { desc = "Location List" })
       vim.keymap.set("n", "K", vim.lsp.buf.hover, { desc = "Hover Documentation" })
-      vim.keymap.set("n", "<C-k>", vim.lsp.buf.signature_help, { desc = "Hover Signature Documentation" })
       vim.keymap.set("n", "J", vim.diagnostic.open_float, { desc = "Hover Diagnostics" })
       vim.keymap.set("n", "gD", vim.lsp.buf.declaration, { desc = "Go to Declaration" })
       vim.keymap.set("n", "gd", function()

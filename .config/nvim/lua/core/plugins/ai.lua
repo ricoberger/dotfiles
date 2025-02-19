@@ -38,6 +38,7 @@ return {
       "CopilotChatFixDiagnostic",
       "CopilotChatCommit",
       "CopilotChatCommitStaged",
+      "CopilotChatReview",
     },
     keys = {
       {
@@ -48,7 +49,8 @@ return {
         end,
         desc = "Actions",
       },
-      { "<leader>cc", "<cmd>CopilotChat<cr>", desc = "Chat" },
+      { "<leader>co", "<cmd>CopilotChatOpen<cr>", desc = "Open" },
+      { "<leader>cc", "<cmd>CopilotChatClose<cr>", desc = "Close" },
       { "<leader>ct", "<cmd>CopilotChatToggle<cr>", desc = "Toggle" },
       { "<leader>cr", "<cmd>CopilotChatReset<cr>", desc = "Reset" },
     },
