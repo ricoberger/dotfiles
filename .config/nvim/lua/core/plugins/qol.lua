@@ -7,6 +7,13 @@ return {
     lazy = false,
     keys = {
       {
+        "<leader>p",
+        function()
+          require("command-palette").show_commands()
+        end,
+        desc = "Command Palette",
+      },
+      {
         "<leader>e",
         function()
           Snacks.picker.explorer({
@@ -157,7 +164,6 @@ return {
         end,
         desc = "Files",
       },
-
       {
         "<leader>ff",
         function()
@@ -439,6 +445,15 @@ return {
           },
           { section = "startup" },
         },
+      },
+      dim = {
+        enabled = true,
+        animate = {
+          enabled = false,
+        },
+      },
+      gitbrowse = {
+        enabled = true,
       },
       indent = {
         enabled = true,

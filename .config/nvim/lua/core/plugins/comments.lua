@@ -20,14 +20,12 @@ return {
         desc = "Previous Todo Comment",
       },
       {
-        "<leader>tf",
+        "<leader>ft",
         function()
           Snacks.picker.todo_comments()
         end,
-        desc = "Find",
+        desc = "Find Todo Comments",
       },
-      { "<leader>tq", "<cmd>TodoQuickFix<cr>", desc = "Quickfix List" },
-      { "<leader>tl", "<cmd>TodoLocList<cr>", desc = "Location List" },
     },
     opts = {
       signs = true,

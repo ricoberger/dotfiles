@@ -41,11 +41,6 @@ vim.keymap.set("v", ">", ">gv")
 -- Clear search with <esc>
 vim.keymap.set({ "i", "n" }, "<esc>", "<cmd>noh<cr><esc>", { desc = "Escape and clear hlsearch" })
 
--- Tabs
-vim.keymap.set("n", "<C-t>n", "<cmd>tabnew<cr>", { desc = "New Tab" })
-vim.keymap.set("n", "<C-t>N", "<C-w>T", { desc = "New Tab (Current Window)", remap = true })
-vim.keymap.set("n", "<C-t>c", "<cmd>tabclose<cr>", { desc = "Close Tab" })
-
 -- Surround
 vim.keymap.set("v", "gs(", "<esc>`>a)<esc>`<i(<esc>", { desc = "Add () around selection" })
 vim.keymap.set("v", "gs)", "<esc>`>a)<esc>`<i(<esc>", { desc = "Add () around selection" })
@@ -65,19 +60,19 @@ vim.keymap.set(
   "n",
   "<leader>rw",
   [[:%s/\<<C-r><C-w>\>//gcI<Left><Left><Left><Left>]],
-  { desc = "Replace Word in Buffer" }
+  { desc = "Replace in Buffer (Word)" }
 )
 vim.keymap.set(
   "n",
   "<leader>rR",
   [[:cfdo %s///gcI | update]]
     .. [[<Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left>]],
-  { desc = "Replace in Workspace" }
+  { desc = "Replace in Quickfix List" }
 )
 vim.keymap.set(
   "n",
   "<leader>rW",
   [[:cfdo %s/\<<C-r><C-w>\>//gcI | update]]
     .. [[<Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left>]],
-  { desc = "Replace Word in Workspace" }
+  { desc = "Replace in Quickfix List (Word)" }
 )
