@@ -292,6 +292,14 @@ M.commands = {
     action = "gy",
   },
   {
+    name = "Marks: Find",
+    action = "<leader>fm",
+  },
+  {
+    name = "Marks: New",
+    action = ":NewMark",
+  },
+  {
     name = "Replace: Buffer",
     action = "<leader>rr",
   },

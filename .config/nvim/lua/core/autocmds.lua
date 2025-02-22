@@ -75,3 +75,41 @@ vim.api.nvim_create_user_command("LintInfo", function()
     print("No linters configured for filetype: " .. filetype)
   end
 end, {})
+
+-- Create sequential global marks
+-- https://www.reddit.com/r/neovim/comments/1gb055z/creating_sequential_global_marks_open_to/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
+local function load_last_mark()
+  local file = io.open(vim.fn.stdpath("data") .. "/last_mark.txt", "r")
+  if file then
+    local mark = file:read("*l")
+    file:close()
+    return mark
+  end
+  return nil
+end
+
+local function save_last_mark(mark)
+  local file = io.open(vim.fn.stdpath("data") .. "/last_mark.txt", "w")
+  file:write(mark)
+  file:close()
+end
+
+local function NewMark()
+  if not vim.g.last_mark then
+    vim.g.last_mark = load_last_mark() or "Z"
+  end
+
+  if vim.g.last_mark == "Z" then
+    vim.g.last_mark = "A"
+  else
+    vim.g.last_mark = string.char(string.byte(vim.g.last_mark) + 1)
+  end
+
+  vim.cmd("mark " .. vim.g.last_mark)
+
+  save_last_mark(vim.g.last_mark)
+
+  vim.notify("Mark set: " .. vim.g.last_mark)
+end
+
+vim.api.nvim_create_user_command("NewMark", NewMark, { desc = "Create New Global Mark" })

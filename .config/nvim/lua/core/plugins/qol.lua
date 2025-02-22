@@ -263,7 +263,10 @@ return {
       {
         "<leader>fm",
         function()
-          Snacks.picker.marks()
+          Snacks.picker.marks({
+            global = true,
+            ["local"] = false,
+          })
         end,
         desc = "Marks",
       },
