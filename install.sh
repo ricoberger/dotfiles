@@ -18,6 +18,7 @@ cp $(pwd)/.tmux.conf ~/.tmux.conf
 
 # Git
 cp $(pwd)/.gitconfig ~/.gitconfig
+cp $(pwd)/.gitconfig-staffbase ~/.gitconfig-staffbase
 cp $(pwd)/.gitignore ~/.gitignore
 
 # GitHub

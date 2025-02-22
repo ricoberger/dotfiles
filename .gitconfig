@@ -2,6 +2,9 @@
   name = ricoberger
   email = mail@ricoberger.de
 
+[includeIf "gitdir/i:~/Documents/GitHub/staffbase/"]
+  path = ~/.gitconfig-staffbase
+
 [core]
   excludesfile = ~/.gitignore
   editor = nvim
