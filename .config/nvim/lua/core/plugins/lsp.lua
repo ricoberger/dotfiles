@@ -12,6 +12,8 @@ return {
     opts = {
       -- Servers:
       --   npm install -g vscode-langservers-extracted@4.8.0
+      --   npm install -g dockerfile-language-server-nodejs
+      --   npm install -g @microsoft/compose-language-service
       --   go install golang.org/x/tools/gopls@latest
       --   brew install helm-ls
       --   brew install lua-language-server
@@ -29,6 +31,8 @@ return {
             return lspconfig.util.root_pattern("deno.json", "deno.jsonc", "import_map.json")(fname)
           end,
         },
+        dockerls = {},
+        docker_compose_language_service = {},
         eslint = {},
         gopls = {},
         helm_ls = {},
