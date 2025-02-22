@@ -7,11 +7,12 @@ return {
         css = { "prettier" },
         dart = { "dart_format" },
         html = { "prettier" },
-        json = { "jq" },
         go = { "gofmt", "goimports" },
-        lua = { "stylua" },
         javascript = { "prettier" },
         javascriptreact = { "prettier" },
+        json = { "jq" },
+        lua = { "stylua" },
+        markdown = { "prettier" },
         rust = { "rustfmt" },
         terraform = { "terraform_fmt" },
         typescript = { "prettier" },
@@ -20,6 +21,14 @@ return {
         ["*"] = { "trim_newlines", "trim_whitespace" },
       },
       formatters = {
+        prettier = {
+          prepend_args = {
+            "--prose-wrap",
+            "always",
+            "--print-width",
+            "80",
+          },
+        },
         yamlfmt = {
           prepend_args = {
             "-formatter",
