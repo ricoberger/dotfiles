@@ -1,4 +1,7 @@
+cd "$(dirname "$0")"
+
 # Ghostty
+mkdir -p ~/.config
 cp -r $(pwd)/.config/ghostty ~/.config
 
 # zsh
@@ -13,7 +16,7 @@ cp -r $(pwd)/.ssh/config ~/.ssh/config
 
 # tmux
 mkdir -p ~/.tmux/plugins
-git -C ~/.tmux/plugins/tpm pull || git clone git@github.com:tmux-plugins/tpm.git ~/.tmux/plugins/tpm
+git -C ~/.tmux/plugins/tpm pull || git clone https://github.com/tmux-plugins/tpm.git ~/.tmux/plugins/tpm
 cp $(pwd)/.tmux.conf ~/.tmux.conf
 
 # Git
@@ -25,6 +28,7 @@ cp $(pwd)/.gitignore ~/.gitignore
 if command -v gh &> /dev/null; then
   gh extension install dlvhdr/gh-dash
 fi
+mkdir -p ~/.config/gh-dash
 cp $(pwd)/.config/gh-dash/config.yml ~/.config/gh-dash/config.yml
 
 # Neovim
