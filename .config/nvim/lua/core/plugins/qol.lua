@@ -486,6 +486,13 @@ return {
           diagnostics = icons.diagnostics,
           kinds = icons.kinds,
         },
+        win = {
+          list = {
+            wo = {
+              relativenumber = true,
+            },
+          },
+        },
       },
       quickfile = {
         enabled = true,
