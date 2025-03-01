@@ -48,14 +48,14 @@ keybindings:
   issues:
   # - key: O
   #   command: tmux new-window -n "{{.RepoName}}/{{.IssueNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo issue edit {{.IssueNumber}}"'
-  #   command: cd {{.RepoPath}} && nvim -c ":GHOpenIssue {{.IssueNumber}}"
+  #   command: cd {{.RepoPath}} && nvim -c ":Octo issue edit {{.IssueNumber}}"
   prs:
     - key: D
-      # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen main...{{.HeadRefName}}"'
+      # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"'
       command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"
     # - key: O
     #   command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo pr edit {{.PrNumber}}"'
-    #   command: cd {{.RepoPath}} && nvim -c ":GHOpenPR {{.PrNumber}}"
+    #   command: cd {{.RepoPath}} && nvim -c ":Octo pr edit {{.PrNumber}}"
     - key: M
       command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
     - key: ctrl+l
