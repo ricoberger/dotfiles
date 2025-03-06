@@ -2,6 +2,32 @@ local M = {}
 
 M.commands = {
   {
+    name = "Change File Type",
+    action = function()
+      local filetypes = {}
+      for _, ft in ipairs(vim.fn.getcompletion("", "filetype")) do
+        table.insert(filetypes, { text = ft, name = ft })
+      end
+
+      Snacks.picker({
+        title = "File Types",
+        layout = "select",
+        items = filetypes,
+        format = function(item)
+          local icon, icon_hl = require("snacks.util").icon(item.text, "filetype")
+          return {
+            { icon .. " ", icon_hl },
+            { item.text },
+          }
+        end,
+        confirm = function(picker, item)
+          picker:close()
+          vim.cmd.set("ft=" .. item.text)
+        end,
+      })
+    end,
+  },
+  {
     name = "Copilot: Actions",
     action = "<leader>ca",
   },
@@ -368,10 +394,7 @@ function M.show_commands()
 
   Snacks.picker({
     title = "Command Palette",
-    layout = {
-      preset = "default",
-      preview = false,
-    },
+    layout = "select",
     items = items,
     format = function(item, _)
       return {
