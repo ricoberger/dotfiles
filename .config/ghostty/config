@@ -19,7 +19,7 @@ quick-terminal-animation-duration = 0
 
 # Misc
 confirm-close-surface = true
-macos-option-as-alt = false
+macos-option-as-alt = true
 clipboard-paste-protection = false
 clipboard-paste-bracketed-safe = true
 
@@ -91,8 +91,8 @@ keybind = global:super+#=toggle_quick_terminal
 # The following keybindings are required to make "Option / Alt + j" and
 # "Option / Alt + k" work as expected on macOS. They are not required when
 # using the "macos-option-as-alt" option.
-keybind = alt+j=esc:j
-keybind = alt+k=esc:k
+# keybind = alt+j=esc:j
+# keybind = alt+k=esc:k
 
 # If the "macos-option-as-alt" option is "true", set a keybinding for
 # "Option / Alt + n" to be able to use the Tilde ("~") character.
