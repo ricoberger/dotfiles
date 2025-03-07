@@ -17,7 +17,7 @@ return {
         terraform = { "terraform_fmt" },
         typescript = { "prettier" },
         typescriptreact = { "prettier" },
-        yaml = { "yamlfmt" },
+        yaml = { "prettier" },
         ["*"] = { "trim_newlines", "trim_whitespace" },
       },
       formatters = {
@@ -27,12 +27,6 @@ return {
             "always",
             "--print-width",
             "80",
-          },
-        },
-        yamlfmt = {
-          prepend_args = {
-            "-formatter",
-            "include_document_start=true,indentless_arrays=false,retain_line_breaks=true,eof_newline=true,scan_folded_as_literal=true",
           },
         },
       },
