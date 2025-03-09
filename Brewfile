@@ -1,3 +1,9 @@
+tap "homebrew/bundle"
+tap "homebrew/services"
+
+# Applications
+cask "ghostty"
+
 # Languages
 brew "go"
 brew "deno"
@@ -8,8 +14,11 @@ brew "node@20"
 
 # Tools
 brew "btop"
+brew "colima"
+brew "docker"
+brew "docker-buildx"
+brew "docker-compose"
 brew "fd"
-brew "fluxcd/tap/flux"
 brew "fzf"
 brew "gh"
 brew "helm"
@@ -24,9 +33,7 @@ brew "operator-sdk"
 brew "rclone"
 brew "ripgrep"
 brew "starship"
-brew "stylua"
 brew "telnet"
-brew "terraform"
 brew "tmux"
 brew "tree"
 brew "watch"
