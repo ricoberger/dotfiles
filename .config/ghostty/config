@@ -86,7 +86,7 @@ keybind = super+shift+page_down=adjust_selection:page_down
 keybind = super+shift+end=adjust_selection:end
 keybind = super+shift+home=adjust_selection:home
 
-keybind = global:super+#=toggle_quick_terminal
+keybind = global:super+'=toggle_quick_terminal
 
 # The following keybindings are required to make "Option / Alt + j" and
 # "Option / Alt + k" work as expected on macOS. They are not required when
