@@ -68,6 +68,7 @@ keybind = super+page_up=scroll_page_up
 keybind = super+page_down=scroll_page_down
 
 keybind = super+plus=increase_font_size:1
+keybind = super+equal=increase_font_size:1
 keybind = super+minus=decrease_font_size:1
 keybind = super+zero=reset_font_size
 
@@ -86,6 +87,7 @@ keybind = super+shift+page_down=adjust_selection:page_down
 keybind = super+shift+end=adjust_selection:end
 keybind = super+shift+home=adjust_selection:home
 
+keybind = global:super+#=toggle_quick_terminal
 keybind = global:super+'=toggle_quick_terminal
 
 # The following keybindings are required to make "Option / Alt + j" and
