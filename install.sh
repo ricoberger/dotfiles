@@ -44,3 +44,6 @@ cp -r $(pwd)/.config/yazi ~/.config
 
 # Binaries
 cp -r $(pwd)/.bin ~/
+
+# Add symlink for iCloud in the home directory
+ln -sfn ~/Library/Mobile\ Documents/com\~apple\~CloudDocs ~/iCloud
