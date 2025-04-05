@@ -28,7 +28,8 @@ require("lazy").setup({
   { import = "core.plugins.comments" },
   { import = "core.plugins.formatting" },
   { import = "core.plugins.linting" },
-  { import = "core.plugins.lsp" },
   { import = "core.plugins.treesitter" },
   { import = "core.plugins.ai" },
 })
+
+require("core.lsp")

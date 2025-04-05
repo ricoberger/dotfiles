@@ -497,6 +497,12 @@ return {
           marks = {
             global = true,
             ["local"] = false,
+            transform = function(item)
+              if item.label and item.label:match("^[A-Z]$") and item then
+                return item
+              end
+              return false
+            end,
           },
         },
       },

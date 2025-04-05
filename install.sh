@@ -34,6 +34,7 @@ cp $(pwd)/.config/gh-dash/config.yml ~/.config/gh-dash/config.yml
 # Neovim
 mkdir -p ~/.config/nvim
 cp $(pwd)/.config/nvim/init.lua ~/.config/nvim/init.lua
+cp -r $(pwd)/.config/nvim/lsp ~/.config/nvim/
 cp -r $(pwd)/.config/nvim/lua ~/.config/nvim/
 
 # btop

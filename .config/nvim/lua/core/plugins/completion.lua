@@ -7,8 +7,8 @@ return {
       "rafamadriz/friendly-snippets",
       "fang2hou/blink-copilot",
     },
-    version = "*",
-    event = { "BufReadPre", "BufNewFile" },
+    version = "1.*",
+    event = "VeryLazy",
     opts = {
       keymap = {
         preset = "enter",

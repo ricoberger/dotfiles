@@ -1,5 +1,9 @@
 return {
   {
+    "towolf/vim-helm",
+    ft = { "helm" },
+  },
+  {
     "nvim-treesitter/nvim-treesitter",
     dependencies = {
       "nvim-treesitter/nvim-treesitter-textobjects",
