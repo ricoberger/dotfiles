@@ -39,6 +39,9 @@ return {
       "CopilotChatCommit",
       "CopilotChatCommitStaged",
       "CopilotChatReview",
+      "CopilotChatModels",
+      "CopilotChatAgents",
+      "CopilotChatPrompts",
     },
     keys = {
       {
@@ -54,6 +57,9 @@ return {
       { "<leader>ct", "<cmd>CopilotChatToggle<cr>", desc = "Toggle" },
       { "<leader>cr", "<cmd>CopilotChatReset<cr>", desc = "Reset" },
     },
-    opts = {},
+    opts = {
+      model = "claude-3.7-sonnet",
+      agent = "copilot",
+    },
   },
 }
