@@ -10,5 +10,5 @@ return {
     "typescript.tsx",
   },
   root_markers = { "tsconfig.json", "jsconfig.json", "package.json" },
-  single_file_support = true,
+  workspace_required = true,
 }

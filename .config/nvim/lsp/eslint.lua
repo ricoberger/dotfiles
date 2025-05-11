@@ -25,6 +25,7 @@ return {
     "eslint.config.mts",
     "eslint.config.cts",
   },
+  workspace_required = true,
   settings = {
     validate = "on",
     packageManager = nil,
@@ -55,52 +56,5 @@ return {
         enable = true,
       },
     },
-  },
-  on_new_config = function(config, new_root_dir)
-    config.settings.workspaceFolder = {
-      uri = new_root_dir,
-      name = vim.fn.fnamemodify(new_root_dir, ":t"),
-    }
-
-    -- Support flat config
-    if
-      vim.fn.filereadable(new_root_dir .. "/eslint.config.js") == 1
-      or vim.fn.filereadable(new_root_dir .. "/eslint.config.mjs") == 1
-      or vim.fn.filereadable(new_root_dir .. "/eslint.config.cjs") == 1
-      or vim.fn.filereadable(new_root_dir .. "/eslint.config.ts") == 1
-      or vim.fn.filereadable(new_root_dir .. "/eslint.config.mts") == 1
-      or vim.fn.filereadable(new_root_dir .. "/eslint.config.cts") == 1
-    then
-      config.settings.experimental.useFlatConfig = true
-    end
-
-    -- Support Yarn2 (PnP) projects
-    local pnp_cjs = new_root_dir .. "/.pnp.cjs"
-    local pnp_js = new_root_dir .. "/.pnp.js"
-    if vim.loop.fs_stat(pnp_cjs) or vim.loop.fs_stat(pnp_js) then
-      config.cmd = vim.list_extend({ "yarn", "exec" }, config.cmd)
-    end
-  end,
-  handlers = {
-    ["eslint/openDoc"] = function(_, result)
-      if result then
-        vim.ui.open(result.url)
-      end
-      return {}
-    end,
-    ["eslint/confirmESLintExecution"] = function(_, result)
-      if not result then
-        return
-      end
-      return 4 -- approved
-    end,
-    ["eslint/probeFailed"] = function()
-      vim.notify("[lspconfig] ESLint probe failed.", vim.log.levels.WARN)
-      return {}
-    end,
-    ["eslint/noLibrary"] = function()
-      vim.notify("[lspconfig] Unable to find ESLint library.", vim.log.levels.WARN)
-      return {}
-    end,
   },
 }
