@@ -72,6 +72,16 @@ vim.opt.updatetime = 200 -- Save swap file and trigger CursorHold
 vim.opt.wrap = false -- Disable line wrap
 vim.opt.winborder = "none"
 
+vim.opt.diffopt = {
+  "internal",
+  "filler",
+  "closeoff",
+  "context:12",
+  "algorithm:histogram",
+  "linematch:200",
+  "indent-heuristic",
+}
+
 -- Set diagnostic icons
 local icons = require("utils").icons
 
