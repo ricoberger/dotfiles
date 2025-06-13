@@ -130,6 +130,10 @@ git() {
   fi
 }
 
+ksecret() {
+  kubectl get secret $@ -o go-template='{{range $k,$v := .data}}{{printf "%s: " $k}}{{if not $v}}{{$v}}{{else}}{{$v | base64decode}}{{end}}{{"\n"}}{{end}}'
+}
+
 vaultedit() {
   TMPFILE=`mktemp /tmp/vaultsecret.XXXXXXXXX`
   vault kv get -format=json $@ | jq .data.data > ${TMPFILE};
