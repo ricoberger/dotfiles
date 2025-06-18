@@ -272,6 +272,12 @@ M.commands = {
     action = "<leader>lf",
   },
   {
+    name = "LSP: Format (Async)",
+    action = function()
+      require("conform").format({ async = true, lsp_fallback = true })
+    end,
+  },
+  {
     name = "LSP: Diagnostics (Quickfix List)",
     action = "<leader>lq",
   },
