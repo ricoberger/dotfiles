@@ -109,6 +109,7 @@ alias ghd='gh dash'
 
 killport() { lsof -i :$1 | awk '{print $2}' | tail -n 1 | xargs kill; }
 listtargz() { tar -ztvf $1; }
+trash() { mv $@ ~/.Trash }
 ts() { tmux attach -t main || tmux new -s main; }
 tsn() { tmux attach -t $1 || tmux new -s $1; }
 tp() { tmux popup -E "tmux attach -t popup || tmux new -s popup"; }
