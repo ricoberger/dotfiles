@@ -39,30 +39,40 @@ defaults:
   preview:
     open: true
     width: 120
-  refetchIntervalMinutes: 1440
+  refetchIntervalMinutes: 0
+
+smartFilteringAtLaunch: false
 
 repoPaths:
   :owner/:repo: ~/Documents/GitHub/:owner/:repo
 
 keybindings:
   issues:
-  # - key: O
+  # - name: open (nvim)
+  #   key: O
   #   command: tmux new-window -n "{{.RepoName}}/{{.IssueNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo issue edit {{.IssueNumber}}"'
   #   command: cd {{.RepoPath}} && nvim -c ":Octo issue edit {{.IssueNumber}}"
   prs:
-    - key: D
+    - name: diff (nvim)
+      key: D
       # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"'
-      command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"
-    # - key: O
+      command: |
+        cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"
+    # - name: open (nvim)
+    #   key: O
     #   command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo pr edit {{.PrNumber}}"'
     #   command: cd {{.RepoPath}} && nvim -c ":Octo pr edit {{.PrNumber}}"
-    - key: M
+    - name: merge (admin)
+      key: M
       command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
-    - key: ctrl+l
+    - name: add label
+      key: ctrl+l
       command: cd {{.RepoPath}} && gh-pr-edit-add-label {{.PrNumber}}
-    - key: ctrl+k
+    - name: remove label
+      key: ctrl+k
       command: cd {{.RepoPath}} && gh-pr-edit-remove-label {{.PrNumber}}
-    - key: ctrl+w
+    - name: show logs
+      key: ctrl+w
       command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && gh-run | less
 
 theme:
