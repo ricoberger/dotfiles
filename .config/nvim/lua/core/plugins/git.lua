@@ -28,7 +28,7 @@ return {
         on_attach = function(bufnr)
           -- don't override the built-in keymaps
           local gs = package.loaded.gitsigns
-          vim.keymap.set({ "n", "v" }, "]c", function()
+          vim.keymap.set("n", "<leader>gs]c", function()
             if vim.wo.diff then
               return "]c"
             end
@@ -36,8 +36,8 @@ return {
               gs.next_hunk()
             end)
             return "<Ignore>"
-          end, { expr = true, buffer = bufnr, desc = "Jump to next hunk" })
-          vim.keymap.set({ "n", "v" }, "[c", function()
+          end, { expr = true, buffer = bufnr, desc = "Jump to Next Hunk" })
+          vim.keymap.set({ "n", "v" }, "<leader>gs[c", function()
             if vim.wo.diff then
               return "[c"
             end
@@ -45,7 +45,7 @@ return {
               gs.prev_hunk()
             end)
             return "<Ignore>"
-          end, { expr = true, buffer = bufnr, desc = "Jump to previous hunk" })
+          end, { expr = true, buffer = bufnr, desc = "Jump to Previous Hunk" })
 
           -- Actions
           vim.keymap.set("n", "<leader>gss", ":Gitsigns stage_hunk<cr>", { desc = "Stage Hunk" })
