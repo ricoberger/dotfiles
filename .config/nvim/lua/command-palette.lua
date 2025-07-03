@@ -91,6 +91,25 @@ M.commands = {
     action = "<leader>e",
   },
   {
+    name = "File: New",
+    action = function()
+      Snacks.input({
+        prompt = "File Name",
+        default = "untitled",
+      }, function(value)
+        vim.cmd("e " .. value .. " | startinsert")
+      end)
+    end,
+  },
+  {
+    name = "File: Save",
+    action = ":w",
+  },
+  {
+    name = "File: Save (Without Formatting)",
+    action = ":noa w",
+  },
+  {
     name = "Find: Buffers",
     action = "<leader>fb",
   },

@@ -216,7 +216,19 @@ return {
         preset = {
           keys = {
             { icon = " ", key = "f", desc = "Find File", action = "<leader>ff" },
-            { icon = " ", key = "n", desc = "New File", action = ":ene | startinsert" },
+            {
+              icon = " ",
+              key = "n",
+              desc = "New File",
+              action = function()
+                Snacks.input({
+                  prompt = "File Name",
+                  default = "untitled",
+                }, function(value)
+                  vim.cmd("e " .. value .. " | startinsert")
+                end)
+              end,
+            },
             { icon = " ", key = "s", desc = "Find Text", action = "<leader>fs" },
             { icon = " ", key = "r", desc = "Recent Files", action = "<leader>fr" },
             { icon = " ", key = "g", desc = "Git Status", action = "<leader>fgs" },
