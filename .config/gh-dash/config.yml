@@ -66,13 +66,13 @@ keybindings:
       key: M
       command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
     - name: add label
-      key: ctrl+l
+      key: Ctrl+l
       command: cd {{.RepoPath}} && gh-pr-edit-add-label {{.PrNumber}}
     - name: remove label
-      key: ctrl+k
+      key: Ctrl+k
       command: cd {{.RepoPath}} && gh-pr-edit-remove-label {{.PrNumber}}
     - name: show logs
-      key: ctrl+w
+      key: Ctrl+w
       command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && gh-run | less
 
 theme:
