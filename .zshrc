@@ -68,6 +68,9 @@ setopt hist_find_no_dups
 # Hidden files
 setopt globdots
 
+# Allow comments in interactive shells
+setopt interactive_comments
+
 # Completion styling
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
