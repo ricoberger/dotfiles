@@ -1,5 +1,7 @@
 ---
 prSections:
+  - title: Involves
+    filters: is:open involves:ricoberger
   - title: Created
     filters: is:open author:ricoberger
   - title: Assigned
@@ -18,6 +20,8 @@ prSections:
     filters: owner:ricoberger
 
 issuesSections:
+  - title: Involves
+    filters: is:open involves:ricoberger
   - title: Created
     filters: is:open author:ricoberger
   - title: Assigned
