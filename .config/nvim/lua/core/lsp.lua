@@ -26,7 +26,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
     vim.keymap.set("n", "gd", function()
       Snacks.picker.lsp_definitions()
     end, { buffer = event.buf, desc = "Go to Definitions" })
-    vim.keymap.set("n", "gr", function()
+    vim.keymap.set("n", "gR", function()
       Snacks.picker.lsp_references()
     end, { buffer = event.buf, desc = "Go to References" })
     vim.keymap.set("n", "gI", function()
