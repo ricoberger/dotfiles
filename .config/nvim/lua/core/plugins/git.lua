@@ -28,7 +28,7 @@ return {
         on_attach = function(bufnr)
           -- don't override the built-in keymaps
           local gs = package.loaded.gitsigns
-          vim.keymap.set("n", "<leader>gs]c", function()
+          vim.keymap.set("n", "]h", function()
             if vim.wo.diff then
               return "]c"
             end
@@ -37,7 +37,7 @@ return {
             end)
             return "<Ignore>"
           end, { expr = true, buffer = bufnr, desc = "Jump to Next Hunk" })
-          vim.keymap.set({ "n", "v" }, "<leader>gs[c", function()
+          vim.keymap.set({ "n", "v" }, "[h", function()
             if vim.wo.diff then
               return "[c"
             end

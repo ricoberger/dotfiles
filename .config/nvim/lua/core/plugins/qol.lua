@@ -515,6 +515,34 @@ return {
               end
               return false
             end,
+            actions = {
+              delmark = function(picker)
+                local cursor = picker.list.cursor
+                local deleted = {}
+                for _, it in ipairs(picker:selected({ fallback = true })) do
+                  local success
+                  if it.label:match("[a-z]") then
+                    success = vim.api.nvim_buf_del_mark(it.buf, it.label)
+                  else
+                    success = vim.api.nvim_del_mark(it.label)
+                  end
+                  if success then
+                    table.insert(deleted, it)
+                  end
+                end
+
+                picker:close()
+                local picker_new = Snacks.picker.marks()
+                picker_new.list:view(cursor - #deleted)
+              end,
+            },
+            win = {
+              input = {
+                keys = {
+                  ["<c-x>"] = { "delmark", mode = { "i", "n" } },
+                },
+              },
+            },
           },
         },
       },
