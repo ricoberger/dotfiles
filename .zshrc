@@ -122,6 +122,11 @@ untargz() { tar -zxvf $1; rm -r $1; }
 webshare() { if [[ $(python --version 2>&1) == *2\.* ]]; then python -m SimpleHTTPServer $@; else python -m http.server $@; fi; }
 websearch() { open -a "Safari" "https://www.google.com/search?q=$(omz_urlencode -P $@)&udm=14"; }
 
+cdp() {
+  REPOS=`find $HOME/Documents/GitHub -type d -maxdepth 2 -mindepth 2`
+  cd $(echo "/Users/ricoberger/Desktop\n/Users/ricoberger/Documents\n/Users/ricoberger/Downloads\n$REPOS" | fzf)
+}
+
 git() {
   if [[ "$1" == "difftool" && "$@" != *"--help"* ]]; then
     shift 1
