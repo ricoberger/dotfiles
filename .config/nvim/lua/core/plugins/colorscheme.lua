@@ -8,7 +8,10 @@ return {
       require("catppuccin").setup({
         flavour = "macchiato",
         integrations = {
-          blink_cmp = true,
+          blink_cmp = {
+            enabled = true,
+            style = "bordered",
+          },
           diffview = true,
           gitsigns = true,
           native_lsp = {
@@ -31,7 +34,9 @@ return {
               background = true,
             },
           },
-          snacks = true,
+          snacks = {
+            enabled = true,
+          },
           treesitter = true,
         },
       })

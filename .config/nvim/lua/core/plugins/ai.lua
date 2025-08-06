@@ -26,35 +26,18 @@ return {
       "CopilotChatOpen",
       "CopilotChatClose",
       "CopilotChatToggle",
+      "CopilotChatStop",
       "CopilotChatReset",
       "CopilotChatSave",
       "CopilotChatLoad",
-      "CopilotChatDebugInfo",
-      "CopilotChatExplain",
-      "CopilotChatTests",
-      "CopilotChatFix",
-      "CopilotChatOptimize",
-      "CopilotChatDocs",
-      "CopilotChatFixDiagnostic",
-      "CopilotChatCommit",
-      "CopilotChatCommitStaged",
-      "CopilotChatReview",
-      "CopilotChatModels",
-      "CopilotChatAgents",
       "CopilotChatPrompts",
+      "CopilotChatModels",
     },
     keys = {
-      {
-        "<leader>ca",
-        function()
-          local actions = require("CopilotChat.actions")
-          require("CopilotChat.integrations.snacks").pick(actions.prompt_actions())
-        end,
-        desc = "Actions",
-      },
       { "<leader>co", "<cmd>CopilotChatOpen<cr>", desc = "Open" },
       { "<leader>cc", "<cmd>CopilotChatClose<cr>", desc = "Close" },
       { "<leader>ct", "<cmd>CopilotChatToggle<cr>", desc = "Toggle" },
+      { "<leader>cs", "<cmd>CopilotChatStop<cr>", desc = "Stop" },
       { "<leader>cr", "<cmd>CopilotChatReset<cr>", desc = "Reset" },
     },
     opts = {
