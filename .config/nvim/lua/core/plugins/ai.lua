@@ -40,9 +40,15 @@ return {
       { "<leader>cs", "<cmd>CopilotChatStop<cr>", desc = "Stop" },
       { "<leader>cr", "<cmd>CopilotChatReset<cr>", desc = "Reset" },
     },
-    opts = {
-      model = "claude-3.7-sonnet",
-      agent = "copilot",
-    },
+    config = function()
+      require("CopilotChat").setup({
+        model = "claude-3.7-sonnet",
+        agent = "copilot",
+      })
+
+      vim.keymap.set("i", "<C-q>", function()
+        require("CopilotChat").trigger_complete()
+      end, { desc = "Trigger Completion in Chat Window" })
+    end,
   },
 }
