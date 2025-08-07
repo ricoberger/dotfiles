@@ -1,16 +1,3 @@
--- Servers:
---   npm install -g vscode-langservers-extracted@4.8.0
---   npm install -g dockerfile-language-server-nodejs
---   npm install -g @microsoft/compose-language-service
---   go install golang.org/x/tools/gopls@latest
---   brew install helm-ls
---   brew install lua-language-server
---   brew install marksman
---   brew install hashicorp/tap/terraform-ls
---   brew install JetBrains/utils/kotlin-lsp
---   npm install -g typescript-language-server typescript
---   npm install -g yaml-language-server
---
 -- See: https://github.com/neovim/nvim-lspconfig/tree/master/lua/lspconfig/configs
 
 vim.api.nvim_create_autocmd("LspAttach", {

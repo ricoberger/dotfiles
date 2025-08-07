@@ -1,30 +1,37 @@
 cd "$(dirname "$0")"
 
 # Ghostty
+echo "\n- Copy Ghostty Configuration"
 mkdir -p ~/.config
 cp -r $(pwd)/.config/ghostty ~/.config
 
-# zsh
+# Zsh
+echo "\n- Copy Zsh Configuration"
 cp $(pwd)/.zshrc ~/.zshrc
 
 # Starship
+echo "\n- Copy Starship Configuration"
 cp $(pwd)/.config/starship.toml ~/.config/starship.toml
 
 # SSH
+echo "\n- Copy SSH Configuration"
 mkdir -p ~/.ssh
 cp -r $(pwd)/.ssh/config ~/.ssh/config
 
 # tmux
+echo "\n- Copy tmux Configuration"
 mkdir -p ~/.tmux/plugins
 git -C ~/.tmux/plugins/tpm pull || git clone https://github.com/tmux-plugins/tpm.git ~/.tmux/plugins/tpm
 cp $(pwd)/.tmux.conf ~/.tmux.conf
 
 # Git
+echo "\n- Copy Git Configuration"
 cp $(pwd)/.gitconfig ~/.gitconfig
 cp $(pwd)/.gitconfig-staffbase ~/.gitconfig-staffbase
 cp $(pwd)/.gitignore ~/.gitignore
 
 # GitHub
+echo "\n- Install Extensions for the GitHub CLI"
 if command -v gh &> /dev/null; then
   gh extension install dlvhdr/gh-dash
 fi
@@ -32,19 +39,33 @@ mkdir -p ~/.config/gh-dash
 cp $(pwd)/.config/gh-dash/config.yml ~/.config/gh-dash/config.yml
 
 # Neovim
+echo "\n- Copy Neovim Configuration"
 mkdir -p ~/.config/nvim
 cp $(pwd)/.config/nvim/init.lua ~/.config/nvim/init.lua
 cp -r $(pwd)/.config/nvim/lsp ~/.config/nvim/
 cp -r $(pwd)/.config/nvim/lua ~/.config/nvim/
 
 # btop
+echo "\n- Copy btop Configuration"
 cp -r $(pwd)/.config/btop ~/.config
 
-# yazi
+# Yazi
+echo "\n- Copy Yazi Configuration"
 cp -r $(pwd)/.config/yazi ~/.config
 
 # Binaries
+echo "\n- Copy Binaries"
 cp -r $(pwd)/.bin ~/
 
 # Add symlink for iCloud in the home directory
+echo "\n- Add Symlink for iCloud"
 ln -sfn ~/Library/Mobile\ Documents/com\~apple\~CloudDocs ~/iCloud
+
+# Language Servers and Linters
+echo "\n- Run the Following Commands to Install Language Servers, Linters and Formatters:"
+echo "  - npm install -g vscode-langservers-extracted@4.8.0"
+echo "  - npm install -g dockerfile-language-server-nodejs"
+echo "  - npm install -g @microsoft/compose-language-service"
+echo "  - go install golang.org/x/tools/gopls@latest"
+echo "  - npm install -g typescript-language-server typescript"
+echo "  - npm install -g yaml-language-server"
