@@ -5,12 +5,20 @@ tap "homebrew/services"
 cask "ghostty"
 
 # Languages
-brew "go"
 brew "deno"
+brew "go"
 # After node was installed we have to link it and we have to install yarn:
 #   brew link --force --overwrite node@20
 #   npm install --global yarn
 brew "node@20"
+
+# Language Servers and Linters
+brew "hashicorp/tap/terraform-ls"
+brew "helm-ls"
+# brew "JetBrains/utils/kotlin-lsp"
+# brew "ktlint"
+brew "lua-language-server"
+brew "marksman"
 
 # Tools
 brew "btop"

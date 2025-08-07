@@ -11,6 +11,7 @@ return {
         javascript = { "prettier" },
         javascriptreact = { "prettier" },
         json = { "jq" },
+        kotlin = { "ktlint" },
         lua = { "stylua" },
         markdown = { "prettier" },
         rust = { "rustfmt" },

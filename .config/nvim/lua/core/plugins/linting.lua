@@ -9,6 +9,7 @@ return {
         go = { "golangcilint" },
         javascript = { "eslint" },
         javascriptreact = { "eslint" },
+        kotlin = { "ktlint" },
         typescript = { "eslint" },
         typescriptreact = { "eslint" },
       }

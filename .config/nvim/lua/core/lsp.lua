@@ -7,6 +7,7 @@
 --   brew install lua-language-server
 --   brew install marksman
 --   brew install hashicorp/tap/terraform-ls
+--   brew install JetBrains/utils/kotlin-lsp
 --   npm install -g typescript-language-server typescript
 --   npm install -g yaml-language-server
 --
@@ -66,6 +67,7 @@ vim.lsp.enable({
   "eslint",
   "gopls",
   "helm_ls",
+  "kotlin_lsp",
   "lua_ls",
   "marksman",
   "terraformls",
