@@ -129,3 +129,10 @@ for _, type in ipairs({ "Error", "Warn", "Hint", "Info" }) do
     { name = "DiagnosticSign" .. type, text = icons.diagnostics[type], texthl = "Diagnostic" .. type }
   )
 end
+
+-- Handle ".arb" files as ".json" files
+vim.filetype.add({
+  extension = {
+    arb = "json",
+  },
+})

@@ -1,8 +1,12 @@
 return {
-  cmd = { "dart", "language-server", "--protocol=lsp" },
+  cmd = {
+    "dart",
+    "language-server",
+    "--protocol=lsp",
+    -- "--instrumentation-log-file=/Users/ricoberger/Desktop/dartls.log",
+  },
   filetypes = { "dart" },
   root_markers = { "pubspec.yaml" },
-  workspace_required = true,
   init_options = {
     onlyAnalyzeProjectsWithOpenFiles = true,
     suggestFromUnimportedLibraries = true,
