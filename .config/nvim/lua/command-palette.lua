@@ -402,6 +402,17 @@ M.commands = {
     name = "Todo Comments: Location List",
     action = ":TodoLocList",
   },
+  {
+    name = "Words: Toggle",
+    action = function()
+      local snacks_words = require("snacks").words
+      if snacks_words.enabled then
+        snacks_words.disable()
+      else
+        snacks_words.enable()
+      end
+    end,
+  },
 }
 
 function M.show_commands()

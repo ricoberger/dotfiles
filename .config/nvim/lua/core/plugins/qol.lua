@@ -203,6 +203,20 @@ return {
         end,
         desc = "Implementations",
       },
+      {
+        "]r",
+        desc = "Next Reference",
+        function()
+          Snacks.words.jump(vim.v.count1)
+        end,
+      },
+      {
+        "[r",
+        desc = "Previous Reference",
+        function()
+          Snacks.words.jump(-vim.v.count1)
+        end,
+      },
     },
     opts = {
       bigfile = {
@@ -548,6 +562,9 @@ return {
       },
       quickfile = {
         enabled = true,
+      },
+      words = {
+        enabled = false,
       },
     },
   },
