@@ -52,6 +52,12 @@ return {
                 or vim.tbl_contains({ "/", "?" }, vim.fn.getcmdtype())
               )
           end,
+          draw = {
+            columns = {
+              { "kind_icon" },
+              { "label", "label_description", gap = 1 },
+            },
+          },
         },
         accept = {
           auto_brackets = {
