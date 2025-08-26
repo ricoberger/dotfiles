@@ -94,6 +94,7 @@ export FZF_DEFAULT_OPTS='--color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:#ed87
 ################################################################################
 alias vim="nvim"
 alias vi="nvim"
+alias nvimn="$HOME/.bin/nvim-nightly/bin/nvim"
 alias ls='ls --color'
 alias la='ls -la --color'
 alias watch='watch '
