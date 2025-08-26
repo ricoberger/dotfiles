@@ -23,8 +23,8 @@ vim.keymap.set("n", "<S-Left>", "<cmd>vertical resize -2<cr>", { desc = "Decreas
 vim.keymap.set("n", "<S-Right>", "<cmd>vertical resize +2<cr>", { desc = "Increase window width" })
 
 -- Move to next / previous buffer
-vim.keymap.set("n", "<TAB>", ":bn<CR>", { desc = "Next buffer" })
-vim.keymap.set("n", "<S-TAB>", ":bp<CR>", { desc = "Previous buffer" })
+-- vim.keymap.set("n", "<TAB>", ":bn<CR>", { desc = "Next buffer" })
+-- vim.keymap.set("n", "<S-TAB>", ":bp<CR>", { desc = "Previous buffer" })
 
 -- Move Lines
 vim.keymap.set("n", "<A-j>", "<cmd>m .+1<cr>==", { desc = "Move down" })

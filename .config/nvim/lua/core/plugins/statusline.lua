@@ -46,15 +46,27 @@ return {
             end,
           },
           {
-            "buffers",
-            -- Disable separators, because of https://github.com/nvim-lualine/lualine.nvim/issues/1322
-            component_separators = { left = "" },
+            "filename",
+            file_status = true,
+            newfile_status = false,
+            path = 0,
             symbols = {
-              modified = " ● ",
-              alternate_file = "",
-              directory = "",
+              modified = icons.git.modified,
+              readonly = "󱈸",
+              unnamed = icons.git.untracked,
+              newfile = icons.git.added,
             },
           },
+          -- {
+          --   "buffers",
+          --   -- Disable separators, because of https://github.com/nvim-lualine/lualine.nvim/issues/1322
+          --   component_separators = { left = "" },
+          --   symbols = {
+          --     modified = " ● ",
+          --     alternate_file = "",
+          --     directory = "",
+          --   },
+          -- },
         },
         lualine_x = {
           "encoding",
