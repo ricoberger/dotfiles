@@ -5,11 +5,44 @@ return {
     build = ":Copilot auth",
     event = "InsertEnter",
     opts = {
-      suggestion = { enabled = false },
-      panel = { enabled = false },
+      panel = {
+        enabled = true,
+        auto_refresh = false,
+        keymap = {
+          jump_prev = "[[",
+          jump_next = "]]",
+          accept = "<CR>",
+          refresh = "gr",
+          open = "<M-CR>",
+        },
+        layout = {
+          position = "bottom",
+          ratio = 0.4,
+        },
+      },
+      suggestion = {
+        enabled = true,
+        auto_trigger = true,
+        hide_during_completion = true,
+        debounce = 75,
+        trigger_on_accept = true,
+        keymap = {
+          accept = "<C-CR>",
+          accept_word = false,
+          accept_line = false,
+          next = "<M-]>",
+          prev = "<M-[>",
+          dismiss = false,
+        },
+      },
       filetypes = {
-        markdown = true,
-        help = true,
+        help = false,
+        gitcommit = false,
+        gitrebase = false,
+        hgcommit = false,
+        svn = false,
+        cvs = false,
+        ["*"] = true,
       },
     },
   },
@@ -18,7 +51,6 @@ return {
     version = "*",
     branch = "main",
     dependencies = {
-      "zbirenbaum/copilot.lua",
       "nvim-lua/plenary.nvim",
     },
     cmd = {
