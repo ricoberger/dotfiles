@@ -55,24 +55,25 @@ vim.keymap.set("v", "gs'", "<esc>`>a'<esc>`<i'<esc>", { desc = "Add '' around se
 vim.keymap.set("v", "gs`", "<esc>`>a`<esc>`<i`<esc>", { desc = "Add `` around selection" })
 
 -- Search and replace
-vim.keymap.set("n", "<leader>rr", [[:%s///gcI<Left><Left><Left><Left><Left>]], { desc = "Replace in Buffer" })
+vim.keymap.set({ "n", "v" }, "<leader>rr", [[:%s///gcI<Left><Left><Left><Left><Left>]], { desc = "Replace in Buffer" })
 vim.keymap.set(
   "n",
   "<leader>rw",
   [[:%s/\<<C-r><C-w>\>//gcI<Left><Left><Left><Left>]],
   { desc = "Replace in Buffer (Word)" }
 )
+vim.keymap.set("v", "<leader>rs", [[:s///gcI<Left><Left><Left><Left><Left>]], { desc = "Replace in Selection" })
 vim.keymap.set(
   "n",
   "<leader>rR",
   [[:cfdo %s///gcI | update]]
-    .. [[<Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left>]],
+  .. [[<Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left>]],
   { desc = "Replace in Quickfix List" }
 )
 vim.keymap.set(
   "n",
   "<leader>rW",
   [[:cfdo %s/\<<C-r><C-w>\>//gcI | update]]
-    .. [[<Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left>]],
+  .. [[<Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left><Left>]],
   { desc = "Replace in Quickfix List (Word)" }
 )

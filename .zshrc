@@ -12,7 +12,7 @@ export GO111MODULE=on
 export ANDROID_HOME=/Users/ricoberger/Library/Android/sdk
 export ANDROID_NDK_HOME=/Users/ricoberger/Library/Android/sdk/ndk/27.0.12077973
 export NODE_OPTIONS='--dns-result-order=ipv4first'
-export PATH=$GOROOT/bin:$GOPATH/bin:$HOME/.bin:$HOME/.krew/bin:$HOME/flutter/bin:$HOME/.pub-cache/bin:/opt/homebrew/opt/openjdk/bin:$HOME/.istioctl/bin:$HOME/.cargo/bin:/opt/homebrew/opt/python@3.10/libexec/bin/:$PATH
+export PATH=$GOROOT/bin:$GOPATH/bin:$HOME/.bin:$HOME/.bin/nvim-nightly/bin:$HOME/.krew/bin:$HOME/flutter/bin:$HOME/.pub-cache/bin:/opt/homebrew/opt/openjdk/bin:$HOME/.istioctl/bin:$HOME/.cargo/bin:/opt/homebrew/opt/python@3.10/libexec/bin/:$PATH
 export MANPAGER='nvim +Man!'
 
 
@@ -94,7 +94,6 @@ export FZF_DEFAULT_OPTS='--color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:#ed87
 ################################################################################
 alias vim="nvim"
 alias vi="nvim"
-alias nvimn="$HOME/.bin/nvim-nightly/bin/nvim"
 alias ls='ls --color'
 alias la='ls -la --color'
 alias watch='watch '
@@ -104,6 +103,7 @@ alias gg1="git log --graph --abbrev-commit --decorate --format=format:'%C(bold b
 alias gg2="git log --graph --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold cyan)%aD%C(reset) %C(bold green)(%ar)%C(reset)%C(auto)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all"
 alias gg3="git log --graph --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold cyan)%aD%C(reset) %C(bold green)(%ar)%C(reset) %C(bold cyan)(committed: %cD)%C(reset) %C(auto)%d%C(reset)%n''          %C(white)%s%C(reset)%n''          %C(dim white)- %an <%ae> %C(reset) %C(dim white)(committer: %cn <%ce>)%C(reset)' --all"
 alias ghd='gh dash'
+alias y='yazi'
 
 
 
@@ -128,18 +128,6 @@ cdp() {
   cd $(echo "/Users/ricoberger/Desktop\n/Users/ricoberger/Documents\n/Users/ricoberger/Downloads\n$REPOS" | fzf)
 }
 
-git() {
-  if [[ "$1" == "difftool" && "$@" != *"--help"* ]]; then
-    shift 1
-    command nvim -c DiffviewOpen "$@"
-  elif [[ "$1" == "mergetool" && "$@" != *"--help"* ]]; then
-    shift 1
-    command nvim -c DiffviewOpen "$@"
-  else
-    command git "$@"
-  fi
-}
-
 ksecret() {
   kubectl get secret $@ -o go-template='{{range $k,$v := .data}}{{printf "%s: " $k}}{{if not $v}}{{$v}}{{else}}{{$v | base64decode}}{{end}}{{"\n"}}{{end}}'
 }
@@ -160,7 +148,7 @@ vaultcreate() {
 }
 
 # See https://yazi-rs.github.io/docs/quick-start#shell-wrapper
-y() {
+yy() {
 	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
 	yazi "$@" --cwd-file="$tmp"
 	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then

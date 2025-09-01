@@ -39,6 +39,13 @@ mkdir -p ~/.config/gh-dash
 cp $(pwd)/.config/gh-dash/config.yml ~/.config/gh-dash/config.yml
 
 # Neovim
+if [ ! -d "$HOME/.bin/nvim-nightly" ]; then
+  echo "\n- Install Neovim Nightly"
+  mkdir -p $HOME/.bin/nvim-nightly
+  curl -o $HOME/.bin/nvim-nightly.tar.gz -LO https://github.com/neovim/neovim/releases/download/nightly/nvim-macos-arm64.tar.gz
+  tar xzf $HOME/.bin/nvim-nightly.tar.gz -C $HOME/.bin/nvim-nightly --strip-components=1
+fi
+
 echo "\n- Copy Neovim Configuration"
 mkdir -p ~/.config/nvim
 cp $(pwd)/.config/nvim/init.lua ~/.config/nvim/init.lua
@@ -57,14 +64,6 @@ cp -r $(pwd)/.config/yazi ~/.config
 echo "\n- Copy Binaries"
 cp -r $(pwd)/.bin ~/
 
-# Neovim Nightly
-if [ ! -d "$HOME/.bin/nvim-nightly" ]; then
-  echo "\n- Install Neovim Nightly"
-  mkdir -p $HOME/.bin/nvim-nightly
-  curl -o $HOME/.bin/nvim-nightly.tar.gz -LO https://github.com/neovim/neovim/releases/download/nightly/nvim-macos-arm64.tar.gz
-  tar xzf $HOME/.bin/nvim-nightly.tar.gz -C $HOME/.bin/nvim-nightly --strip-components=1
-fi
-
 # Add symlink for iCloud in the home directory
 echo "\n- Add Symlink for iCloud"
 ln -sfn ~/Library/Mobile\ Documents/com\~apple\~CloudDocs ~/iCloud
@@ -77,3 +76,4 @@ echo "  - npm install -g @microsoft/compose-language-service"
 echo "  - go install golang.org/x/tools/gopls@latest"
 echo "  - npm install -g typescript-language-server typescript"
 echo "  - npm install -g yaml-language-server"
+echo "  - npm install -g @github/copilot-language-server"

@@ -32,10 +32,18 @@ return {
             "typescript",
             "yaml",
           },
-
           auto_install = true,
-          highlight = { enable = true },
-          indent = { enable = true, disable = { "dart", "yaml" } },
+          highlight = {
+            enable = true,
+            additional_vim_regex_highlighting = false,
+          },
+          indent = {
+            enable = true,
+            disable = {
+              "dart",
+              "yaml",
+            },
+          },
 
           incremental_selection = { enable = false },
           textobjects = {
