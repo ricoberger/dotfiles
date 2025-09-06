@@ -51,21 +51,11 @@ repoPaths:
   :owner/:repo: ~/Documents/GitHub/:owner/:repo
 
 keybindings:
-  issues:
-  # - name: open (nvim)
-  #   key: O
-  #   command: tmux new-window -n "{{.RepoName}}/{{.IssueNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo issue edit {{.IssueNumber}}"'
-  #   command: cd {{.RepoPath}} && nvim -c ":Octo issue edit {{.IssueNumber}}"
   prs:
     - name: diff (nvim)
       key: D
-      # command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"'
       command: |
-        cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && nvim -c ":DiffviewOpen origin/HEAD...HEAD --imply-local"
-    # - name: open (nvim)
-    #   key: O
-    #   command: tmux new-window -n "{{.RepoName}}/{{.PrNumber}}" -c {{.RepoPath}} 'nvim -c ":Octo pr edit {{.PrNumber}}"'
-    #   command: cd {{.RepoPath}} && nvim -c ":Octo pr edit {{.PrNumber}}"
+        cd {{.RepoPath}} && git checkout {{.BaseRefName}} && git pull && gh pr checkout {{.PrNumber}} && nvim -c ":GitDiff {{.BaseRefName}} {{.HeadRefName}}"
     - name: merge (admin)
       key: M
       command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}

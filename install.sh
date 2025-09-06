@@ -48,9 +48,7 @@ fi
 
 echo "\n- Copy Neovim Configuration"
 mkdir -p ~/.config/nvim
-cp $(pwd)/.config/nvim/init.lua ~/.config/nvim/init.lua
-cp -r $(pwd)/.config/nvim/lsp ~/.config/nvim/
-cp -r $(pwd)/.config/nvim/lua ~/.config/nvim/
+cp -r $(pwd)/.config/nvim ~/.config
 
 # btop
 echo "\n- Copy btop Configuration"
@@ -73,6 +71,7 @@ echo "\n- Run the Following Commands to Install Language Servers, Linters and Fo
 echo "  - npm install -g vscode-langservers-extracted@4.8.0"
 echo "  - npm install -g dockerfile-language-server-nodejs"
 echo "  - npm install -g @microsoft/compose-language-service"
+echo "  - go install github.com/nametake/golangci-lint-langserver@latest"
 echo "  - go install golang.org/x/tools/gopls@latest"
 echo "  - npm install -g typescript-language-server typescript"
 echo "  - npm install -g yaml-language-server"
