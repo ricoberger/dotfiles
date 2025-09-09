@@ -807,7 +807,11 @@ vim.api.nvim_create_autocmd("LspAttach", {
       -- Add additional keymaps to the default LSP keymaps.
       --
       -- See: https://neovim.io/doc/user/lsp.html#_global-defaults
-      vim.keymap.set("n", "grf", vim.lsp.buf.format, { buffer = buffer })
+      vim.keymap.set("n", "grf", function()
+        vim.lsp.buf.format({
+          timeout_ms = 10000,
+        })
+      end, { buffer = buffer })
       vim.keymap.set("n", "grq", vim.diagnostic.setqflist, { buffer = buffer })
       vim.keymap.set("n", "gry", function()
         vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
