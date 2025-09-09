@@ -11,9 +11,11 @@ export GOPATH=$HOME/go
 export GO111MODULE=on
 export ANDROID_HOME=/Users/ricoberger/Library/Android/sdk
 export ANDROID_NDK_HOME=/Users/ricoberger/Library/Android/sdk/ndk/27.0.12077973
-export NODE_OPTIONS='--dns-result-order=ipv4first'
+export NODE_OPTIONS="--dns-result-order=ipv4first"
 export PATH=$GOROOT/bin:$GOPATH/bin:$HOME/.bin:$HOME/.bin/nvim-nightly/bin:$HOME/.krew/bin:$HOME/flutter/bin:$HOME/.pub-cache/bin:/opt/homebrew/opt/openjdk/bin:$HOME/.istioctl/bin:$HOME/.cargo/bin:/opt/homebrew/opt/python@3.10/libexec/bin/:$PATH
-export MANPAGER='nvim +Man!'
+export MANPAGER="nvim +Man!"
+# See .config/nvim/lsp/yamlls.lua
+export YAMLLS_KUBERNETES_SCHEMA_URL="https://raw.githubusercontent.com/ricoberger/kubernetes-json-schema/refs/heads/main/schemas/all.json"
 
 
 
