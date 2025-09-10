@@ -717,6 +717,14 @@ require("nvim-treesitter.configs").setup({
   highlight = {
     enable = true,
     additional_vim_regex_highlighting = false,
+    -- Disable treesitter for files larger than 1 MB
+    disable = function(_, buf)
+      local max_filesize = 1 * 1024 * 1024
+      local ok, stats = pcall(vim.loop.fs_stat, vim.api.nvim_buf_get_name(buf))
+      if ok and stats and stats.size > max_filesize then
+        return true
+      end
+    end,
   },
   indent = {
     enable = true,
