@@ -1,22 +1,7 @@
 return {
-  -- Use my custom build of yaml-language-server, were the default Kubernetes
-  -- schema can be set via the "YAMLLS_KUBERNETES_SCHEMA_URL" environemnt
-  -- variable.
-  --
-  -- See: https://github.com/ricoberger/yaml-language-server/pull/1
-  --
-  -- This was done to be able to combine the Kubernetes schema with the schema
-  -- of CustomResourceDefinitions (CRDs), to have a better experience with the
-  -- yaml-language-server when working with Kubernetes manifests.
-  --
-  -- See: https://github.com/ricoberger/kubernetes-json-schema
-  --
+  -- See: ./bin/yamlls
   -- cmd = { "yaml-language-server", "--stdio" },
-  cmd = {
-    "node",
-    "/Users/ricoberger/Documents/GitHub/ricoberger/yaml-language-server/out/server/src/server.js",
-    "--stdio",
-  },
+  cmd = { "yamlls", "--stdio" },
   filetypes = {
     "yaml",
     "yaml.docker-compose",

@@ -10,4 +10,28 @@ return {
       },
     },
   },
+  settings = {
+    ["helm-ls"] = {
+      -- See: .config/nvim/lsp/yamlls.lua
+      -- See: ./bin/yamlls
+      yamlls = {
+        path = "yamlls",
+        config = {
+          format = {
+            enable = false,
+          },
+          completion = true,
+          hover = true,
+          validate = true,
+          schemas = {
+            kubernetes = "templates/**",
+          },
+          schemaStore = {
+            enable = false,
+            url = "",
+          },
+        },
+      },
+    },
+  },
 }
