@@ -20,7 +20,7 @@ local jq = {
 
 local prettier = {
   formatCanRange = true,
-  formatCommand = "prettier --stdin --stdin-filepath '${INPUT}' ${--range-start:charStart} ${--range-end:charEnd} ${--tab-width:tabSize} ${--use-tabs:!insertSpaces} --prose-wrap=always --print-width=80",
+  formatCommand = "prettier --stdin --stdin-filepath '${INPUT}' ${--range-start:charStart} ${--range-end:charEnd} ${--tab-width:tabSize} ${--use-tabs:!insertSpaces} --config-precedence=file-override --prose-wrap=always --print-width=80",
   formatStdin = true,
 }
 
