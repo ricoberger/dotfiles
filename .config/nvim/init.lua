@@ -348,8 +348,8 @@ end, { expr = true })
 vim.keymap.set("n", "<leader>ey", function()
   vim.fn.setreg("+", vim.fn.expand("%:."))
 end)
-vim.keymap.set("n", "<leader>ew", "<cmd>write<cr>")
-vim.keymap.set("n", "<leader>eW", "<cmd>noautocmd write<cr>")
+vim.keymap.set("n", "<leader>ew", "<cmd>write ++p<cr>")
+vim.keymap.set("n", "<leader>eW", "<cmd>noautocmd write ++p<cr>")
 
 --------------------------------------------------------------------------------
 -- FIND FILES
@@ -507,6 +507,9 @@ vim.keymap.set("n", "<leader>ss", ":silent grep!<space>")
 vim.keymap.set("n", "<leader>sc", function()
   return ":silent grep! --glob='" .. vim.fn.expand("%:.:h") .. "/**' "
 end, { expr = true })
+vim.keymap.set("n", "<leader>s/", function()
+  return ":silent grep! --glob='" .. vim.fn.expand("%:.") .. "' "
+end, { expr = true })
 vim.keymap.set("n", "<leader>sw", ":silent grep!<space><c-r><c-w>")
 vim.keymap.set("v", "<leader>sv", 'y:silent grep!<space><c-r>"')
 vim.keymap.set(
@@ -522,9 +525,14 @@ vim.keymap.set(
 -- Replace in the current buffer or in all items in the quickfix list. Replace
 -- in the current buffer also works for a visual selection.
 vim.keymap.set(
-  { "n", "v" },
+  { "n" },
   "<leader>rr",
   [[:%s///gcI<left><left><left><left><left>]]
+)
+vim.keymap.set(
+  { "v" },
+  "<leader>rr",
+  [[:s///gcI<left><left><left><left><left>]]
 )
 vim.keymap.set(
   "n",
