@@ -642,6 +642,19 @@ vim.keymap.set("n", "<leader>q8", "<cmd>8chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q9", "<cmd>9chistory<cr> <bar> <cmd>copen<cr>")
 
 --------------------------------------------------------------------------------
+-- MACROS
+--------------------------------------------------------------------------------
+
+-- Select a pattern and press "Q" + "Q" to record a macro into register "q",
+-- starting from the selected pattern. Once the macro is recorded, press "q" to
+-- stop the recording. The macro can then be replayed using "<c-q>". If
+-- nothing is selected the macro is replayed for the whole file, otherwise it is
+-- only replayed for the selected lines.
+vim.keymap.set("v", "Q", '"wyqq')
+vim.keymap.set("n", "Q", "V/\\%V\\V<c-r>w<cr><esc>")
+vim.keymap.set({ "n", "v" }, "<c-q>", ":g/\\V<c-r>w/normal! @q<cr>")
+
+--------------------------------------------------------------------------------
 -- COLORSCHEME
 --------------------------------------------------------------------------------
 
