@@ -38,6 +38,10 @@ fi
 mkdir -p ~/.config/gh-dash
 cp $(pwd)/.config/gh-dash/config.yml ~/.config/gh-dash/config.yml
 
+# Vim
+echo "\n- Copy Vim Configuration"
+cp $(pwd)/.vimrc ~/.vimrc
+
 # Neovim
 if [ ! -d "$HOME/.bin/nvim-nightly" ]; then
   echo "\n- Install Neovim Nightly"

@@ -124,6 +124,10 @@ vim.opt.diffopt = {
   "indent-heuristic",
 }
 
+-- Enable strikethrough.
+vim.cmd([[let &t_Ts = "\e[9m"]])
+vim.cmd([[let &t_Te = "\e[29m"]])
+
 -- Enable undercurls.
 vim.cmd([[let &t_Cs = "\e[4:3m"]])
 vim.cmd([[let &t_Ce = "\e[4:0m"]])
