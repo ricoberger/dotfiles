@@ -629,12 +629,33 @@ vim.api.nvim_create_autocmd("QuickFixCmdPost", {
   command = "cwindow",
 })
 
+-- Filter the items in the quickfix list by their filename using fuzzy matching.
+-- The current quickfix list is replaced by the filtered list.
+--
+-- This can be used to first search for a term using "<leader>ss" and then
+-- filter the results by their filename using "<leader>qf".
+vim.api.nvim_create_user_command("QuickfixFilter", function(opts)
+  local title = vim.fn.getqflist({ title = 1 })
+
+  vim.notify(opts.args, vim.log.levels.INFO)
+
+  local qflist = vim.fn.matchfuzzy(vim.fn.getqflist(), opts.args, {
+    text_cb = function(item)
+      return vim.fn.bufname(item.bufnr)
+    end,
+  })
+
+  vim.fn.setqflist({}, " ", { title = title, items = qflist })
+  vim.cmd.copen()
+end, { nargs = "*" })
+
 -- Add keymaps for easier acccess to the Quickfix list.
 vim.keymap.set("n", "<leader>qo", "<cmd>copen<cr>")
 vim.keymap.set("n", "<leader>qc", "<cmd>cclose<cr>")
 vim.keymap.set("n", "<leader>qh", "<cmd>chistory<cr>")
 vim.keymap.set("n", "<leader>qn", "<cmd>cnewer<cr>")
 vim.keymap.set("n", "<leader>qp", "<cmd>colder<cr>")
+vim.keymap.set("n", "<leader>qf", ":QuickfixFilter ")
 vim.keymap.set("n", "<leader>q1", "<cmd>1chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q2", "<cmd>2chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q3", "<cmd>3chistory<cr> <bar> <cmd>copen<cr>")
