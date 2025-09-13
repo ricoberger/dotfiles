@@ -279,6 +279,7 @@ vim.api.nvim_create_autocmd({ "CmdlineChanged", "CmdlineLeave" }, {
         or cmdline_cmd == "Find"
         or cmdline_cmd == "buffer"
         or cmdline_cmd == "edit"
+        or cmdline_cmd == "QuickfixFilter"
     end
 
     if ev.event == "CmdlineChanged" and should_enable_autocomplete() then
@@ -647,7 +648,23 @@ vim.api.nvim_create_user_command("QuickfixFilter", function(opts)
 
   vim.fn.setqflist({}, " ", { title = title, items = qflist })
   vim.cmd.copen()
-end, { nargs = "*" })
+end, {
+  complete = function(_, cmdline, _)
+    local args = ""
+    if #vim.fn.split(cmdline, " ") > 1 then
+      args = table.concat(vim.fn.split(cmdline, " "), " ", 2)
+    end
+
+    local qflist = vim.fn.getqflist()
+    local files = {}
+    for _, item in pairs(qflist) do
+      table.insert(files, vim.fn.bufname(item.bufnr))
+    end
+
+    return vim.fn.matchfuzzy(files, args)
+  end,
+  nargs = "*",
+})
 
 -- Add keymaps for easier acccess to the Quickfix list.
 vim.keymap.set("n", "<leader>qo", "<cmd>copen<cr>")
