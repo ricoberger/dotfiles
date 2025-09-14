@@ -1,5 +1,5 @@
 return {
-  -- See: ./bin/yamlls
+  -- See: ./.local/bin/yamlls
   -- cmd = { "yaml-language-server", "--stdio" },
   cmd = { "yamlls", "--stdio" },
   filetypes = {

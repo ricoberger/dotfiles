@@ -13,7 +13,7 @@ return {
   settings = {
     ["helm-ls"] = {
       -- See: .config/nvim/lsp/yamlls.lua
-      -- See: ./bin/yamlls
+      -- See: ./.local/bin/yamlls
       yamlls = {
         path = "yamlls",
         config = {

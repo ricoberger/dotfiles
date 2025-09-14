@@ -43,11 +43,11 @@ echo "\n- Copy Vim Configuration"
 cp $(pwd)/.vimrc ~/.vimrc
 
 # Neovim
-if [ ! -d "$HOME/.bin/nvim-nightly" ]; then
+if [ ! -d "$HOME/.local/bin/nvim-nightly" ]; then
   echo "\n- Install Neovim Nightly"
-  mkdir -p $HOME/.bin/nvim-nightly
-  curl -o $HOME/.bin/nvim-nightly.tar.gz -LO https://github.com/neovim/neovim/releases/download/nightly/nvim-macos-arm64.tar.gz
-  tar xzf $HOME/.bin/nvim-nightly.tar.gz -C $HOME/.bin/nvim-nightly --strip-components=1
+  mkdir -p $HOME/.local/bin/nvim-nightly
+  curl -o $HOME/.local/bin/nvim-nightly.tar.gz -LO https://github.com/neovim/neovim/releases/download/nightly/nvim-macos-arm64.tar.gz
+  tar xzf $HOME/.local/bin/nvim-nightly.tar.gz -C $HOME/.local/bin/nvim-nightly --strip-components=1
 fi
 
 echo "\n- Copy Neovim Configuration"
@@ -64,7 +64,7 @@ cp -r $(pwd)/.config/yazi ~/.config
 
 # Binaries
 echo "\n- Copy Binaries"
-cp -r $(pwd)/.bin ~/
+cp -r $(pwd)/.local/bin ~/.local
 
 # Add symlink for iCloud in the home directory
 echo "\n- Add Symlink for iCloud"
