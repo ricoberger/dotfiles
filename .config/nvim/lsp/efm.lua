@@ -24,6 +24,17 @@ local prettier = {
   formatStdin = true,
 }
 
+local ruff = {
+  formatCommand = "ruff format --no-cache --stdin-filename '${INPUT}'",
+  formatStdin = true,
+  rootMarkers = {
+    "pyproject.toml",
+    "setup.py",
+    "requirements.txt",
+    "ruff.toml",
+  },
+}
+
 local rustfmt = {
   formatCommand = "rustfmt --emit=stdout",
   formatStdin = true,
@@ -52,6 +63,7 @@ local languages = {
   json = { jq },
   lua = { stylua },
   markdown = { prettier },
+  python = { ruff },
   rust = { rustfmt },
   terraform = { terraformfmt },
   typescript = { prettier },

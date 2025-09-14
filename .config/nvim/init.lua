@@ -872,6 +872,7 @@ vim.lsp.enable({
   "helm_ls",
   "lua_ls",
   "marksman",
+  "pyright",
   "terraformls",
   "ts_ls",
   "yamlls",
