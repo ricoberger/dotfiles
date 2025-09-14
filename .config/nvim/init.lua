@@ -355,6 +355,14 @@ vim.keymap.set("n", "<leader>ey", function()
 end)
 vim.keymap.set("n", "<leader>ew", "<cmd>write ++p<cr>")
 vim.keymap.set("n", "<leader>eW", "<cmd>noautocmd write ++p<cr>")
+vim.keymap.set("n", "<leader>eg", function()
+  local dot_git_path = vim.fn.finddir(".git", ".;")
+  if dot_git_path == "" then
+    return nil
+  end
+
+  vim.api.nvim_set_current_dir(vim.fn.fnamemodify(dot_git_path, ":p:h:h"))
+end)
 
 --------------------------------------------------------------------------------
 -- FIND FILES
