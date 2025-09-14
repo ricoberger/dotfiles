@@ -705,6 +705,44 @@ vim.keymap.set("n", "Q", "V/\\%V\\V<c-r>w<cr><esc>")
 vim.keymap.set({ "n", "v" }, "<c-q>", ":g/\\V<c-r>w/normal! @q<cr>")
 
 --------------------------------------------------------------------------------
+-- PROJECT MANAGEMENT
+--------------------------------------------------------------------------------
+
+-- Simple session management. Sessions are stored in the "data" directory of
+-- Neovim in a subdirectory called "sessions". The name of the session is the
+-- name of the directory which contains the ".git" directory.
+vim.keymap.set("n", "<leader>pss", function()
+  local dot_git_path = vim.fn.finddir(".git", ".;")
+  if dot_git_path == "" then
+    return nil
+  end
+
+  local sessionname = vim.fn.fnamemodify(dot_git_path, ":p:h:h:t")
+  local filename = vim.fn.stdpath("data") .. "/sessions/" .. sessionname
+
+  vim.fn.mkdir(vim.fn.stdpath("data") .. "/sessions", "p")
+  vim.api.nvim_command("mksession! " .. filename)
+  vim.notify("Session saved to " .. filename, vim.log.levels.INFO)
+end)
+vim.keymap.set("n", "<leader>psl", function()
+  local dot_git_path = vim.fn.finddir(".git", ".;")
+  if dot_git_path == "" then
+    return nil
+  end
+
+  local sessionname = vim.fn.fnamemodify(dot_git_path, ":p:h:h:t")
+  local filename = vim.fn.stdpath("data") .. "/sessions/" .. sessionname
+
+  if vim.fn.filereadable(filename) == 0 then
+    vim.notify("No session found", vim.log.levels.WARN)
+    return
+  end
+
+  vim.api.nvim_command("silent source " .. filename)
+  vim.notify("Session loaded from " .. filename, vim.log.levels.INFO)
+end)
+
+--------------------------------------------------------------------------------
 -- COLORSCHEME
 --------------------------------------------------------------------------------
 
