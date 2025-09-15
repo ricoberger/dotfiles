@@ -258,6 +258,8 @@ vim.keymap.set("v", "gs>", "<esc>`>a><esc>`<i<<esc>")
 vim.keymap.set("v", 'gs"', '<esc>`>a"<esc>`<i"<esc>')
 vim.keymap.set("v", "gs'", "<esc>`>a'<esc>`<i'<esc>")
 vim.keymap.set("v", "gs`", "<esc>`>a`<esc>`<i`<esc>")
+vim.keymap.set("v", "gs*", "<esc>`>a*<esc>`<i*<esc>")
+vim.keymap.set("v", "gs_", "<esc>`>a_<esc>`<i_<esc>")
 
 --------------------------------------------------------------------------------
 -- COMMAND LINE
