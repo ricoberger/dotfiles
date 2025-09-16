@@ -1307,11 +1307,13 @@ vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile" }, {
 -- AI
 --------------------------------------------------------------------------------
 
+vim.keymap.set({ "n", "v" }, "<leader>cc", ":CopilotChat ")
 vim.keymap.set("n", "<leader>co", "<cmd>CopilotChatOpen<cr>")
-vim.keymap.set("n", "<leader>cc", "<cmd>CopilotChatClose<cr>")
+vim.keymap.set("n", "<leader>cq", "<cmd>CopilotChatClose<cr>")
 vim.keymap.set("n", "<leader>ct", "<cmd>CopilotChatToggle<cr>")
 vim.keymap.set("n", "<leader>cs", "<cmd>CopilotChatStop<cr>")
 vim.keymap.set("n", "<leader>cr", "<cmd>CopilotChatReset<cr>")
+vim.keymap.set({ "n", "v" }, "<leader>cp", "<cmd>CopilotChatPrompts<cr>")
 
 -- Lazy load the CopilotChat plugin, when a keymap from above or a command
 -- starting with "CopilotChat" is used.
@@ -1335,6 +1337,10 @@ vim.api.nvim_create_autocmd("CmdUndefined", {
     require("CopilotChat").setup({
       model = "claude-3.7-sonnet",
       agent = "copilot",
+      sticky = {
+        "@copilot",
+        "#file:.github/copilot-instructions.md",
+      },
     })
   end,
   once = true,
