@@ -121,8 +121,10 @@ vim.opt.diffopt = {
   "closeoff",
   "context:12",
   "algorithm:histogram",
-  "linematch:200",
   "indent-heuristic",
+  -- See https://www.reddit.com/r/neovim/comments/1k24zgk/comment/moj5kxj/
+  -- "linematch:200",
+  "inline:char",
 }
 
 -- Enable strikethrough.
