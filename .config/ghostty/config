@@ -1,5 +1,5 @@
 # Theme
-theme = catppuccin-macchiato
+theme = "Catppuccin Macchiato"
 font-family = "Cascadia Mono NF"
 font-synthetic-style = false
 font-size = 12
@@ -22,6 +22,8 @@ confirm-close-surface = true
 macos-option-as-alt = true
 clipboard-paste-protection = false
 clipboard-paste-bracketed-safe = true
+quick-terminal-size = 50%,50%
+quick-terminal-position = center
 
 # Keybindings
 keybind = clear
@@ -89,6 +91,7 @@ keybind = super+shift+home=adjust_selection:home
 
 keybind = global:super+#=toggle_quick_terminal
 keybind = global:super+'=toggle_quick_terminal
+keybind = super+shift+p=toggle_command_palette
 
 # The following keybindings are required to make "Option / Alt + j" and
 # "Option / Alt + k" work as expected on macOS. They are not required when
