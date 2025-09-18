@@ -108,10 +108,9 @@ vim.opt.winborder = "none"
 -- Folding
 vim.opt.foldcolumn = "0"
 vim.opt.foldenable = true
-vim.opt.foldexpr = "v:lua.vim.treesitter.foldexpr()"
 vim.opt.foldlevel = 99
 vim.opt.foldlevelstart = 99
-vim.opt.foldmethod = "expr"
+vim.opt.foldmethod = "syntax"
 vim.opt.foldtext = ""
 
 -- Better diff experience in Neovim.
@@ -806,66 +805,89 @@ vim.pack.add({
   {
     src = "https://github.com/nvim-treesitter/nvim-treesitter",
     name = "nvim-treesitter",
-    version = "master",
+    version = "main",
   },
 }, { load = true })
 
-require("nvim-treesitter.configs").setup({
-  ensure_installed = {
-    "bash",
-    "css",
-    "dart",
-    "diff",
-    "go",
-    "helm",
-    "html",
-    "javascript",
-    "json",
-    "lua",
-    "markdown",
-    "markdown_inline",
-    "rust",
-    "terraform",
-    "tsx",
-    "typescript",
-    "yaml",
-  },
-  auto_install = true,
-  highlight = {
-    enable = true,
-    additional_vim_regex_highlighting = false,
-    -- Disable treesitter for files larger than 1 MB
-    disable = function(_, buf)
-      local max_filesize = 1 * 1024 * 1024
-      local ok, stats = pcall(vim.loop.fs_stat, vim.api.nvim_buf_get_name(buf))
-      if ok and stats and stats.size > max_filesize then
-        return true
-      end
-    end,
-  },
-  indent = {
-    enable = true,
-    disable = {
-      "dart",
-      "yaml",
-    },
-  },
+require("nvim-treesitter").setup({
+  install_dir = vim.fn.stdpath("data") .. "/site",
 })
 
+local ts_parsers = {
+  "bash",
+  "css",
+  "dart",
+  "diff",
+  "dockerfile",
+  "git_config",
+  "git_rebase",
+  "gitattributes",
+  "gitcommit",
+  "gitignore",
+  "go",
+  "gomod",
+  "gosum",
+  "helm",
+  "html",
+  "javascript",
+  "json",
+  "lua",
+  "make",
+  "markdown",
+  "markdown_inline",
+  "python",
+  "rust",
+  "sql",
+  "terraform",
+  "toml",
+  "tsx",
+  "typescript",
+  "vim",
+  "yaml",
+  "zig",
+}
+
+local ts = require("nvim-treesitter")
+ts.install(ts_parsers)
+
+-- Update treesitter parsers / queries with plugin updates.
 vim.api.nvim_create_autocmd("PackChanged", {
   group = vim.api.nvim_create_augroup(
     "nvim-treesitter-pack-update-handler",
     { clear = true }
   ),
   callback = function(event)
-    if event.data.kind == "update" then
-      vim.notify("Running TSUpdate...", vim.log.levels.INFO)
-      local ok = pcall(vim.cmd, "TSUpdate")
-      if ok then
-        vim.notify("TSUpdate completed", vim.log.levels.INFO)
-      else
-        vim.notify("TSUpdate skipped", vim.log.levels.WARN)
+    local spec = event.data.spec
+    if
+      spec
+      and spec.name == "nvim-treesitter"
+      and event.data.kind == "update"
+    then
+      vim.schedule(function()
+        ts.update()
+      end)
+    end
+  end,
+})
+
+-- Enable treesitter highlighting and indents.
+vim.api.nvim_create_autocmd("FileType", {
+  group = vim.api.nvim_create_augroup(
+    "nvim-treesitter-enable-highlighting-and-indents-handler",
+    { clear = true }
+  ),
+  callback = function(event)
+    local filetype = event.match
+    local lang = vim.treesitter.language.get_lang(filetype)
+    if vim.treesitter.language.add(lang) then
+      if vim.treesitter.query.get(filetype, "indents") then
+        vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
       end
+      if vim.treesitter.query.get(filetype, "folds") then
+        vim.wo.foldexpr = "v:lua.vim.treesitter.foldexpr()"
+        vim.wo.foldmethod = "expr"
+      end
+      vim.treesitter.start()
     end
   end,
 })
