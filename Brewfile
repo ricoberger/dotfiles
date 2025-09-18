@@ -8,9 +8,8 @@ cask "ghostty"
 brew "deno"
 brew "go"
 # After node was installed we have to link it and we have to install yarn:
-#   brew link --force --overwrite node@20
-#   npm install --global yarn
-brew "node@20"
+#   brew link --force --overwrite node@22
+brew "node@22"
 
 # Language Servers and Linters
 brew "efm-langserver"
