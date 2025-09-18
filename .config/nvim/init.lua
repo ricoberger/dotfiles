@@ -1271,6 +1271,28 @@ vim.api.nvim_create_user_command("GitDiff", function(opts)
   gitsigns.setqflist("all")
 end, { nargs = "*" })
 
+-- The "GitMerge" command populates the quickfix list with all merge conflicts
+-- in the current repository.
+--
+-- See: https://github.com/git/git/blob/215033b3ac599432a17d58f18a92b356d98354a9/contrib/git-jump/git-jump#L59
+vim.api.nvim_create_user_command("GitMerge", function()
+  local qflist = {}
+  local files = vim.fn.systemlist(
+    "git ls-files -u | perl -pe 's/^.*?\t//' | sort -u | while IFS= read fn; do grep -Hn '^<<<<<<<' \"$fn\"; done"
+  )
+
+  for _, file in pairs(files) do
+    local parts = vim.fn.split(file, ":")
+    table.insert(
+      qflist,
+      { filename = parts[1], lnum = parts[2], text = parts[3] }
+    )
+  end
+
+  vim.fn.setqflist({}, " ", { title = "Merge conflicts", items = qflist })
+  vim.cmd.copen()
+end, { nargs = "*" })
+
 --------------------------------------------------------------------------------
 -- MULTICURSOR
 --------------------------------------------------------------------------------
