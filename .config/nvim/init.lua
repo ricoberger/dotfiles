@@ -754,10 +754,12 @@ end)
 -- Use the built-in plugin manager to install the Catppuccin theme
 --
 -- See: https://neovim.io/doc/user/pack.html#_plugin-manager
+-- To update all plugins run ":lua vim.pack.update()"
 vim.pack.add({
   {
     src = "https://github.com/catppuccin/nvim",
     name = "catppuccin",
+    version = "main",
   },
 }, { load = true })
 
@@ -804,6 +806,7 @@ vim.pack.add({
   {
     src = "https://github.com/nvim-treesitter/nvim-treesitter",
     name = "nvim-treesitter",
+    version = "master",
   },
 }, { load = true })
 
@@ -879,6 +882,7 @@ vim.pack.add({
   {
     src = "https://github.com/qvalentin/helm-ls.nvim",
     name = "helm-ls",
+    version = "main",
   },
 }, { load = true })
 
@@ -1052,6 +1056,7 @@ vim.pack.add({
   {
     src = "https://github.com/nvim-lualine/lualine.nvim",
     name = "lualine",
+    version = "master",
   },
 }, { load = true })
 
@@ -1125,6 +1130,7 @@ vim.pack.add({
   {
     src = "https://github.com/lewis6991/gitsigns.nvim",
     name = "gitsigns",
+    version = "main",
   },
 }, { load = true })
 
@@ -1259,6 +1265,7 @@ vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile" }, {
       {
         src = "https://github.com/jake-stewart/multicursor.nvim",
         name = "multicursor",
+        version = "main",
       },
     }, { load = true })
 
@@ -1327,10 +1334,12 @@ vim.api.nvim_create_autocmd("CmdUndefined", {
     vim.pack.add({
       {
         src = "https://github.com/nvim-lua/plenary.nvim",
+        version = "master",
       },
       {
         src = "https://github.com/CopilotC-Nvim/CopilotChat.nvim",
         name = "CopilotChat",
+        version = "main",
       },
     }, { load = true })
 
