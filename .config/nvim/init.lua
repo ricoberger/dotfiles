@@ -373,7 +373,7 @@ end)
 --------------------------------------------------------------------------------
 
 local findCommand =
-  "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules"
+  "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store"
 
 -- If "fd" is installed we use it to find files with the "find" command.
 -- Together with the "matchfuzzy()" function this should replace any external
@@ -381,10 +381,10 @@ local findCommand =
 --
 -- Maybe we can also use "fzf" in the future if the results returned by the
 -- "matchfuzzy()" function are not satisfying, e.g.
--- "return vim.fn.systemlist( "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules | fzf --filter='" .. cmdarg .. "'")"
+-- "return vim.fn.systemlist( "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store | fzf --filter='" .. cmdarg .. "'")"
 --
 -- If we do not want to use "fd" we can also use "rg", which we will also use
--- for searching through files: "rg --files --hidden --color=never --glob='!.git' --glob='!node_modules'"
+-- for searching through files: "rg --files --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
 if vim.fn.executable("fd") == 1 then
   function _G.fd_find_files(cmdarg, _)
     local fnames = vim.fn.systemlist(findCommand)
@@ -513,7 +513,7 @@ vim.keymap.set("n", "<leader>fm", "<cmd>Marks<cr>")
 -- "grep" command.
 if vim.fn.executable("rg") == 1 then
   vim.opt.grepprg =
-    "rg --vimgrep --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules'"
+    "rg --vimgrep --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
   vim.opt.grepformat = "%f:%l:%c:%m"
 end
 
