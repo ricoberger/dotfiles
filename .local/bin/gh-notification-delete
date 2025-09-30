@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -e
+
+notification=$(gh api notifications --jq '.[] | "\(.id) \(.repository.owner.login)/\(.repository.name) \(.subject.title)"' | fzf)
+notification_id=$(cut -d ' ' -f 1 <<< "$notification")
+
+gh api -X DELETE notifications/threads/$notification_id
