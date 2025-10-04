@@ -298,7 +298,7 @@ vim.api.nvim_create_autocmd({ "CmdlineChanged", "CmdlineLeave" }, {
 })
 
 -- Better navigation of the command line wildmenu using the arrow keys. Also
--- "Enter: doesn't execute the command, but instead accepts the currently
+-- Enter: doesn't execute the command, but instead accepts the currently
 -- selected item in the wildmenu.
 function _G.get_wildmenu_key(key_wildmenu, key_regular)
   return vim.fn.wildmenumode() ~= 0 and key_wildmenu or key_regular
@@ -1358,43 +1358,83 @@ vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile" }, {
 -- AI
 --------------------------------------------------------------------------------
 
-vim.keymap.set({ "n", "v" }, "<leader>cc", ":CopilotChat ")
-vim.keymap.set("n", "<leader>co", "<cmd>CopilotChatOpen<cr>")
-vim.keymap.set("n", "<leader>cq", "<cmd>CopilotChatClose<cr>")
-vim.keymap.set("n", "<leader>ct", "<cmd>CopilotChatToggle<cr>")
-vim.keymap.set("n", "<leader>cs", "<cmd>CopilotChatStop<cr>")
-vim.keymap.set("n", "<leader>cr", "<cmd>CopilotChatReset<cr>")
-vim.keymap.set({ "n", "v" }, "<leader>cp", "<cmd>CopilotChatPrompts<cr>")
+vim.pack.add({
+  {
+    src = "https://github.com/folke/sidekick.nvim",
+    name = "sidekick",
+    version = "main",
+  },
+}, { load = true })
 
--- Lazy load the CopilotChat plugin, when a keymap from above or a command
--- starting with "CopilotChat" is used.
-vim.api.nvim_create_autocmd("CmdUndefined", {
-  group = vim.api.nvim_create_augroup(
-    "lazy-load-copilotchat",
-    { clear = true }
-  ),
-  pattern = { "CopilotChat*" },
-  callback = function()
-    vim.pack.add({
-      {
-        src = "https://github.com/nvim-lua/plenary.nvim",
-        version = "master",
+-- Setup sidekick.nvim for next edit suggestions and AI chat. The next edit
+-- suggestions are integrated with the GitHub Copilot LSP server. The AI chat
+-- uses the GitHub Copilot CLI tool as backend.
+require("sidekick").setup({
+  nes = {
+    diff = {
+      inline = "chars",
+    },
+  },
+  cli = {
+    win = {
+      keys = {
+        stopinsert = { "<esc><esc>", "stopinsert", mode = "t" },
+        hide_n = { "q", "hide", mode = "n" },
+        hide_t = { "<c-q>", "hide" },
+        win_p = { "<c-w>p", "blur" },
+        blur = { "<c-o>", "blur" },
+        prompt = { "<c-p>", "prompt" },
       },
-      {
-        src = "https://github.com/CopilotC-Nvim/CopilotChat.nvim",
-        name = "CopilotChat",
-        version = "main",
+    },
+    mux = {
+      backend = "tmux",
+      enabled = false,
+    },
+    tools = {
+      copilot = {
+        cmd = { "copilot", "--banner" },
+        url = "https://github.com/github/copilot-cli",
       },
-    }, { load = true })
-
-    require("CopilotChat").setup({
-      model = "claude-3.7-sonnet",
-      agent = "copilot",
-      sticky = {
-        "@copilot",
-        "#file:.github/copilot-instructions.md",
-      },
-    })
-  end,
-  once = true,
+    },
+  },
 })
+
+-- Create a command "AskAI" which prompts the user for input and then sends the
+-- input to the AI chat provided by sidekick.nvim.
+vim.api.nvim_create_user_command("AskAI", function()
+  vim.ui.input({ prompt = "Ask AI: " }, function(input)
+    if input and input ~= "" then
+      require("sidekick.cli").send({
+        msg = input,
+        name = "copilot",
+        submit = true,
+      })
+    end
+  end)
+end, {})
+
+-- Use Tab to jump to the next edit suggestion and to to apply it. If there is
+-- no suggestion available Tab works as normal.
+vim.keymap.set({ "i", "n" }, "<tab>", function()
+  if require("sidekick").nes_jump_or_apply() then
+    return
+  end
+
+  if vim.lsp.inline_completion.get() then
+    return
+  end
+
+  return "<tab>"
+end, { expr = true })
+
+-- Add Keymaps for AI chat related actions. The "Space + aa" can be used to ask
+-- the AI a question. The "Space + at" keymap toggles the AI chat window and
+-- focuses it. The "Space + ap" keymap can be used to select a predifined
+-- prompt.
+vim.keymap.set({ "n", "v" }, "<leader>aa", "<cmd>AskAI<cr>")
+vim.keymap.set({ "n", "v" }, "<leader>at", function()
+  require("sidekick.cli").toggle({ name = "copilot", focus = true })
+end)
+vim.keymap.set({ "n", "v" }, "<leader>ap", function()
+  require("sidekick.cli").prompt()
+end)
