@@ -1,0 +1,39 @@
+{
+  "plugins": {
+    "catppuccin": {
+      "rev": "e79d09f",
+      "src": "https://github.com/catppuccin/nvim",
+      "version": "'main'"
+    },
+    "gitsigns": {
+      "rev": "1ee5c1f",
+      "src": "https://github.com/lewis6991/gitsigns.nvim",
+      "version": "'main'"
+    },
+    "helm-ls": {
+      "rev": "f36ecbd",
+      "src": "https://github.com/qvalentin/helm-ls.nvim",
+      "version": "'main'"
+    },
+    "lualine": {
+      "rev": "b8c2315",
+      "src": "https://github.com/nvim-lualine/lualine.nvim",
+      "version": "'master'"
+    },
+    "multicursor": {
+      "rev": "0c6ceae",
+      "src": "https://github.com/jake-stewart/multicursor.nvim",
+      "version": "'main'"
+    },
+    "nvim-treesitter": {
+      "rev": "01ced749",
+      "src": "https://github.com/nvim-treesitter/nvim-treesitter",
+      "version": "'main'"
+    },
+    "sidekick": {
+      "rev": "e869205",
+      "src": "https://github.com/folke/sidekick.nvim",
+      "version": "'main'"
+    }
+  }
+}
