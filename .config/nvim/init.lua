@@ -490,6 +490,9 @@ vim.api.nvim_create_user_command("Marks", function()
   vim.cmd.copen()
 end, { nargs = "*" })
 
+-- Undotree
+vim.cmd([[packadd nvim.undotree]])
+
 -- Add keymaps for all find related operations. This includes finding files via
 -- the "find" and "Find" command (workspace or directory of the current file),
 -- finding recent files, finding buffers and finding marks.
@@ -504,6 +507,7 @@ end, { expr = true })
 vim.keymap.set("n", "<leader>fr", "<cmd>FindRecent<cr>")
 vim.keymap.set("n", "<leader>fb", ":buffer<space>")
 vim.keymap.set("n", "<leader>fm", "<cmd>Marks<cr>")
+vim.keymap.set("n", "<leader>fu", "<cmd>Undotree<cr>")
 
 --------------------------------------------------------------------------------
 -- SEARCH THROUGH FILES
