@@ -431,7 +431,7 @@ end, {
       args = table.concat(vim.fn.split(cmdline, " "), " ", 2)
     end
 
-    local files = vim.fn.systemlist(findCommand .. args)
+    local files = vim.fn.systemlist(findCommand .. " " .. args)
     return files
   end,
   nargs = "*",
