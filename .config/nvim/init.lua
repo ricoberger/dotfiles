@@ -103,7 +103,6 @@ vim.opt.undolevels = 10000
 vim.opt.updatetime = 200 -- Save swap file and trigger CursorHold
 vim.opt.wrap = false -- Disable line wrap
 vim.opt.wildignore = vim.opt.wildignore + ".DS_Store"
-vim.opt.winborder = "none"
 
 -- Folding
 vim.opt.foldcolumn = "0"
@@ -798,6 +797,15 @@ require("catppuccin").setup({
 })
 
 vim.cmd.colorscheme("catppuccin")
+
+-- Set borders for floating windows, popup menus and the command line completion
+-- menu. Also set a custom background color for the popup menu and a border
+-- color.
+vim.opt.winborder = "single"
+vim.opt.pumborder = "single"
+
+vim.api.nvim_set_hl(0, "Pmenu", { bg = "#1e2030" })
+vim.api.nvim_set_hl(0, "PmenuBorder", { bg = "#1e2030", fg = "#8aadf4" })
 
 --------------------------------------------------------------------------------
 -- TREESITTER
