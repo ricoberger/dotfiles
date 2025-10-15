@@ -1305,6 +1305,14 @@ vim.api.nvim_create_user_command("GitMerge", function()
   vim.cmd.copen()
 end, { nargs = "*" })
 
+-- DiffTool is the newly built-in diff tool of Neovim. It can be used as
+-- replacement for our custom ":GitDiff" command.
+--
+-- DiffTool is configured as "git difftool" and can be used as follows:
+--   - git difftool -d
+--   - git difftool -d origin/HEAD...HEAD
+vim.cmd([[packadd nvim.difftool]])
+
 --------------------------------------------------------------------------------
 -- MULTICURSOR
 --------------------------------------------------------------------------------

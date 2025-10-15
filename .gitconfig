@@ -33,7 +33,8 @@
 [difftool]
   prompt = true
 [difftool "nvimdiff"]
-  cmd = "nvim -d \"$LOCAL\" \"$REMOTE\""
+  ; cmd = "nvim -d \"$LOCAL\" \"$REMOTE\""
+  cmd = "nvim -c \"DiffTool $LOCAL $REMOTE\""
 
 [merge]
 	tool = nvimmerge

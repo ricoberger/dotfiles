@@ -55,7 +55,7 @@ keybindings:
     - name: diff (nvim)
       key: D
       command: |
-        cd {{.RepoPath}} && git checkout {{.BaseRefName}} && git pull && gh pr checkout {{.PrNumber}} && nvim -c ":GitDiff {{.BaseRefName}} {{.HeadRefName}}"
+        cd {{.RepoPath}} && git checkout {{.BaseRefName}} && git pull && gh pr checkout {{.PrNumber}} && git difftool -d origin/HEAD...HEAD
     - name: merge (admin)
       key: M
       command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
