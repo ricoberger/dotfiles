@@ -1440,10 +1440,6 @@ vim.keymap.set({ "i", "n" }, "<tab>", function()
     return
   end
 
-  if vim.lsp.inline_completion.get() then
-    return
-  end
-
   return "<tab>"
 end, { expr = true })
 
