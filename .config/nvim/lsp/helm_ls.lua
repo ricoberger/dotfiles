@@ -24,7 +24,10 @@ return {
           hover = true,
           validate = true,
           schemas = {
-            kubernetes = "templates/**",
+            kubernetes = {
+              "/charts/**/*.yml",
+              "/charts/**/*.yaml",
+            },
           },
           schemaStore = {
             enable = false,
