@@ -325,7 +325,8 @@ vim.api.nvim_set_keymap(
 -- Change the command in the command line. This can be used together with the
 -- fuzzy finder and file explorer keymaps above.
 vim.keymap.set("c", "<m-e>", "<home><s-right><c-w>edit<end>")
-vim.keymap.set("c", "<m-f>", "<home><s-right><c-w>Find<end>")
+vim.keymap.set("c", "<m-f>", "<home><s-right><c-w>find<end>")
+vim.keymap.set("c", "<m-F>", "<home><s-right><c-w>Find<end>")
 vim.keymap.set("c", "<m-v>", "<home><s-right><c-w>vsplit<end>")
 vim.keymap.set("c", "<m-s>", "<home><s-right><c-w>split<end>")
 vim.keymap.set("c", "<m-t>", "<home><s-right><c-w>tabedit<end>")
