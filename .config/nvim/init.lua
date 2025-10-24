@@ -765,7 +765,7 @@ vim.pack.add({
     name = "catppuccin",
     version = "main",
   },
-}, { load = true })
+}, { confirm = false, load = true })
 
 -- Setup the Catppuccin theme, by disabling all default integrations and only
 -- activating the integrations we are really using.
@@ -821,7 +821,7 @@ vim.pack.add({
     name = "nvim-treesitter",
     version = "main",
   },
-}, { load = true })
+}, { confirm = false, load = true })
 
 require("nvim-treesitter").setup({
   install_dir = vim.fn.stdpath("data") .. "/site",
@@ -920,7 +920,7 @@ vim.pack.add({
     name = "helm-ls",
     version = "main",
   },
-}, { load = true })
+}, { confirm = false, load = true })
 
 require("helm-ls").setup({
   conceal_templates = {
@@ -1094,7 +1094,7 @@ vim.pack.add({
     name = "lualine",
     version = "master",
   },
-}, { load = true })
+}, { confirm = false, load = true })
 
 require("lualine").setup({
   options = {
@@ -1168,7 +1168,7 @@ vim.pack.add({
     name = "gitsigns",
     version = "main",
   },
-}, { load = true })
+}, { confirm = false, load = true })
 
 require("gitsigns").setup({
   signs = {
@@ -1333,7 +1333,7 @@ vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile" }, {
         name = "multicursor",
         version = "main",
       },
-    }, { load = true })
+    }, { confirm = false, load = true })
 
     local mc = require("multicursor-nvim")
     mc.setup()
@@ -1386,7 +1386,7 @@ vim.pack.add({
     name = "sidekick",
     version = "main",
   },
-}, { load = true })
+}, { confirm = false, load = true })
 
 -- Setup sidekick.nvim for next edit suggestions and AI chat. The next edit
 -- suggestions are integrated with the GitHub Copilot LSP server. The AI chat
