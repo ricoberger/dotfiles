@@ -282,7 +282,7 @@ vim.api.nvim_create_autocmd({ "CmdlineChanged", "CmdlineLeave" }, {
         or cmdline_cmd == "Find"
         or cmdline_cmd == "buffer"
         or cmdline_cmd == "edit"
-        or cmdline_cmd == "QuickfixFilter"
+        or cmdline_cmd == "QuickFixFilter"
     end
 
     if ev.event == "CmdlineChanged" and should_enable_autocomplete() then
@@ -466,7 +466,7 @@ end, { nargs = "*" })
 
 -- Find all marks in the current working directory and show them in the quickfix
 -- list.
-vim.api.nvim_create_user_command("Marks", function()
+vim.api.nvim_create_user_command("FindMarks", function()
   local qflist = {}
   local cwd = vim.pesc(vim.uv.cwd() .. "/")
 
@@ -507,7 +507,7 @@ vim.keymap.set("n", "<leader>fC", function()
 end, { expr = true })
 vim.keymap.set("n", "<leader>fr", "<cmd>FindRecent<cr>")
 vim.keymap.set("n", "<leader>fb", ":buffer<space>")
-vim.keymap.set("n", "<leader>fm", "<cmd>Marks<cr>")
+vim.keymap.set("n", "<leader>fm", "<cmd>FindMarks<cr>")
 vim.keymap.set("n", "<leader>fu", "<cmd>Undotree<cr>")
 
 --------------------------------------------------------------------------------
@@ -652,7 +652,7 @@ vim.api.nvim_create_autocmd("QuickFixCmdPost", {
 --
 -- This can be used to first search for a term using "<leader>ss" and then
 -- filter the results by their filename using "<leader>qf".
-vim.api.nvim_create_user_command("QuickfixFilter", function(opts)
+vim.api.nvim_create_user_command("QuickFixFilter", function(opts)
   local title = vim.fn.getqflist({ title = 1 })
 
   vim.notify(opts.args, vim.log.levels.INFO)
@@ -689,7 +689,7 @@ vim.keymap.set("n", "<leader>qc", "<cmd>cclose<cr>")
 vim.keymap.set("n", "<leader>qh", "<cmd>chistory<cr>")
 vim.keymap.set("n", "<leader>qn", "<cmd>cnewer<cr>")
 vim.keymap.set("n", "<leader>qp", "<cmd>colder<cr>")
-vim.keymap.set("n", "<leader>qf", ":QuickfixFilter ")
+vim.keymap.set("n", "<leader>qf", ":QuickFixFilter ")
 vim.keymap.set("n", "<leader>q1", "<cmd>1chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q2", "<cmd>2chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q3", "<cmd>3chistory<cr> <bar> <cmd>copen<cr>")
@@ -699,57 +699,6 @@ vim.keymap.set("n", "<leader>q6", "<cmd>6chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q7", "<cmd>7chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q8", "<cmd>8chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q9", "<cmd>9chistory<cr> <bar> <cmd>copen<cr>")
-
---------------------------------------------------------------------------------
--- MACROS
---------------------------------------------------------------------------------
-
--- Select a pattern and press "Q" + "Q" to record a macro into register "q",
--- starting from the selected pattern. Once the macro is recorded, press "q" to
--- stop the recording. The macro can then be replayed using "<c-q>". If
--- nothing is selected the macro is replayed for the whole file, otherwise it is
--- only replayed for the selected lines.
-vim.keymap.set("v", "Q", '"wyqq')
-vim.keymap.set("n", "Q", "V/\\%V\\V<c-r>w<cr><esc>")
-vim.keymap.set({ "n", "v" }, "<c-q>", ":g/\\V<c-r>w/normal! @q<cr>")
-
---------------------------------------------------------------------------------
--- PROJECT MANAGEMENT
---------------------------------------------------------------------------------
-
--- Simple session management. Sessions are stored in the "data" directory of
--- Neovim in a subdirectory called "sessions". The name of the session is the
--- name of the directory which contains the ".git" directory.
-vim.keymap.set("n", "<leader>pss", function()
-  local dot_git_path = vim.fn.finddir(".git", ".;")
-  if dot_git_path == "" then
-    return nil
-  end
-
-  local sessionname = vim.fn.fnamemodify(dot_git_path, ":p:h:h:t")
-  local filename = vim.fn.stdpath("data") .. "/sessions/" .. sessionname
-
-  vim.fn.mkdir(vim.fn.stdpath("data") .. "/sessions", "p")
-  vim.api.nvim_command("mksession! " .. filename)
-  vim.notify("Session saved to " .. filename, vim.log.levels.INFO)
-end)
-vim.keymap.set("n", "<leader>psl", function()
-  local dot_git_path = vim.fn.finddir(".git", ".;")
-  if dot_git_path == "" then
-    return nil
-  end
-
-  local sessionname = vim.fn.fnamemodify(dot_git_path, ":p:h:h:t")
-  local filename = vim.fn.stdpath("data") .. "/sessions/" .. sessionname
-
-  if vim.fn.filereadable(filename) == 0 then
-    vim.notify("No session found", vim.log.levels.WARN)
-    return
-  end
-
-  vim.api.nvim_command("silent source " .. filename)
-  vim.notify("Session loaded from " .. filename, vim.log.levels.INFO)
-end)
 
 --------------------------------------------------------------------------------
 -- COLORSCHEME
