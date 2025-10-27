@@ -48,7 +48,6 @@ keybind = super+physical:six=goto_tab:6
 keybind = super+physical:seven=goto_tab:7
 keybind = super+physical:eight=goto_tab:8
 keybind = super+physical:nine=goto_tab:9
-keybind = super+physical:zero=last_tab
 
 keybind = super+d=new_split:right
 keybind = super+shift+d=new_split:down
