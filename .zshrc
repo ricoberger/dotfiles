@@ -112,6 +112,7 @@ alias y='yazi'
 ################################################################################
 
 killport() { lsof -i :$1 | awk '{print $2}' | tail -n 1 | xargs kill; }
+kubeconfigmerge() { KUBECONFIG=$(for f in `fd --full-path --hidden --color never --type f -e yaml "" "${HOME}/Documents/kubeconfig/"`; do echo -n "${f}:"; done;) kubectl config view --merge --flatten > ~/.kube/config }
 listtargz() { tar -ztvf $1; }
 trash() { mv $@ ~/.Trash }
 ts() { tmux attach -t main || tmux new -s main; }
