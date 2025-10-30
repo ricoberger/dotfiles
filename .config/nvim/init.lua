@@ -464,33 +464,6 @@ vim.api.nvim_create_user_command("FindRecent", function()
   vim.cmd.copen()
 end, { nargs = "*" })
 
--- Find all marks in the current working directory and show them in the quickfix
--- list.
-vim.api.nvim_create_user_command("FindMarks", function()
-  local qflist = {}
-  local cwd = vim.pesc(vim.uv.cwd() .. "/")
-
-  for idx = vim.fn.char2nr("A"), vim.fn.char2nr("Z") do
-    local letter = vim.fn.nr2char(idx)
-    local mark = vim.api.nvim_get_mark(letter, {})
-    local filename = vim.fn.fnamemodify(mark[4], ":p")
-
-    if filename:sub(1, #cwd) == cwd then
-      filename = (filename:gsub("^" .. cwd, ""))
-
-      if filename ~= "" then
-        table.insert(
-          qflist,
-          { filename = filename, lnum = mark[1], col = mark[2], text = letter }
-        )
-      end
-    end
-  end
-
-  vim.fn.setqflist({}, " ", { title = "Marks", items = qflist })
-  vim.cmd.copen()
-end, { nargs = "*" })
-
 -- Undotree
 vim.cmd([[packadd nvim.undotree]])
 
@@ -507,7 +480,6 @@ vim.keymap.set("n", "<leader>fC", function()
 end, { expr = true })
 vim.keymap.set("n", "<leader>fr", "<cmd>FindRecent<cr>")
 vim.keymap.set("n", "<leader>fb", ":buffer<space>")
-vim.keymap.set("n", "<leader>fm", "<cmd>FindMarks<cr>")
 vim.keymap.set("n", "<leader>fu", "<cmd>Undotree<cr>")
 
 --------------------------------------------------------------------------------
@@ -699,6 +671,19 @@ vim.keymap.set("n", "<leader>q6", "<cmd>6chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q7", "<cmd>7chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q8", "<cmd>8chistory<cr> <bar> <cmd>copen<cr>")
 vim.keymap.set("n", "<leader>q9", "<cmd>9chistory<cr> <bar> <cmd>copen<cr>")
+
+--------------------------------------------------------------------------------
+-- MACROS
+--------------------------------------------------------------------------------
+
+-- Select a pattern and press "Q" + "Q" to record a macro into register "q",
+-- starting from the selected pattern. Once the macro is recorded, press "q" to
+-- stop the recording. The macro can then be replayed using "<c-q>". If
+-- nothing is selected the macro is replayed for the whole file, otherwise it is
+-- only replayed for the selected lines.
+vim.keymap.set("v", "Q", '"wyqq')
+vim.keymap.set("n", "Q", "V/\\%V\\V<c-r>w<cr><esc>")
+vim.keymap.set({ "n", "v" }, "<c-q>", ":g/\\V<c-r>w/normal! @q<cr>")
 
 --------------------------------------------------------------------------------
 -- COLORSCHEME
