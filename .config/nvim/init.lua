@@ -74,7 +74,6 @@ vim.opt.ignorecase = true -- Ignore case
 vim.opt.inccommand = "split" -- Show live preview of substitution
 vim.opt.laststatus = 3 -- global statusline
 vim.opt.list = true -- Show some invisible characters
-vim.opt.listchars = { tab = "│ ", leadmultispace = "│ " } -- Set characters for invisible characters
 vim.opt.mouse = "a" -- Enable mouse mode
 vim.opt.number = true -- Print line number
 vim.opt.relativenumber = true -- Relative line numbers
@@ -279,10 +278,7 @@ vim.api.nvim_create_autocmd({ "CmdlineChanged", "CmdlineLeave" }, {
       return cmdline_cmd == "help"
         or cmdline_cmd == "h"
         or cmdline_cmd == "find"
-        or cmdline_cmd == "Find"
         or cmdline_cmd == "buffer"
-        or cmdline_cmd == "edit"
-        or cmdline_cmd == "QuickFixFilter"
     end
 
     if ev.event == "CmdlineChanged" and should_enable_autocomplete() then
@@ -322,58 +318,426 @@ vim.api.nvim_set_keymap(
   { expr = true }
 )
 
--- Change the command in the command line. This can be used together with the
--- fuzzy finder and file explorer keymaps above.
-vim.keymap.set("c", "<m-e>", "<home><s-right><c-w>edit<end>")
-vim.keymap.set("c", "<m-f>", "<home><s-right><c-w>find<end>")
-vim.keymap.set("c", "<m-F>", "<home><s-right><c-w>Find<end>")
-vim.keymap.set("c", "<m-v>", "<home><s-right><c-w>vsplit<end>")
-vim.keymap.set("c", "<m-s>", "<home><s-right><c-w>split<end>")
-vim.keymap.set("c", "<m-t>", "<home><s-right><c-w>tabedit<end>")
-vim.keymap.set("c", "<m-r>", "<home><s-right><c-w>!rm<end>")
+--------------------------------------------------------------------------------
+-- COLORSCHEME
+--------------------------------------------------------------------------------
+
+-- Use the built-in plugin manager to install the Catppuccin theme
+--
+-- See: https://neovim.io/doc/user/pack.html#_plugin-manager
+-- To update all plugins run ":lua vim.pack.update()"
+vim.pack.add({
+  {
+    src = "https://github.com/catppuccin/nvim",
+    name = "catppuccin",
+    version = "main",
+  },
+}, { confirm = false, load = true })
+
+-- Setup the Catppuccin theme, by disabling all default integrations and only
+-- activating the integrations we are really using.
+require("catppuccin").setup({
+  flavour = "macchiato",
+  default_integrations = false,
+  integrations = {
+    gitsigns = true,
+    native_lsp = {
+      enabled = true,
+      virtual_text = {
+        errors = { "italic" },
+        hints = { "italic" },
+        warnings = { "italic" },
+        information = { "italic" },
+        ok = { "italic" },
+      },
+      underlines = {
+        errors = { "undercurl" },
+        hints = { "undercurl" },
+        warnings = { "undercurl" },
+        information = { "undercurl" },
+        ok = { "undercurl" },
+      },
+      inlay_hints = {
+        background = true,
+      },
+    },
+    snacks = {
+      enabled = false,
+      indent_scope_color = "",
+    },
+    treesitter = true,
+  },
+})
+
+vim.cmd.colorscheme("catppuccin")
+
+-- Set borders for floating windows, popup menus and the command line completion
+-- menu. Also set a custom background color for the popup menu and a border
+-- color.
+vim.opt.winborder = "single"
+vim.opt.pumborder = "single"
+
+vim.api.nvim_set_hl(0, "Pmenu", { bg = "#1e2030" })
+vim.api.nvim_set_hl(0, "PmenuBorder", { bg = "#1e2030", fg = "#8aadf4" })
+
+--------------------------------------------------------------------------------
+-- SNACKS
+--------------------------------------------------------------------------------
+
+vim.pack.add({
+  {
+    src = "https://github.com/folke/snacks.nvim",
+    name = "snacks",
+    version = "main",
+  },
+}, { confirm = false, load = true })
+
+local fd_args = {
+  "--full-path",
+  "--hidden",
+  "--color",
+  "never",
+  "--type",
+  "f",
+  "--exclude",
+  ".git",
+  "--exclude",
+  "node_modules",
+  "--exclude",
+  "dist",
+  "--exclude",
+  ".DS_Store",
+}
+
+local rg_args = {
+  "--vimgrep",
+  "--smart-case",
+  "--hidden",
+  "--color",
+  "never",
+  "--glob",
+  "!.git",
+  "--glob",
+  "!node_modules",
+  "--glob",
+  "!dist",
+  "--glob",
+  "!.DS_Store",
+}
+
+require("snacks").setup({
+  -- Deal with big files. Enable when file is larger then 1MB and show
+  -- notification when big file detected.
+  bigfile = {
+    enabled = true,
+    notify = true,
+    size = 1 * 1024 * 1024,
+  },
+  -- Show dashboard when opening Neovim. Show keymaps, recent files and git
+  -- status.
+  dashboard = {
+    enabled = true,
+    autokeys = "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    preset = {
+      keys = {
+        { icon = " ", key = "f", desc = "Find File", action = "<leader>ff" },
+        {
+          icon = " ",
+          key = "n",
+          desc = "New File",
+          action = function()
+            Snacks.input({
+              prompt = "File Name",
+              default = "untitled",
+            }, function(value)
+              vim.cmd("e " .. value .. " | startinsert")
+            end)
+          end,
+        },
+        { icon = " ", key = "s", desc = "Find Text", action = "<leader>ss" },
+        {
+          icon = " ",
+          key = "r",
+          desc = "Recent Files",
+          action = "<leader>fr",
+        },
+        {
+          icon = " ",
+          key = "g",
+          desc = "Git Status",
+          action = "<leader>gfs",
+        },
+        { icon = "󰙅 ", key = "e", desc = "Explorer", action = "<leader>ee" },
+        { icon = " ", key = "q", desc = "Quit", action = ":qa" },
+      },
+      header = [[
+███╗   ██╗███████╗ ██████╗ ██╗   ██╗██╗███╗   ███╗
+████╗  ██║██╔════╝██╔═══██╗██║   ██║██║████╗ ████║
+██╔██╗ ██║█████╗  ██║   ██║██║   ██║██║██╔████╔██║
+██║╚██╗██║██╔══╝  ██║   ██║╚██╗ ██╔╝██║██║╚██╔╝██║
+██║ ╚████║███████╗╚██████╔╝ ╚████╔╝ ██║██║ ╚═╝ ██║
+╚═╝  ╚═══╝╚══════╝ ╚═════╝   ╚═══╝  ╚═╝╚═╝     ╚═╝]],
+    },
+    sections = {
+      { section = "header" },
+      {
+        icon = " ",
+        title = "Keymaps",
+        section = "keys",
+        enabled = function()
+          return vim.o.lines >= 25
+        end,
+        indent = 2,
+        padding = 1,
+      },
+      {
+        icon = " ",
+        title = "Recent Files",
+        section = "recent_files",
+        enabled = function()
+          return vim.o.lines >= 35
+        end,
+        indent = 2,
+        padding = 1,
+        cwd = true,
+      },
+      {
+        icon = " ",
+        title = "Git Status",
+        section = "terminal",
+        enabled = function()
+          return Snacks.git.get_root() ~= nil and vim.o.lines >= 45
+        end,
+        cmd = "git --no-pager diff --stat -B -M -C",
+        indent = 2,
+        padding = 1,
+        height = 10,
+        ttl = 60,
+      },
+    },
+  },
+  -- GitHub CLI integration.
+  gh = {
+    enabled = true,
+  },
+  -- Open the current file, branch, commit, or repo in a browser (e.g. GitHub,
+  -- GitLab, Bitbucket).
+  gitbrowse = {
+    enabled = true,
+  },
+  -- Visualize indent guides and scopes based on treesitter or indent.
+  indent = {
+    enabled = true,
+    animate = {
+      enabled = false,
+    },
+  },
+  -- Better "vim.ui.input".
+  input = {
+    enabled = true,
+  },
+  -- Picker for selecting items such as files, grep results, buffers, marks,
+  -- etc.
+  picker = {
+    enabled = true,
+    ui_select = true,
+    icons = {
+      git = {
+        enabled = true,
+        commit = icons.git.commit,
+        staged = icons.git.staged,
+        added = icons.git.added,
+        deleted = icons.git.deleted,
+        ignored = icons.git.ignored,
+        modified = icons.git.modified,
+        renamed = icons.git.renamed,
+        unmerged = icons.git.unmerged,
+        untracked = icons.git.untracked,
+      },
+      diagnostics = icons.diagnostics,
+      kinds = icons.kinds,
+    },
+    win = {
+      list = {
+        wo = {
+          relativenumber = true,
+        },
+      },
+    },
+    sources = {
+      explorer = {
+        auto_close = true,
+        hidden = true,
+        layout = {
+          preset = "default",
+          preview = false,
+        },
+        actions = {
+          copy_file_path = {
+            action = function(_, item)
+              if not item then
+                return
+              end
+
+              local vals = {
+                ["basename"] = vim.fn.fnamemodify(item.file, ":t:r"),
+                ["extension"] = vim.fn.fnamemodify(item.file, ":t:e"),
+                ["filename"] = vim.fn.fnamemodify(item.file, ":t"),
+                ["path"] = item.file,
+                ["path (cwd)"] = vim.fn.fnamemodify(item.file, ":."),
+                ["path (home)"] = vim.fn.fnamemodify(item.file, ":~"),
+                ["uri"] = vim.uri_from_fname(item.file),
+              }
+
+              local options = vim.tbl_filter(function(val)
+                return vals[val] ~= ""
+              end, vim.tbl_keys(vals))
+              if vim.tbl_isempty(options) then
+                return
+              end
+              table.sort(options)
+              vim.ui.select(options, {
+                prompt = "Choose to copy to clipboard:",
+                format_item = function(list_item)
+                  return ("%s: %s"):format(list_item, vals[list_item])
+                end,
+              }, function(choice)
+                local result = vals[choice]
+                if result then
+                  vim.fn.setreg("+", result)
+                end
+              end)
+            end,
+          },
+          search_in_directory = {
+            action = function(_, item)
+              if not item then
+                return
+              end
+              local dir = vim.fn.fnamemodify(item.file, ":p:h")
+              Snacks.picker.grep({
+                cwd = dir,
+                cmd = "rg",
+                args = rg_args,
+                show_empty = true,
+                hidden = true,
+                ignored = true,
+                follow = false,
+                supports_live = true,
+              })
+            end,
+          },
+          diff = {
+            action = function(picker)
+              picker:close()
+              local sel = picker:selected()
+              if #sel > 0 and sel then
+                vim.cmd("tabnew " .. sel[1].file)
+                vim.cmd("vert diffs " .. sel[2].file)
+                return
+              end
+            end,
+          },
+        },
+        win = {
+          list = {
+            keys = {
+              ["y"] = "copy_file_path",
+              ["s"] = "search_in_directory",
+              ["D"] = "diff",
+            },
+          },
+        },
+      },
+      files = {
+        cmd = "fd",
+        args = fd_args,
+        show_empty = true,
+        hidden = true,
+        ignored = true,
+        follow = false,
+        supports_live = true,
+      },
+      grep = {
+        cmd = "rg",
+        args = rg_args,
+        hidden = true,
+        ignored = true,
+        follow = false,
+        supports_live = true,
+      },
+      marks = {
+        global = true,
+        ["local"] = false,
+        transform = function(item)
+          if item.label and item.label:match("^[A-Z]$") and item then
+            return item
+          end
+          return false
+        end,
+        actions = {
+          delmark = function(picker)
+            local cursor = picker.list.cursor
+            local deleted = {}
+            for _, it in ipairs(picker:selected({ fallback = true })) do
+              local success
+              if it.label:match("[a-z]") then
+                success = vim.api.nvim_buf_del_mark(it.buf, it.label)
+              else
+                success = vim.api.nvim_del_mark(it.label)
+              end
+              if success then
+                table.insert(deleted, it)
+              end
+            end
+
+            picker:close()
+            local picker_new = Snacks.picker.marks()
+            picker_new.list:view(cursor - #deleted)
+          end,
+        },
+        win = {
+          input = {
+            keys = {
+              ["<c-x>"] = { "delmark", mode = { "i", "n" } },
+            },
+          },
+        },
+      },
+    },
+  },
+  -- When doing "nvim somefile.txt", it will render the file as quickly as
+  -- possible, before loading your plugins.
+  quickfile = {
+    enabled = true,
+  },
+})
 
 --------------------------------------------------------------------------------
 -- EXPLORER
 --------------------------------------------------------------------------------
 
--- Add keymaps for some "file explorer" operations, like opening the "explorer"
--- in the directory of the current file, copy, move, delete and yank the path of
--- the current file.
+-- Show file explorer, which can be used to navigate the file system. The
+-- explorer also allows to perform file operations such as create, delete, move,
+-- etc.
 vim.keymap.set("n", "<leader>ee", function()
-  local dir = vim.fn.expand("%:.:h")
-  if dir == "." or dir == "" then
-    return ":edit "
-  end
-  return ":edit " .. vim.fn.expand("%:.:h") .. "/"
-end, { expr = true })
-vim.keymap.set("n", "<leader>ec", function()
-  return ":!cp " .. vim.fn.expand("%:.") .. " " .. vim.fn.expand("%:.")
-end, { expr = true })
-vim.keymap.set("n", "<leader>em", function()
-  return ":!mv " .. vim.fn.expand("%:.") .. " " .. vim.fn.expand("%:.")
-end, { expr = true })
-vim.keymap.set("n", "<leader>er", function()
-  return ":!rm " .. vim.fn.expand("%:.")
-end, { expr = true })
-vim.keymap.set("n", "<leader>ey", function()
-  vim.fn.setreg("+", vim.fn.expand("%:."))
+  Snacks.picker.explorer()
 end)
-vim.keymap.set("n", "<leader>ew", "<cmd>write ++p<cr>")
-vim.keymap.set("n", "<leader>eW", "<cmd>noautocmd write ++p<cr>")
-vim.keymap.set("n", "<leader>eg", function()
-  local dot_git_path = vim.fn.finddir(".git", ".;")
-  if dot_git_path == "" then
-    return nil
-  end
 
-  vim.api.nvim_set_current_dir(vim.fn.fnamemodify(dot_git_path, ":p:h:h"))
+vim.keymap.set("n", "<leader>en", function()
+  Snacks.input({
+    prompt = "File Name",
+    default = "untitled",
+  }, function(value)
+    vim.cmd("e " .. value .. " | startinsert")
+  end)
 end)
 
 --------------------------------------------------------------------------------
 -- FIND FILES
 --------------------------------------------------------------------------------
 
-local findCommand =
+local find_command =
   "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store"
 
 -- If "fd" is installed we use it to find files with the "find" command.
@@ -388,7 +752,7 @@ local findCommand =
 -- for searching through files: "rg --files --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
 if vim.fn.executable("fd") == 1 then
   function _G.fd_find_files(cmdarg, _)
-    local fnames = vim.fn.systemlist(findCommand)
+    local fnames = vim.fn.systemlist(find_command)
 
     if #cmdarg == 0 then
       return fnames
@@ -400,87 +764,29 @@ if vim.fn.executable("fd") == 1 then
   vim.opt.findfunc = "v:lua.fd_find_files"
 end
 
--- Find files via the "fd" command. This is an alternative to the "find"
--- command. For find we are using the "matchfuzzy()" function of Neovim to
--- filter the list of files returned by "fd". Here we are directly passing the
--- provided arguments to "fd" to filter the files.
---
--- If the search term is an existing file, we directly open this file.
--- Otherwise we populate the quickfix list with all files found be "fd" and the
--- search term.
-vim.api.nvim_create_user_command("Find", function(opts)
-  if vim.uv.fs_stat(opts.args) then
-    vim.cmd.edit(opts.args)
-  else
-    local qflist = {}
-    local files = vim.fn.systemlist(findCommand .. " " .. opts.args)
-
-    for _, file in pairs(files) do
-      table.insert(qflist, { filename = file, lnum = 1 })
-    end
-
-    vim.fn.setqflist(
-      {},
-      " ",
-      { title = findCommand .. " " .. opts.args, items = qflist }
-    )
-    vim.cmd.copen()
-  end
-end, {
-  complete = function(_, cmdline, _)
-    local args = ""
-    if #vim.fn.split(cmdline, " ") > 1 then
-      args = table.concat(vim.fn.split(cmdline, " "), " ", 2)
-    end
-
-    local files = vim.fn.systemlist(findCommand .. " " .. args)
-    return files
-  end,
-  nargs = "*",
-})
-
--- Find recently opened files in the current working directory. We are using
--- the "oldfiles" command to get the list of recently opened files. Afterwards
--- we filter the files to only include those that are in the current working
--- directory. Finally we populate the quickfix list with the filtered files and
--- open the quickfix window.
-vim.api.nvim_create_user_command("FindRecent", function()
-  local qflist = {}
-  local oldfiles = vim.api.nvim_command_output("oldfiles")
-  local cwd = vim.fn.getcwd()
-
-  for _, oldfile in pairs(vim.split(oldfiles, "\n")) do
-    local file = oldfile:gsub(".*%s(.*)$", "%1")
-    if file:sub(1, #cwd) == cwd then
-      file = file:sub(#cwd + 2)
-
-      if file ~= "" then
-        table.insert(qflist, { filename = file, lnum = 1 })
-      end
-    end
-  end
-
-  vim.fn.setqflist({}, " ", { title = "Recent files", items = qflist })
-  vim.cmd.copen()
-end, { nargs = "*" })
-
--- Undotree
-vim.cmd([[packadd nvim.undotree]])
-
--- Add keymaps for all find related operations. This includes finding files via
--- the "find" and "Find" command (workspace or directory of the current file),
--- finding recent files, finding buffers and finding marks.
-vim.keymap.set("n", "<leader>ff", ":find<space>")
-vim.keymap.set("n", "<leader>fF", ":Find<space>")
-vim.keymap.set("n", "<leader>fc", function()
-  return ":find " .. vim.fn.expand("%:.:h") .. "/"
-end, { expr = true })
-vim.keymap.set("n", "<leader>fC", function()
-  return ":Find " .. vim.fn.expand("%:.:h") .. "/"
-end, { expr = true })
-vim.keymap.set("n", "<leader>fr", "<cmd>FindRecent<cr>")
-vim.keymap.set("n", "<leader>fb", ":buffer<space>")
-vim.keymap.set("n", "<leader>fu", "<cmd>Undotree<cr>")
+-- Keymaps for finding files, buffers, recent files, etc. using the Snacks
+-- picker.
+vim.keymap.set("n", "<leader>ff", function()
+  Snacks.picker.files()
+end)
+vim.keymap.set("n", "<leader>fb", function()
+  Snacks.picker.buffers()
+end)
+vim.keymap.set("n", "<leader>fr", function()
+  Snacks.picker.recent({ filter = { cwd = true } })
+end)
+vim.keymap.set("n", "<leader>fu", function()
+  Snacks.picker.undo()
+end)
+vim.keymap.set("n", "<leader>fl", function()
+  Snacks.picker.loclist()
+end)
+vim.keymap.set("n", "<leader>fm", function()
+  Snacks.picker.marks()
+end)
+vim.keymap.set("n", "<leader>fq", function()
+  Snacks.picker.qflist()
+end)
 
 --------------------------------------------------------------------------------
 -- SEARCH THROUGH FILES
@@ -494,18 +800,19 @@ if vim.fn.executable("rg") == 1 then
   vim.opt.grepformat = "%f:%l:%c:%m"
 end
 
--- Set keymaps for search operations. This includes searching through files in
--- the workspace or directory of the current file, searching for the word under
--- the cursor or visual selection and searching for todo comments.
-vim.keymap.set("n", "<leader>ss", ":silent grep!<space>")
-vim.keymap.set("n", "<leader>sc", function()
-  return ":silent grep! --glob='" .. vim.fn.expand("%:.:h") .. "/**' "
-end, { expr = true })
+-- Keymaps for searching through files using the Snacks picker.
+vim.keymap.set("n", "<leader>ss", function()
+  Snacks.picker.grep()
+end)
 vim.keymap.set("n", "<leader>s/", function()
-  return ":silent grep! --glob='" .. vim.fn.expand("%:.") .. "' "
-end, { expr = true })
-vim.keymap.set("n", "<leader>sw", ":silent grep!<space><c-r><c-w>")
-vim.keymap.set("v", "<leader>sv", 'y:silent grep!<space><c-r>"')
+  Snacks.picker.grep_buffers()
+end)
+vim.keymap.set("n", "<leader>sw", function()
+  Snacks.picker.grep_word()
+end)
+vim.keymap.set("n", "<leader>sr", function()
+  Snacks.picker.resume()
+end)
 vim.keymap.set(
   "n",
   "<leader>st",
@@ -618,130 +925,6 @@ vim.api.nvim_create_autocmd("QuickFixCmdPost", {
   pattern = { "[^l]*" },
   command = "cwindow",
 })
-
--- Filter the items in the quickfix list by their filename using fuzzy matching.
--- The current quickfix list is replaced by the filtered list.
---
--- This can be used to first search for a term using "<leader>ss" and then
--- filter the results by their filename using "<leader>qf".
-vim.api.nvim_create_user_command("QuickFixFilter", function(opts)
-  local title = vim.fn.getqflist({ title = 1 })
-
-  vim.notify(opts.args, vim.log.levels.INFO)
-
-  local qflist = vim.fn.matchfuzzy(vim.fn.getqflist(), opts.args, {
-    text_cb = function(item)
-      return vim.fn.bufname(item.bufnr)
-    end,
-  })
-
-  vim.fn.setqflist({}, " ", { title = title, items = qflist })
-  vim.cmd.copen()
-end, {
-  complete = function(_, cmdline, _)
-    local args = ""
-    if #vim.fn.split(cmdline, " ") > 1 then
-      args = table.concat(vim.fn.split(cmdline, " "), " ", 2)
-    end
-
-    local qflist = vim.fn.getqflist()
-    local files = {}
-    for _, item in pairs(qflist) do
-      table.insert(files, vim.fn.bufname(item.bufnr))
-    end
-
-    return vim.fn.matchfuzzy(files, args)
-  end,
-  nargs = "*",
-})
-
--- Add keymaps for easier acccess to the Quickfix list.
-vim.keymap.set("n", "<leader>qo", "<cmd>copen<cr>")
-vim.keymap.set("n", "<leader>qc", "<cmd>cclose<cr>")
-vim.keymap.set("n", "<leader>qh", "<cmd>chistory<cr>")
-vim.keymap.set("n", "<leader>qn", "<cmd>cnewer<cr>")
-vim.keymap.set("n", "<leader>qp", "<cmd>colder<cr>")
-vim.keymap.set("n", "<leader>qf", ":QuickFixFilter ")
-vim.keymap.set("n", "<leader>q1", "<cmd>1chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q2", "<cmd>2chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q3", "<cmd>3chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q4", "<cmd>4chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q5", "<cmd>5chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q6", "<cmd>6chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q7", "<cmd>7chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q8", "<cmd>8chistory<cr> <bar> <cmd>copen<cr>")
-vim.keymap.set("n", "<leader>q9", "<cmd>9chistory<cr> <bar> <cmd>copen<cr>")
-
---------------------------------------------------------------------------------
--- MACROS
---------------------------------------------------------------------------------
-
--- Select a pattern and press "Q" + "Q" to record a macro into register "q",
--- starting from the selected pattern. Once the macro is recorded, press "q" to
--- stop the recording. The macro can then be replayed using "<c-q>". If
--- nothing is selected the macro is replayed for the whole file, otherwise it is
--- only replayed for the selected lines.
-vim.keymap.set("v", "Q", '"wyqq')
-vim.keymap.set("n", "Q", "V/\\%V\\V<c-r>w<cr><esc>")
-vim.keymap.set({ "n", "v" }, "<c-q>", ":g/\\V<c-r>w/normal! @q<cr>")
-
---------------------------------------------------------------------------------
--- COLORSCHEME
---------------------------------------------------------------------------------
-
--- Use the built-in plugin manager to install the Catppuccin theme
---
--- See: https://neovim.io/doc/user/pack.html#_plugin-manager
--- To update all plugins run ":lua vim.pack.update()"
-vim.pack.add({
-  {
-    src = "https://github.com/catppuccin/nvim",
-    name = "catppuccin",
-    version = "main",
-  },
-}, { confirm = false, load = true })
-
--- Setup the Catppuccin theme, by disabling all default integrations and only
--- activating the integrations we are really using.
-require("catppuccin").setup({
-  flavour = "macchiato",
-  default_integrations = false,
-  integrations = {
-    gitsigns = true,
-    native_lsp = {
-      enabled = true,
-      virtual_text = {
-        errors = { "italic" },
-        hints = { "italic" },
-        warnings = { "italic" },
-        information = { "italic" },
-        ok = { "italic" },
-      },
-      underlines = {
-        errors = { "undercurl" },
-        hints = { "undercurl" },
-        warnings = { "undercurl" },
-        information = { "undercurl" },
-        ok = { "undercurl" },
-      },
-      inlay_hints = {
-        background = true,
-      },
-    },
-    treesitter = true,
-  },
-})
-
-vim.cmd.colorscheme("catppuccin")
-
--- Set borders for floating windows, popup menus and the command line completion
--- menu. Also set a custom background color for the popup menu and a border
--- color.
-vim.opt.winborder = "single"
-vim.opt.pumborder = "single"
-
-vim.api.nvim_set_hl(0, "Pmenu", { bg = "#1e2030" })
-vim.api.nvim_set_hl(0, "PmenuBorder", { bg = "#1e2030", fg = "#8aadf4" })
 
 --------------------------------------------------------------------------------
 -- TREESITTER
@@ -963,6 +1146,32 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end
   end,
 })
+
+-- Keymaps for LSP-related Snacks picker functionalities.
+vim.keymap.set("n", "<leader>ld", function()
+  Snacks.picker.diagnostics_buffer()
+end)
+vim.keymap.set("n", "<leader>lD", function()
+  Snacks.picker.diagnostics()
+end)
+vim.keymap.set("n", "<leader>ls", function()
+  Snacks.picker.lsp_symbols()
+end)
+vim.keymap.set("n", "<leader>lr", function()
+  Snacks.picker.lsp_references()
+end)
+vim.keymap.set("n", "<leader>ld", function()
+  Snacks.picker.lsp_definitions()
+end)
+vim.keymap.set("n", "<leader>lD", function()
+  Snacks.picker.lsp_declarations()
+end)
+vim.keymap.set("n", "<leader>ly", function()
+  Snacks.picker.lsp_type_definitions()
+end)
+vim.keymap.set("n", "<leader>li", function()
+  Snacks.picker.lsp_implementations()
+end)
 
 --------------------------------------------------------------------------------
 -- DIAGNOSTICS
@@ -1197,28 +1406,6 @@ require("gitsigns").setup({
 -- keymap is not defined in the on_attach function, so it is available globally.
 vim.keymap.set("n", "<leader>gsq", "<cmd>:Gitsigns setqflist all<cr>")
 
--- The "GitDiff <base> <head>" command shows the diff between two branches via
--- gitsigns. It also populates the quickfix list with the hunks.
-vim.api.nvim_create_user_command("GitDiff", function(opts)
-  if #vim.fn.split(opts.args, " ") ~= 2 then
-    return
-  end
-
-  local base = vim.fn.split(opts.args, " ")[1]
-  local head = vim.fn.split(opts.args, " ")[2]
-
-  local result = vim.system({ "git", "merge-base", base, head }):wait()
-  if result.code ~= 0 then
-    return
-  end
-
-  local commit = vim.fn.trim(result.stdout)
-
-  local gitsigns = require("gitsigns")
-  gitsigns.change_base(commit, true)
-  gitsigns.setqflist("all")
-end, { nargs = "*" })
-
 -- The "GitMerge" command populates the quickfix list with all merge conflicts
 -- in the current repository.
 --
@@ -1241,13 +1428,47 @@ vim.api.nvim_create_user_command("GitMerge", function()
   vim.cmd.copen()
 end, { nargs = "*" })
 
--- DiffTool is the newly built-in diff tool of Neovim. It can be used as
--- replacement for our custom ":GitDiff" command.
+-- DiffTool is the newly built-in diff tool of Neovim.
 --
 -- DiffTool is configured as "git difftool" and can be used as follows:
 --   - git difftool -d
 --   - git difftool -d origin/HEAD...HEAD
 vim.cmd([[packadd nvim.difftool]])
+
+-- Keymaps for Git-related Snacks picker functionalities.
+vim.keymap.set("n", "<leader>gff", function()
+  Snacks.picker.git_files()
+end)
+vim.keymap.set("n", "<leader>gfb", function()
+  Snacks.picker.git_branches()
+end)
+vim.keymap.set("n", "<leader>gfl", function()
+  Snacks.picker.git_log_file()
+end)
+vim.keymap.set("n", "<leader>gfL", function()
+  Snacks.picker.git_log()
+end)
+vim.keymap.set("n", "<leader>gfs", function()
+  Snacks.picker.git_status()
+end)
+vim.keymap.set("n", "<leader>gfS", function()
+  Snacks.picker.git_stash()
+end)
+
+-- Select issues and pull requests from current GitHub repository and open them
+-- in Neovim.
+vim.keymap.set("n", "<leader>ghi", function()
+  Snacks.picker.gh_issue()
+end)
+vim.keymap.set("n", "<leader>ghI", function()
+  Snacks.picker.gh_issue({ state = "all" })
+end)
+vim.keymap.set("n", "<leader>ghp", function()
+  Snacks.picker.gh_pr()
+end)
+vim.keymap.set("n", "<leader>ghP", function()
+  Snacks.picker.gh_pr({ state = "all" })
+end)
 
 --------------------------------------------------------------------------------
 -- MULTICURSOR
