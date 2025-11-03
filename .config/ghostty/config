@@ -36,8 +36,8 @@ keybind = super+alt+shift+w=close_all_windows
 keybind = super+ctrl+f=toggle_fullscreen
 
 keybind = super+t=new_tab
-keybind = ctrl+tab=next_tab
-keybind = ctrl+shift+tab=previous_tab
+keybind = super+alt+ctrl+right=next_tab
+keybind = super+alt+ctrl+left=previous_tab
 
 keybind = super+physical:one=goto_tab:1
 keybind = super+physical:two=goto_tab:2
