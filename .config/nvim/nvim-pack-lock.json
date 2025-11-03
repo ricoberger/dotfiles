@@ -26,7 +26,7 @@
       "version": "'main'"
     },
     "nvim-treesitter": {
-      "rev": "64f4755b",
+      "rev": "65a266bf",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     },
@@ -36,7 +36,7 @@
       "version": "'main'"
     },
     "snacks": {
-      "rev": "6f60105",
+      "rev": "2e2cf50",
       "src": "https://github.com/folke/snacks.nvim",
       "version": "'main'"
     }
