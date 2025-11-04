@@ -536,10 +536,6 @@ require("snacks").setup({
   input = {
     enabled = true,
   },
-  -- Pretty vim.notify
-  notifier = {
-    enabled = true,
-  },
   -- Picker for selecting items such as files, grep results, buffers, marks,
   -- etc.
   picker = {
@@ -728,6 +724,7 @@ vim.keymap.set("n", "<leader>ee", function()
   Snacks.picker.explorer()
 end)
 
+-- Keymap to create a new file and open it in insert mode.
 vim.keymap.set("n", "<leader>en", function()
   Snacks.input({
     prompt = "File Name",
@@ -736,6 +733,10 @@ vim.keymap.set("n", "<leader>en", function()
     vim.cmd("e " .. value .. " | startinsert")
   end)
 end)
+
+-- Keymap to save a file without running any auto commands and with creating
+-- directories.
+vim.keymap.set("n", "<leader>ew", "<cmd>noautocmd write ++p<cr>")
 
 --------------------------------------------------------------------------------
 -- FIND FILES
@@ -1148,22 +1149,6 @@ vim.api.nvim_create_autocmd("LspAttach", {
         })
       end
     end
-  end,
-})
-
--- Show LSP progress in a notification.
-vim.api.nvim_create_autocmd("LspProgress", {
-  callback = function(event)
-    local spinner =
-      { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-    vim.notify(vim.lsp.status(), "info", {
-      id = "lsp_progress",
-      title = "LSP Progress",
-      opts = function(notif)
-        notif.icon = event.data.params.value.kind == "end" and " "
-          or spinner[math.floor(vim.uv.hrtime() / (1e6 * 80)) % #spinner + 1]
-      end,
-    })
   end,
 })
 
