@@ -183,7 +183,6 @@ command! -nargs=1 Find call s:Find(<f-args>)
 " the "Find" command (workspace or directory of the current file) and finding
 " buffers.
 nnoremap <leader>ff :silent Find<space>
-nnoremap <expr> <leader>fc ":silent Find " . expand("%:.:h") . "/"
 nnoremap <leader>fb :buffer<space>
 
 " ------------------------------------------------------------------------------
@@ -201,10 +200,9 @@ endif
 " the workspace or directory of the current file, searching for the word under
 " the cursor or visual selection and searching for todo comments.
 nnoremap <leader>ss :silent grep!<space>
-nnoremap <expr> <leader>sc ":silent grep! --glob='" . expand("%:.:h") . "/**' "
 nnoremap <expr> <leader>s/ ":silent grep! --glob='" . expand("%:.") . "' "
 nnoremap <leader>sw :silent grep!<space><c-r><c-w>
-vnoremap <leader>sv y:silent grep!<space><c-r>"
+vnoremap <leader>sw y:silent grep!<space><c-r>"
 nnoremap <leader>st :silent grep! -e='todo:' -e='warn:' -e='info:' -e='xxx:' -e='bug:' -e='fixme:' -e='fixit:' -e='bug:' -e='issue:'<cr>
 
 " ------------------------------------------------------------------------------

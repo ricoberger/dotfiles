@@ -847,7 +847,7 @@ vim.keymap.set(
 )
 vim.keymap.set(
   "v",
-  "<leader>rv",
+  "<leader>rw",
   [[y:%s/\V<c-r>"//gcI<left><left><left><left>]]
 )
 vim.keymap.set(
@@ -864,7 +864,7 @@ vim.keymap.set(
 )
 vim.keymap.set(
   "v",
-  "<leader>rV",
+  "<leader>rW",
   [[y:cfdo %s/\V<c-r>"//gcI | update]]
     .. [[<left><left><left><left><left><left><left><left><left><left><left><left><left><left>]]
 )
