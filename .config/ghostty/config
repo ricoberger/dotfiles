@@ -32,12 +32,11 @@ keybind = super+n=new_window
 keybind = super+q=quit
 keybind = super+w=close_surface
 keybind = super+shift+w=close_window
-keybind = super+alt+shift+w=close_all_windows
 keybind = super+ctrl+f=toggle_fullscreen
 
 keybind = super+t=new_tab
-keybind = super+alt+ctrl+right=next_tab
-keybind = super+alt+ctrl+left=previous_tab
+keybind = super+alt+right=next_tab
+keybind = super+alt+left=previous_tab
 
 keybind = super+physical:one=goto_tab:1
 keybind = super+physical:two=goto_tab:2
@@ -53,15 +52,15 @@ keybind = super+d=new_split:right
 keybind = super+shift+d=new_split:down
 keybind = super+shift+enter=toggle_split_zoom
 
-keybind = super+alt+left=goto_split:left
-keybind = super+alt+right=goto_split:right
-keybind = super+alt+up=goto_split:top
-keybind = super+alt+down=goto_split:bottom
+keybind = super+ctrl+left=goto_split:left
+keybind = super+ctrl+right=goto_split:right
+keybind = super+ctrl+up=goto_split:top
+keybind = super+ctrl+down=goto_split:bottom
 
-keybind = super+ctrl+left=resize_split:left,10
-keybind = super+ctrl+right=resize_split:right,10
-keybind = super+ctrl+up=resize_split:up,10
-keybind = super+ctrl+down=resize_split:down,10
+keybind = super+ctrl+alt+left=resize_split:left,10
+keybind = super+ctrl+alt+right=resize_split:right,10
+keybind = super+ctrl+alt+up=resize_split:up,10
+keybind = super+ctrl+alt+down=resize_split:down,10
 
 keybind = super+home=scroll_to_top
 keybind = super+end=scroll_to_bottom
