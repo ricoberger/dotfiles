@@ -393,12 +393,6 @@ vim.pack.add({
 }, { confirm = false, load = true })
 
 local fd_args = {
-  "--full-path",
-  "--hidden",
-  "--color",
-  "never",
-  "--type",
-  "f",
   "--exclude",
   ".git",
   "--exclude",
@@ -410,19 +404,9 @@ local fd_args = {
 }
 
 local rg_args = {
-  "--vimgrep",
-  "--smart-case",
-  "--hidden",
-  "--color",
-  "never",
-  "--glob",
-  "!.git",
-  "--glob",
-  "!node_modules",
-  "--glob",
-  "!dist",
-  "--glob",
-  "!.DS_Store",
+  "--glob=!.git",
+  "--glob=!.node_modules",
+  "--glob=!.DS_Store",
 }
 
 require("snacks").setup({
@@ -490,7 +474,11 @@ require("snacks").setup({
           preview = false,
         },
         actions = {
-          copy_file_path = {
+          -- Overwrite the "explorer_yank" command to provide more options for
+          -- yanking file information. By default the command would copy the
+          -- full path ot the file to the clipboard. Now we can choose what path
+          -- should be copied.
+          explorer_yank = {
             action = function(_, item)
               if not item then
                 return
@@ -526,7 +514,8 @@ require("snacks").setup({
               end)
             end,
           },
-          search_in_directory = {
+          -- Search in the selected directory using "rg" (ripgrep).
+          explorer_search_in_directory = {
             action = function(_, item)
               if not item then
                 return
@@ -544,7 +533,9 @@ require("snacks").setup({
               })
             end,
           },
-          diff = {
+          -- Show diff between two selected files in a new tab. The files which
+          -- should be compared must be selected using "tab" or "shift+tab".
+          explorer_diff = {
             action = function(picker)
               picker:close()
               local sel = picker:selected()
@@ -559,9 +550,9 @@ require("snacks").setup({
         win = {
           list = {
             keys = {
-              ["y"] = "copy_file_path",
-              ["s"] = "search_in_directory",
-              ["D"] = "diff",
+              ["y"] = "explorer_yank",
+              ["s"] = "explorer_search_in_directory",
+              ["D"] = "explorer_diff",
             },
           },
         },
@@ -585,38 +576,11 @@ require("snacks").setup({
       },
       marks = {
         global = true,
-        ["local"] = false,
-        transform = function(item)
-          if item.label and item.label:match("^[A-Z]$") and item then
-            return item
-          end
-          return false
-        end,
-        actions = {
-          delmark = function(picker)
-            local cursor = picker.list.cursor
-            local deleted = {}
-            for _, it in ipairs(picker:selected({ fallback = true })) do
-              local success
-              if it.label:match("[a-z]") then
-                success = vim.api.nvim_buf_del_mark(it.buf, it.label)
-              else
-                success = vim.api.nvim_del_mark(it.label)
-              end
-              if success then
-                table.insert(deleted, it)
-              end
-            end
-
-            picker:close()
-            local picker_new = Snacks.picker.marks()
-            picker_new.list:view(cursor - #deleted)
-          end,
-        },
+        ["local"] = true,
         win = {
           input = {
             keys = {
-              ["<c-x>"] = { "delmark", mode = { "i", "n" } },
+              ["<c-x>"] = { "mark_delete", mode = { "n", "i" } },
             },
           },
         },
@@ -662,29 +626,19 @@ vim.keymap.set("n", "<leader>ew", "<cmd>noautocmd write ++p<cr>")
 local find_command =
   "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store"
 
--- If "fd" is installed we use it to find files with the "find" command.
--- Together with the "matchfuzzy()" function this should replace any external
--- fuzzy finder plugin.
---
--- Maybe we can also use "fzf" in the future if the results returned by the
--- "matchfuzzy()" function are not satisfying, e.g.
--- "return vim.fn.systemlist( "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store | fzf --filter='" .. cmdarg .. "'")"
---
--- If we do not want to use "fd" we can also use "rg", which we will also use
--- for searching through files: "rg --files --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
-if vim.fn.executable("fd") == 1 then
-  function _G.fd_find_files(cmdarg, _)
-    local fnames = vim.fn.systemlist(find_command)
+-- Use "fd" to find files with the "find" command. Together with the
+-- "matchfuzzy()" function this should replace any external fuzzy finder plugin.
+function _G.fd_find_files(cmdarg, _)
+  local fnames = vim.fn.systemlist(find_command)
 
-    if #cmdarg == 0 then
-      return fnames
-    else
-      return vim.fn.matchfuzzy(fnames, cmdarg)
-    end
+  if #cmdarg == 0 then
+    return fnames
+  else
+    return vim.fn.matchfuzzy(fnames, cmdarg)
   end
-
-  vim.opt.findfunc = "v:lua.fd_find_files"
 end
+
+vim.opt.findfunc = "v:lua.fd_find_files"
 
 -- Keymaps for finding files, buffers, recent files, etc. using the Snacks
 -- picker.
@@ -700,14 +654,8 @@ end)
 vim.keymap.set("n", "<leader>fu", function()
   Snacks.picker.undo()
 end)
-vim.keymap.set("n", "<leader>fl", function()
-  Snacks.picker.loclist()
-end)
 vim.keymap.set("n", "<leader>fm", function()
   Snacks.picker.marks()
-end)
-vim.keymap.set("n", "<leader>fq", function()
-  Snacks.picker.qflist()
 end)
 vim.keymap.set("n", "<leader>fd", function()
   Snacks.picker.diagnostics_buffer()
@@ -720,13 +668,10 @@ end)
 -- SEARCH THROUGH FILES
 --------------------------------------------------------------------------------
 
--- If "rg" (ripgrep) is installed we use it to search though files with the
--- "grep" command.
-if vim.fn.executable("rg") == 1 then
-  vim.opt.grepprg =
-    "rg --vimgrep --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
-  vim.opt.grepformat = "%f:%l:%c:%m"
-end
+-- Use "rg" (ripgrep) to search though files with the "grep" command.
+vim.opt.grepprg =
+  "rg --vimgrep --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
+vim.opt.grepformat = "%f:%l:%c:%m"
 
 -- Keymaps for searching through files using the Snacks picker.
 vim.keymap.set("n", "<leader>ss", function()
@@ -738,14 +683,20 @@ end)
 vim.keymap.set({ "n", "x" }, "<leader>sw", function()
   Snacks.picker.grep_word()
 end)
-vim.keymap.set("n", "<leader>sr", function()
-  Snacks.picker.resume()
+vim.keymap.set({ "n", "x" }, "<leader>st", function()
+  Snacks.picker.grep({
+    finder = "grep",
+    regex = true,
+    cmd = "rg",
+    args = rg_args,
+    format = "file",
+    search = function()
+      return "todo:|warn:|info:|xxx:|bug:|fixme:|fixit:|issue:"
+    end,
+    live = false,
+    supports_live = true,
+  })
 end)
-vim.keymap.set(
-  "n",
-  "<leader>st",
-  ":silent grep! -e='todo:' -e='warn:' -e='info:' -e='xxx:' -e='bug:' -e='fixme:' -e='fixit:' -e='bug:' -e='issue:'<cr>"
-)
 
 --------------------------------------------------------------------------------
 -- REPLACE
@@ -1003,7 +954,10 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local buffer = event.buf
 
     if client then
-      -- Add additional keymaps to the default LSP keymaps.
+      -- Add additional keymaps to the default LSP keymaps and overwrite some
+      -- default keymaps to use Snacks functionalities. Some defaults are
+      -- overridden to show a picker, so that the locations can be opened in a
+      -- new tab, split, etc.
       --
       -- See: https://neovim.io/doc/user/lsp.html#_global-defaults
       vim.keymap.set("n", "grf", function()
@@ -1011,16 +965,26 @@ vim.api.nvim_create_autocmd("LspAttach", {
           timeout_ms = 10000,
         })
       end, { buffer = buffer })
-      vim.keymap.set("n", "grq", vim.diagnostic.setqflist, { buffer = buffer })
-      vim.keymap.set("n", "gry", function()
-        vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
-      end, { buffer = buffer })
       vim.keymap.set("n", "gd", function()
-        vim.lsp.buf.definition()
+        Snacks.picker.lsp_definitions({ auto_confirm = false })
       end, { buffer = buffer })
       vim.keymap.set("n", "gD", function()
-        vim.cmd([[ vsplit ]])
-        vim.lsp.buf.definition()
+        Snacks.picker.lsp_declarations({ auto_confirm = false })
+      end)
+      vim.keymap.set("n", "gri", function()
+        Snacks.picker.lsp_implementations({ auto_confirm = false })
+      end)
+      vim.keymap.set("n", "grr", function()
+        Snacks.picker.lsp_references({ auto_confirm = false })
+      end)
+      vim.keymap.set("n", "<leader>grt", function()
+        Snacks.picker.lsp_type_definitions({ auto_confirm = false })
+      end)
+      vim.keymap.set("n", "gO", function()
+        Snacks.picker.lsp_symbols()
+      end)
+      vim.keymap.set("n", "grh", function()
+        vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
       end, { buffer = buffer })
 
       -- Enable completion.
@@ -1074,26 +1038,6 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end
   end,
 })
-
--- Keymaps for LSP-related Snacks picker functionalities.
-vim.keymap.set("n", "<leader>ls", function()
-  Snacks.picker.lsp_symbols()
-end)
-vim.keymap.set("n", "<leader>lr", function()
-  Snacks.picker.lsp_references()
-end)
-vim.keymap.set("n", "<leader>ld", function()
-  Snacks.picker.lsp_definitions()
-end)
-vim.keymap.set("n", "<leader>lD", function()
-  Snacks.picker.lsp_declarations()
-end)
-vim.keymap.set("n", "<leader>ly", function()
-  Snacks.picker.lsp_type_definitions()
-end)
-vim.keymap.set("n", "<leader>li", function()
-  Snacks.picker.lsp_implementations()
-end)
 
 --------------------------------------------------------------------------------
 -- DIAGNOSTICS
@@ -1259,6 +1203,7 @@ require("gitsigns").setup({
     -- Define keymaps for Git related actions provided by gitsigns.
     local gitsigns = require("gitsigns")
 
+    -- Go to next / previous hunk.
     vim.keymap.set("n", "]c", function()
       if vim.wo.diff then
         vim.cmd.normal({ "]c", bang = true })
@@ -1274,6 +1219,7 @@ require("gitsigns").setup({
       end
     end, { buffer = bufnr })
 
+    -- Stage / reset / preview hunk(s).
     vim.keymap.set("n", "<leader>gss", gitsigns.stage_hunk, { buffer = bufnr })
     vim.keymap.set("n", "<leader>gsr", gitsigns.reset_hunk, { buffer = bufnr })
     vim.keymap.set("v", "<leader>gss", function()
@@ -1306,17 +1252,20 @@ require("gitsigns").setup({
       gitsigns.preview_hunk,
       { buffer = bufnr }
     )
+
+    -- Git blame line / buffer.
     vim.keymap.set("n", "<leader>gsb", function()
       gitsigns.blame_line({ full = true })
     end, { buffer = bufnr })
     vim.keymap.set("n", "<leader>gsB", gitsigns.blame, { buffer = bufnr })
+
+    -- Git diff.
     vim.keymap.set("n", "<leader>gsd", gitsigns.diffthis, { buffer = bufnr })
     vim.keymap.set("n", "<leader>gsD", function()
       gitsigns.diffthis("~")
     end, { buffer = bufnr })
-    vim.keymap.set("n", "<leader>gsl", function()
-      gitsigns.setloclist(bufnr)
-    end, { buffer = bufnr })
+
+    -- Toggle word diff and deleted lines.
     vim.keymap.set("n", "<leader>gst", function()
       gitsigns.toggle_word_diff()
       gitsigns.toggle_deleted()
@@ -1324,42 +1273,13 @@ require("gitsigns").setup({
   end,
 })
 
--- The "<leader>gsq" keymap populates the quickfix list with all git hunks. This
--- keymap is not defined in the on_attach function, so it is available globally.
-vim.keymap.set("n", "<leader>gsq", "<cmd>:Gitsigns setqflist all<cr>")
-
--- The "GitMerge" command populates the quickfix list with all merge conflicts
--- in the current repository.
---
--- See: https://github.com/git/git/blob/215033b3ac599432a17d58f18a92b356d98354a9/contrib/git-jump/git-jump#L59
-vim.api.nvim_create_user_command("GitMerge", function()
-  local qflist = {}
-  local files = vim.fn.systemlist(
-    "git ls-files -u | perl -pe 's/^.*?\t//' | sort -u | while IFS= read fn; do grep -Hn '^<<<<<<<' \"$fn\"; done"
-  )
-
-  for _, file in pairs(files) do
-    local parts = vim.fn.split(file, ":")
-    table.insert(
-      qflist,
-      { filename = parts[1], lnum = parts[2], text = parts[3] }
-    )
-  end
-
-  vim.fn.setqflist({}, " ", { title = "Merge conflicts", items = qflist })
-  vim.cmd.copen()
-end, { nargs = "*" })
-
--- DiffTool is the newly built-in diff tool of Neovim.
---
--- DiffTool is configured as "git difftool" and can be used as follows:
---   - git difftool -d
---   - git difftool -d origin/HEAD...HEAD
-vim.cmd([[packadd nvim.difftool]])
-
--- Keymaps for Git-related Snacks picker functionalities.
+-- Find related Git actions powered by the Snacks picker. It is possible to find
+-- files, diffs, branches, commits, stashed and status entries.
 vim.keymap.set("n", "<leader>gff", function()
   Snacks.picker.git_files()
+end)
+vim.keymap.set("n", "<leader>gfd", function()
+  Snacks.picker.git_diff()
 end)
 vim.keymap.set("n", "<leader>gfb", function()
   Snacks.picker.git_branches()
@@ -1376,6 +1296,39 @@ end)
 vim.keymap.set("n", "<leader>gfS", function()
   Snacks.picker.git_stash()
 end)
+
+-- DiffTool is the newly built-in diff tool of Neovim.
+--
+-- DiffTool is configured as "git difftool" and can be used as follows:
+--   - git difftool -d
+--   - git difftool -d origin/HEAD...HEAD
+vim.cmd([[packadd nvim.difftool]])
+
+-- Populate the quickfix list with all merge conflicts in the current
+-- repository.
+--
+-- See: https://github.com/git/git/blob/215033b3ac599432a17d58f18a92b356d98354a9/contrib/git-jump/git-jump#L59
+vim.keymap.set("n", "<leader>gm", function()
+  local qflist = {}
+  local files = vim.fn.systemlist(
+    "git ls-files -u | perl -pe 's/^.*?\t//' | sort -u | while IFS= read fn; do grep -Hn '^<<<<<<<' \"$fn\"; done"
+  )
+
+  for _, file in pairs(files) do
+    local parts = vim.fn.split(file, ":")
+    table.insert(
+      qflist,
+      { filename = parts[1], lnum = parts[2], text = parts[3] }
+    )
+  end
+
+  vim.fn.setqflist({}, " ", { title = "Merge conflicts", items = qflist })
+  vim.cmd.copen()
+end)
+
+--------------------------------------------------------------------------------
+-- GITHUB
+--------------------------------------------------------------------------------
 
 -- Select issues and pull requests from current GitHub repository and open them
 -- in Neovim.
@@ -1498,20 +1451,6 @@ require("sidekick").setup({
   },
 })
 
--- Create a command "AskAI" which prompts the user for input and then sends the
--- input to the AI chat provided by sidekick.nvim.
-vim.api.nvim_create_user_command("AskAI", function()
-  vim.ui.input({ prompt = "Ask AI: " }, function(input)
-    if input and input ~= "" then
-      require("sidekick.cli").send({
-        msg = input,
-        name = "copilot",
-        submit = true,
-      })
-    end
-  end)
-end, {})
-
 -- Use Tab to jump to the next edit suggestion and to to apply it. If there is
 -- no suggestion available Tab works as normal.
 vim.keymap.set({ "i", "n" }, "<tab>", function()
@@ -1522,14 +1461,18 @@ vim.keymap.set({ "i", "n" }, "<tab>", function()
   return "<tab>"
 end, { expr = true })
 
--- Add Keymaps for AI chat related actions. The "Space + aa" can be used to ask
--- the AI a question. The "Space + at" keymap toggles the AI chat window and
--- focuses it. The "Space + ap" keymap can be used to select a predifined
--- prompt.
-vim.keymap.set({ "n", "v" }, "<leader>aa", "<cmd>AskAI<cr>")
-vim.keymap.set({ "n", "v" }, "<leader>at", function()
+-- Add keymaps for AI chat related actions. The "Space + aa" can be used toggle
+-- the AI chat window and focuses it. The "Space + ap" keymap can be used to
+-- select a predifined prompt / context.
+vim.keymap.set({ "n", "t", "x" }, "<leader>aa", function()
   require("sidekick.cli").toggle({ name = "copilot", focus = true })
 end)
-vim.keymap.set({ "n", "v" }, "<leader>ap", function()
+vim.keymap.set({ "n", "x" }, "<leader>ap", function()
   require("sidekick.cli").prompt()
+end)
+
+-- Add keymaps for next edit suggestion actions. The "Space + an" keymap can be
+-- used to toggle the next edit suggestion feature.
+vim.keymap.set({ "n" }, "<leader>an", function()
+  require("sidekick.nes").toggle()
 end)
