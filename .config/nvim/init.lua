@@ -406,6 +406,7 @@ local fd_args = {
 local rg_args = {
   "--glob=!.git",
   "--glob=!.node_modules",
+  "--glob=!dist",
   "--glob=!.DS_Store",
 }
 
@@ -527,7 +528,7 @@ require("snacks").setup({
                 args = rg_args,
                 show_empty = true,
                 hidden = true,
-                ignored = true,
+                ignored = false,
                 follow = false,
                 supports_live = true,
               })
@@ -562,7 +563,7 @@ require("snacks").setup({
         args = fd_args,
         show_empty = true,
         hidden = true,
-        ignored = true,
+        ignored = false,
         follow = false,
         supports_live = true,
       },
@@ -570,7 +571,7 @@ require("snacks").setup({
         cmd = "rg",
         args = rg_args,
         hidden = true,
-        ignored = true,
+        ignored = false,
         follow = false,
         supports_live = true,
       },
