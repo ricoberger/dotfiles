@@ -22,7 +22,7 @@ confirm-close-surface = true
 macos-option-as-alt = true
 clipboard-paste-protection = false
 clipboard-paste-bracketed-safe = true
-quick-terminal-size = 50%,50%
+quick-terminal-size = 70%,70%
 quick-terminal-position = center
 
 # Keybindings
