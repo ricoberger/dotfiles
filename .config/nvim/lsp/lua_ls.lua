@@ -15,7 +15,7 @@ return {
     Lua = {
       workspace = { checkThirdParty = false },
       telemetry = { enable = false },
-      diagnostics = { globals = { "vim" } },
+      diagnostics = { globals = { "vim", "Snacks" } },
       format = { enable = false },
     },
   },
