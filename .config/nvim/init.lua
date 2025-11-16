@@ -792,6 +792,12 @@ end)
 vim.keymap.set("n", "<leader>fq", function()
   Snacks.picker.qflist()
 end)
+vim.keymap.set("n", "<leader>fd", function()
+  Snacks.picker.diagnostics_buffer()
+end)
+vim.keymap.set("n", "<leader>fD", function()
+  Snacks.picker.diagnostics()
+end)
 
 --------------------------------------------------------------------------------
 -- SEARCH THROUGH FILES
@@ -1153,12 +1159,6 @@ vim.api.nvim_create_autocmd("LspAttach", {
 })
 
 -- Keymaps for LSP-related Snacks picker functionalities.
-vim.keymap.set("n", "<leader>ld", function()
-  Snacks.picker.diagnostics_buffer()
-end)
-vim.keymap.set("n", "<leader>lD", function()
-  Snacks.picker.diagnostics()
-end)
 vim.keymap.set("n", "<leader>ls", function()
   Snacks.picker.lsp_symbols()
 end)
