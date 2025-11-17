@@ -1305,26 +1305,31 @@ end)
 --   - git difftool -d origin/HEAD...HEAD
 vim.cmd([[packadd nvim.difftool]])
 
--- Populate the quickfix list with all merge conflicts in the current
+-- Custom Snacks picker to find all merge conflicts in the current Git
 -- repository.
 --
 -- See: https://github.com/git/git/blob/215033b3ac599432a17d58f18a92b356d98354a9/contrib/git-jump/git-jump#L59
-vim.keymap.set("n", "<leader>gm", function()
-  local qflist = {}
+vim.keymap.set("n", "<leader>gfm", function()
+  local items = {}
   local files = vim.fn.systemlist(
     "git ls-files -u | perl -pe 's/^.*?\t//' | sort -u | while IFS= read fn; do grep -Hn '^<<<<<<<' \"$fn\"; done"
   )
 
-  for _, file in pairs(files) do
+  for idx, file in pairs(files) do
     local parts = vim.fn.split(file, ":")
-    table.insert(
-      qflist,
-      { filename = parts[1], lnum = parts[2], text = parts[3] }
-    )
+    table.insert(items, {
+      idx = idx,
+      text = parts[1] .. ":" .. parts[2],
+      file = parts[1],
+      cwd = Snacks.git.get_root(),
+      pos = { tonumber(parts[2]), 0 },
+    })
   end
 
-  vim.fn.setqflist({}, " ", { title = "Merge conflicts", items = qflist })
-  vim.cmd.copen()
+  Snacks.picker({
+    title = "Git Merge Conflicts",
+    items = items,
+  })
 end)
 
 --------------------------------------------------------------------------------
