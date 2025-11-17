@@ -405,7 +405,7 @@ local fd_args = {
 
 local rg_args = {
   "--glob=!.git",
-  "--glob=!.node_modules",
+  "--glob=!node_modules",
   "--glob=!dist",
   "--glob=!.DS_Store",
 }
