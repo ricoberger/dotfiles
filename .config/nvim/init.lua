@@ -235,30 +235,30 @@ vim.keymap.set("n", "<m-j>", "<cmd>m .+1<cr>==")
 vim.keymap.set("n", "<m-k>", "<cmd>m .-2<cr>==")
 vim.keymap.set("i", "<m-j>", "<esc><cmd>m .+1<cr>==gi")
 vim.keymap.set("i", "<m-k>", "<esc><cmd>m .-2<cr>==gi")
-vim.keymap.set("v", "<m-j>", ":m '>+1<cr>gv=gv")
-vim.keymap.set("v", "<m-k>", ":m '<-2<cr>gv=gv")
+vim.keymap.set("x", "<m-j>", ":m '>+1<cr>gv=gv")
+vim.keymap.set("x", "<m-k>", ":m '<-2<cr>gv=gv")
 
 -- Better indenting in visual mode using "<" and ">".
-vim.keymap.set("v", "<", "<gv")
-vim.keymap.set("v", ">", ">gv")
+vim.keymap.set("x", "<", "<gv")
+vim.keymap.set("x", ">", ">gv")
 
 -- Clear search with "Esc" in normal and insert mode.
 vim.keymap.set({ "i", "n" }, "<esc>", "<cmd>noh<cr><esc>")
 
 -- Surround the visual selection with parentheses, brackets, braces or quotes.
-vim.keymap.set("v", "gs(", "<esc>`>a)<esc>`<i(<esc>")
-vim.keymap.set("v", "gs)", "<esc>`>a)<esc>`<i(<esc>")
-vim.keymap.set("v", "gs{", "<esc>`>a}<esc>`<i{<esc>")
-vim.keymap.set("v", "gs}", "<esc>`>a}<esc>`<i{<esc>")
-vim.keymap.set("v", "gs[", "<esc>`>a]<esc>`<i[<esc>")
-vim.keymap.set("v", "gs]", "<esc>`>a]<esc>`<i[<esc>")
-vim.keymap.set("v", "gs<", "<esc>`>a><esc>`<i<<esc>")
-vim.keymap.set("v", "gs>", "<esc>`>a><esc>`<i<<esc>")
-vim.keymap.set("v", 'gs"', '<esc>`>a"<esc>`<i"<esc>')
-vim.keymap.set("v", "gs'", "<esc>`>a'<esc>`<i'<esc>")
-vim.keymap.set("v", "gs`", "<esc>`>a`<esc>`<i`<esc>")
-vim.keymap.set("v", "gs*", "<esc>`>a*<esc>`<i*<esc>")
-vim.keymap.set("v", "gs_", "<esc>`>a_<esc>`<i_<esc>")
+vim.keymap.set("x", "gs(", "<esc>`>a)<esc>`<i(<esc>")
+vim.keymap.set("x", "gs)", "<esc>`>a)<esc>`<i(<esc>")
+vim.keymap.set("x", "gs{", "<esc>`>a}<esc>`<i{<esc>")
+vim.keymap.set("x", "gs}", "<esc>`>a}<esc>`<i{<esc>")
+vim.keymap.set("x", "gs[", "<esc>`>a]<esc>`<i[<esc>")
+vim.keymap.set("x", "gs]", "<esc>`>a]<esc>`<i[<esc>")
+vim.keymap.set("x", "gs<", "<esc>`>a><esc>`<i<<esc>")
+vim.keymap.set("x", "gs>", "<esc>`>a><esc>`<i<<esc>")
+vim.keymap.set("x", 'gs"', '<esc>`>a"<esc>`<i"<esc>')
+vim.keymap.set("x", "gs'", "<esc>`>a'<esc>`<i'<esc>")
+vim.keymap.set("x", "gs`", "<esc>`>a`<esc>`<i`<esc>")
+vim.keymap.set("x", "gs*", "<esc>`>a*<esc>`<i*<esc>")
+vim.keymap.set("x", "gs_", "<esc>`>a_<esc>`<i_<esc>")
 
 --------------------------------------------------------------------------------
 -- COMMAND LINE
@@ -713,18 +713,14 @@ vim.keymap.set(
   "<leader>rr",
   [[:%s///gcI<left><left><left><left><left>]]
 )
-vim.keymap.set(
-  { "v" },
-  "<leader>rr",
-  [[:s///gcI<left><left><left><left><left>]]
-)
+vim.keymap.set("x", "<leader>rr", [[:s///gcI<left><left><left><left><left>]])
 vim.keymap.set(
   "n",
   "<leader>rw",
   [[:%s/\<<c-r><c-w>\>//gcI<left><left><left><left>]]
 )
 vim.keymap.set(
-  "v",
+  "x",
   "<leader>rw",
   [[y:%s/\V<c-r>"//gcI<left><left><left><left>]]
 )
@@ -741,10 +737,10 @@ vim.keymap.set(
     .. [[<left><left><left><left><left><left><left><left><left><left><left><left><left>]]
 )
 vim.keymap.set(
-  "v",
+  "x",
   "<leader>rW",
   [[y:cfdo %s/\V<c-r>"//gcI | update]]
-    .. [[<left><left><left><left><left><left><left><left><left><left><left><left><left><left>]]
+    .. [[<left><left><left><left><left><left><left><left><left><left><left><left><left>]]
 )
 
 --------------------------------------------------------------------------------
