@@ -322,6 +322,12 @@ vim.api.nvim_set_keymap(
 -- COLORSCHEME
 --------------------------------------------------------------------------------
 
+-- Set borders for floating windows, popup menus and the command line completion
+-- menu. Also set a custom background color for the popup menu and a border
+-- color.
+vim.opt.winborder = "single"
+vim.opt.pumborder = "single"
+
 -- Use the built-in plugin manager to install the Catppuccin theme
 --
 -- See: https://neovim.io/doc/user/pack.html#_plugin-manager
@@ -367,18 +373,15 @@ require("catppuccin").setup({
     },
     treesitter = true,
   },
+  custom_highlights = function(colors)
+    return {
+      Pmenu = { bg = colors.mantle },
+      PmenuBorder = { bg = colors.mantle, fg = colors.blue },
+    }
+  end,
 })
 
 vim.cmd.colorscheme("catppuccin")
-
--- Set borders for floating windows, popup menus and the command line completion
--- menu. Also set a custom background color for the popup menu and a border
--- color.
-vim.opt.winborder = "single"
-vim.opt.pumborder = "single"
-
-vim.api.nvim_set_hl(0, "Pmenu", { bg = "#1e2030" })
-vim.api.nvim_set_hl(0, "PmenuBorder", { bg = "#1e2030", fg = "#8aadf4" })
 
 --------------------------------------------------------------------------------
 -- SNACKS
