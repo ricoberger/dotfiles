@@ -1504,3 +1504,86 @@ end)
 vim.keymap.set({ "n" }, "<leader>an", function()
   require("sidekick.nes").toggle()
 end)
+
+--------------------------------------------------------------------------------
+-- NOTES
+--------------------------------------------------------------------------------
+
+local notes_dir = "/Users/ricoberger/Documents/GitHub/ricoberger/notes"
+
+vim.keymap.set("n", "<leader>nd", function()
+  local date = vim.fn.strftime("%Y/%m/%Y-%m-%d")
+
+  if vim.uv.fs_stat(notes_dir .. "/daily/" .. date .. ".md") then
+    vim.cmd("e " .. notes_dir .. "/daily/" .. date .. ".md")
+  else
+    vim.cmd("e " .. notes_dir .. "/daily/" .. date .. ".md")
+    vim.cmd("r " .. notes_dir .. "/daily/template.md")
+  end
+end)
+
+vim.keymap.set("n", "<leader>ny", function()
+  local date = vim.fn.strftime("%Y/%m/%Y-%m-%d", vim.fn.localtime() - 3600 * 24)
+  vim.cmd("e " .. notes_dir .. "/daily/" .. date .. ".md")
+end)
+
+vim.keymap.set("n", "<leader>nf", function()
+  Snacks.picker.files({
+    cwd = notes_dir,
+    cmd = "fd",
+    args = fd_args,
+    show_empty = true,
+    hidden = true,
+    ignored = false,
+    follow = false,
+    supports_live = true,
+  })
+end)
+
+vim.keymap.set("n", "<leader>ns", function()
+  Snacks.picker.grep({
+    cwd = notes_dir,
+    cmd = "rg",
+    args = rg_args,
+    hidden = true,
+    ignored = false,
+    follow = false,
+    supports_live = true,
+  })
+end)
+
+vim.keymap.set("n", "<leader>nt", function()
+  Snacks.picker.grep({
+    cwd = notes_dir,
+    regex = true,
+    cmd = "rg",
+    args = rg_args,
+    format = "file",
+    search = function()
+      return "- \\[ \\] .*"
+    end,
+    live = false,
+    supports_live = true,
+  })
+end)
+
+vim.keymap.set("n", "<leader>nk", function()
+  Snacks.picker.grep({
+    cwd = notes_dir,
+    regex = true,
+    cmd = "rg",
+    args = rg_args,
+    format = "file",
+    search = function()
+      return "^tags: \\[(.*)\\]$"
+    end,
+    live = false,
+    supports_live = true,
+  })
+end)
+
+vim.keymap.set("n", "<leader>ne", function()
+  Snacks.picker.explorer({
+    cwd = notes_dir,
+  })
+end)
