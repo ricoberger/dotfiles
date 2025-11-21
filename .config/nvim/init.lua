@@ -482,7 +482,7 @@ require("snacks").setup({
           -- yanking file information. By default the command would copy the
           -- full path ot the file to the clipboard. Now we can choose what path
           -- should be copied.
-          explorer_yank = {
+          explorer_yank_path = {
             action = function(_, item)
               if not item then
                 return
@@ -554,7 +554,7 @@ require("snacks").setup({
         win = {
           list = {
             keys = {
-              ["y"] = "explorer_yank",
+              ["Y"] = "explorer_yank_path",
               ["s"] = "explorer_search_in_directory",
               ["D"] = "explorer_diff",
             },
@@ -689,7 +689,6 @@ vim.keymap.set({ "n", "x" }, "<leader>sw", function()
 end)
 vim.keymap.set({ "n", "x" }, "<leader>st", function()
   Snacks.picker.grep({
-    finder = "grep",
     regex = true,
     cmd = "rg",
     args = rg_args,
@@ -846,6 +845,7 @@ local ts_parsers = {
   "markdown",
   "markdown_inline",
   "python",
+  "regex",
   "rust",
   "sql",
   "terraform",
