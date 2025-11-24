@@ -62,6 +62,7 @@ local icons = {
 --------------------------------------------------------------------------------
 
 vim.opt.background = "dark"
+vim.opt.shada = "!,'1000,<50,s10,h"
 vim.opt.cc = "80,120" -- Display rulers
 vim.opt.clipboard = "unnamedplus" -- Sync with system clipboard
 vim.opt.completeopt = { "menuone", "noselect", "fuzzy", "nosort", "popup" } -- Better completion experience
