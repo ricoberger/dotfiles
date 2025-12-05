@@ -1359,22 +1359,32 @@ vim.keymap.set("n", "<leader>ghP", function()
 end)
 
 --------------------------------------------------------------------------------
--- TERMINAL
+-- MISC
 --------------------------------------------------------------------------------
 
-vim.keymap.set("n", "<leader>tt", function()
-  Snacks.terminal.toggle()
-end)
-vim.keymap.set("n", "<leader>to", function()
-  Snacks.terminal.open()
-end)
-
---------------------------------------------------------------------------------
--- ZEN
---------------------------------------------------------------------------------
-
-vim.keymap.set("n", "<leader>zz", function()
+-- Toggle zen mode for distraction-free coding.
+vim.keymap.set("n", "<leader>mz", function()
   Snacks.zen()
+end)
+
+-- Toggle spell checking for the current buffer. If spell checking is already
+-- enabled with the given language then it will be disabled.
+local function toggle_spell(lang)
+  local spell_on = vim.opt_local.spell:get()
+  local current_langs = vim.opt_local.spelllang:get()
+  local current_lang = spell_on and current_langs[1] or nil
+
+  if current_lang == lang then
+    vim.opt_local.spell = false
+    return
+  end
+
+  vim.opt_local.spell = true
+  vim.opt_local.spelllang = { lang }
+end
+
+vim.keymap.set("n", "<leader>ms", function()
+  toggle_spell("en_us")
 end)
 
 --------------------------------------------------------------------------------
