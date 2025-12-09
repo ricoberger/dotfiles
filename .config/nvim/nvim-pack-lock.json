@@ -21,12 +21,12 @@
       "version": "'master'"
     },
     "multicursor": {
-      "rev": "a6cf4e7",
+      "rev": "c1d0f629e825877c7bec363bd8b7815f233d8742",
       "src": "https://github.com/jake-stewart/multicursor.nvim",
       "version": "'main'"
     },
     "nvim-treesitter": {
-      "rev": "75797cdd8ac125c7ace065b17788b439dcf89a71",
+      "rev": "b6271b678e035a5cbf62d637364f3eeca0890171",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     },
