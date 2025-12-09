@@ -82,6 +82,11 @@ set foldlevel=99
 set foldlevelstart=99
 set foldmethod=indent
 
+" Cursor shape
+let &t_SI.="\e[6 q" "SI = INSERT
+let &t_SR.="\e[4 q" "SR = REPLACE
+let &t_EI.="\e[2 q" "EI = NORMAL
+
 " Enable strikethrough.
 let &t_Ts = "\e[9m"
 let &t_Te = "\e[29m"
