@@ -1506,7 +1506,7 @@ end, { expr = true })
 -- Add keymaps for AI chat related actions. The "Space + aa" can be used toggle
 -- the AI chat window and focuses it. The "Space + ap" keymap can be used to
 -- select a predifined prompt / context.
-vim.keymap.set({ "n", "t", "x" }, "<leader>aa", function()
+vim.keymap.set({ "n", "x" }, "<leader>aa", function()
   require("sidekick.cli").toggle({ name = "copilot", focus = true })
 end)
 vim.keymap.set({ "n", "x" }, "<leader>ap", function()
