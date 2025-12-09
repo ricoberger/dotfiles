@@ -24,6 +24,7 @@ clipboard-paste-protection = false
 clipboard-paste-bracketed-safe = true
 quick-terminal-size = 70%,70%
 quick-terminal-position = center
+auto-update-channel = tip
 
 # Keybindings
 keybind = clear
@@ -75,6 +76,7 @@ keybind = super+zero=reset_font_size
 keybind = super+v=paste_from_clipboard
 keybind = super+c=copy_to_clipboard
 keybind = super+a=select_all
+keybind = super+f=start_search
 
 keybind = super+k=clear_screen
 
