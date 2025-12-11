@@ -1257,12 +1257,6 @@ require("gitsigns").setup({
       { buffer = bufnr }
     )
 
-    -- Git blame line / buffer.
-    vim.keymap.set("n", "<leader>gsb", function()
-      gitsigns.blame_line({ full = true })
-    end, { buffer = bufnr })
-    vim.keymap.set("n", "<leader>gsB", gitsigns.blame, { buffer = bufnr })
-
     -- Git diff.
     vim.keymap.set("n", "<leader>gsd", gitsigns.diffthis, { buffer = bufnr })
     vim.keymap.set("n", "<leader>gsD", function()
@@ -1276,6 +1270,14 @@ require("gitsigns").setup({
     end, { buffer = bufnr })
   end,
 })
+
+-- Git blame line via Snacks.
+--
+-- We are using the gitsigns prefix, also when we are using Snacks for blaming
+-- lines.
+vim.keymap.set("n", "<leader>gsb", function()
+  Snacks.git.blame_line()
+end)
 
 -- Find related Git actions powered by the Snacks picker. It is possible to find
 -- files, diffs, branches, commits, stashed and status entries.
@@ -1335,6 +1337,7 @@ vim.keymap.set("n", "<leader>gfm", function()
   })
 end)
 
+-- Open the position under the cursor on GitHub, GitLab, Bitbucket, etc.
 vim.keymap.set("n", "<leader>gb", function()
   Snacks.gitbrowse()
 end)
