@@ -549,8 +549,8 @@ require("snacks").setup({
               picker:close()
               local sel = picker:selected()
               if #sel > 0 and sel then
-                vim.cmd("tabnew " .. sel[1].file)
-                vim.cmd("vert diffs " .. sel[2].file)
+                vim.cmd("tabnew")
+                vim.cmd("DiffTool " .. sel[1].file .. " " .. sel[2].file)
                 return
               end
             end,
