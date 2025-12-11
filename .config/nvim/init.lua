@@ -966,7 +966,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
       -- See: https://neovim.io/doc/user/lsp.html#_global-defaults
       vim.keymap.set("n", "grf", function()
         vim.lsp.buf.format({
-          timeout_ms = 10000,
+          timeout_ms = 60000,
         })
       end, { buffer = buffer })
       vim.keymap.set("n", "gd", function()
