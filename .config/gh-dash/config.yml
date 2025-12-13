@@ -51,7 +51,16 @@ repoPaths:
   :owner/:repo: ~/Documents/GitHub/:owner/:repo
 
 keybindings:
+  issues:
+    - name: open (nvim)
+      key: O
+      command: |
+        nvim -c ':lua Snacks.picker.gh_actions({ type = "issue", repo = "{{.RepoName}}", number = "{{.IssueNumber}}" })'
   prs:
+    - name: open (nvim)
+      key: O
+      command: |
+        nvim -c ':lua Snacks.picker.gh_actions({ type = "pr", repo = "{{.RepoName}}", number = "{{.PrNumber}}" })'
     - name: diff (nvim)
       key: D
       command: |
@@ -59,15 +68,6 @@ keybindings:
     - name: merge (admin)
       key: M
       command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
-    - name: add label
-      key: Ctrl+l
-      command: cd {{.RepoPath}} && gh-pr-edit-add-label {{.PrNumber}}
-    - name: remove label
-      key: Ctrl+k
-      command: cd {{.RepoPath}} && gh-pr-edit-remove-label {{.PrNumber}}
-    - name: show logs
-      key: Ctrl+w
-      command: cd {{.RepoPath}} && gh pr checkout {{.PrNumber}} && gh-run | less
 
 theme:
   colors:
