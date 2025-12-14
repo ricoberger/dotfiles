@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+# gh-notifications fetches all GitHub notifications using the GitHub
+# command-line tool (gh) and the GraphQL API. This is an alternative to the
+# "gh api notifications --method GET -F all=true --paginate | jq -s 'add | map({repo: .repository.full_name, title: .subject.title, type: .subject.type, reason: .reason, url: .subject.url, updated: .updated_at, unread: .unread})'"
+# command, which provides the same notifications as the GitHub web interface.
+#
+# The script requires more scopes on the GitHub token, these scopes can be added
+# by running
+# "gh auth refresh --scopes 'gist,read:org,repo,workflow,notifications,read:discussion'"
+#
+# See: https://gist.github.com/0xdevalias/04ec31b12edaae727cd87d379499c14c#github-ios-graphql-query
+
+set -e
+
+QUERY='
+query Inbox(
+  $first: Int!
+  $after: String
+  $filterBy: NotificationThreadFilters
+  $searchQuery: String
+) {
+  viewer {
+    __typename
+    id
+    notificationThreads(
+      first: $first
+      after: $after
+      filterBy: $filterBy
+      query: $searchQuery
+    ) {
+      __typename
+      pageInfo {
+        __typename
+        hasNextPage
+        endCursor
+      }
+      totalCount
+      nodes {
+        __typename
+        ...NotificationThreadCommonFieldsFragment
+        url
+        subject {
+          __typename
+          ... on Issue {
+            ...InboxSubjectIssueFieldsFragment
+          }
+          ... on PullRequest {
+            ...InboxSubjectPullRequestFieldsFragment
+          }
+        }
+      }
+    }
+  }
+}
+fragment InboxSubjectIssueFieldsFragment on Issue {
+  __typename
+  id
+  number
+  issueState: state
+  stateReason
+  issueHtmlTitle: titleHTML
+  url
+}
+fragment InboxSubjectPullRequestFieldsFragment on PullRequest {
+  __typename
+  id
+  number
+  pullRequestHtmlTitle: titleHTML
+  url
+}
+fragment NotificationThreadCommonFieldsFragment on NotificationThread {
+  __typename
+  id
+  threadType
+  threadId
+  title
+  isUnread
+  unreadItemsCount
+  lastUpdatedAt
+  subscriptionStatus
+  summaryItemBody
+  isArchived
+  isSaved
+  reason
+}
+'
+
+all_nodes="[]"
+after=""
+has_next_page=true
+
+while [ "$has_next_page" = true ]; do
+  if [ -z "$after" ]; then
+    response=$(gh api graphql -F first="100" -F searchQuery="$1" -F operationName="Inbox" --raw-field query="$QUERY")
+  else
+    response=$(gh api graphql -F first="100" -F after="$after" -F searchQuery="$1" -F operationName="Inbox" --raw-field query="$QUERY")
+  fi
+
+  has_next_page=$(echo "$response" | jq -r '.data.viewer.notificationThreads.pageInfo.hasNextPage')
+  after=$(echo "$response" | jq -r '.data.viewer.notificationThreads.pageInfo.endCursor')
+  nodes=$(echo "$response" | jq -c '.data.viewer.notificationThreads.nodes')
+
+  all_nodes=$(echo "$all_nodes" | jq -c --argjson new_nodes "$nodes" '. + $new_nodes')
+done
+
+echo "$all_nodes"

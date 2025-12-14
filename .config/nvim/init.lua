@@ -59,6 +59,10 @@ local icons = {
     commit = "󰜘",
     unmerged = " ",
   },
+  notifications = {
+    unread = "",
+    read = "",
+  },
 }
 
 --------------------------------------------------------------------------------
@@ -322,6 +326,56 @@ vim.api.nvim_set_keymap(
   "v:lua.get_wildmenu_key('<c-y>', '<cr>')",
   { expr = true }
 )
+
+--------------------------------------------------------------------------------
+-- UTILS
+--------------------------------------------------------------------------------
+
+-- Convert ISO 8601 timestamp to relative time
+--
+-- See: https://github.com/folke/snacks.nvim/blob/fe7cfe9800a182274d0f868a74b7263b8c0c020b/lua/snacks/gh/item.lua#L15
+-- See: https://github.com/folke/snacks.nvim/blob/fe7cfe9800a182274d0f868a74b7263b8c0c020b/lua/snacks/picker/util/init.lua#L414
+local function format_relative_time(s)
+  local year, month, day, hour, min, sec =
+    s:match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)Z$")
+  if not year then
+    return
+  end
+  local t = os.time({
+    year = assert(tonumber(year), "invalid year in timestamp: " .. s),
+    month = assert(tonumber(month), "invalid month in timestamp: " .. s),
+    day = assert(tonumber(day), "invalid day in timestamp: " .. s),
+    hour = assert(tonumber(hour), "invalid hour in timestamp: " .. s),
+    min = assert(tonumber(min), "invalid minute in timestamp: " .. s),
+    sec = assert(tonumber(sec), "invalid second in timestamp: " .. s),
+    isdst = false,
+  })
+
+  -- Calculate UTC offset
+  local now = os.time()
+  local utc_date = os.date("!*t", now)
+  utc_date.isdst = false
+  local time = t + os.difftime(now, os.time(utc_date))
+
+  local delta = os.time() - time
+  local tpl = {
+    { 1, 60, "just now", "just now" },
+    { 60, 3600, "a minute ago", "%d minutes ago" },
+    { 3600, 3600 * 24, "an hour ago", "%d hours ago" },
+    { 3600 * 24, 3600 * 24 * 7, "yesterday", "%d days ago" },
+    { 3600 * 24 * 7, 3600 * 24 * 7 * 4, "a week ago", "%d weeks ago" },
+  }
+  for _, v in ipairs(tpl) do
+    if delta < v[2] then
+      local value = math.floor(delta / v[1] + 0.5)
+      return value == 1 and v[3] or v[4]:format(value)
+    end
+  end
+  if os.date("%Y", time) == os.date("%Y") then
+    return os.date("%b %d", time)
+  end
+  return os.date("%b %d, %Y", time)
+end
 
 --------------------------------------------------------------------------------
 -- COLORSCHEME
@@ -1350,20 +1404,342 @@ end)
 -- GITHUB
 --------------------------------------------------------------------------------
 
--- Select issues and pull requests from current GitHub repository and open them
--- in Neovim.
-vim.keymap.set("n", "<leader>ghi", function()
-  Snacks.picker.gh_issue()
-end)
-vim.keymap.set("n", "<leader>ghI", function()
-  Snacks.picker.gh_issue({ state = "all" })
-end)
-vim.keymap.set("n", "<leader>ghp", function()
-  Snacks.picker.gh_pr()
-end)
-vim.keymap.set("n", "<leader>ghP", function()
-  Snacks.picker.gh_pr({ state = "all" })
-end)
+-- Fetch notifications from GitHub and show them via the Snacks picker. Issues
+-- and PRs can be opened via Snacks. Discussions are opened in the browser.
+vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
+  -- Fetch notifications from GitHub using the "gh" command-line tool and handle
+  -- any errors.
+  local output =
+    vim.fn.system(string.format("gh-notifications '%s'", opts.args))
+
+  if vim.v.shell_error ~= 0 then
+    vim.notify(
+      "Failed to fetch GitHub notifications: " .. output,
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  local ok, notifications = pcall(vim.fn.json_decode, output)
+  if not ok or type(notifications) ~= "table" then
+    vim.notify("Failed to parse GitHub notifications", vim.log.levels.ERROR)
+    return
+  end
+
+  if #notifications == 0 then
+    vim.notify("No GitHub notifications found", vim.log.levels.INFO)
+    return
+  end
+
+  -- Prepare the items for the Snacks picker and format them nicely.
+  local items = {}
+  for idx, notification in ipairs(notifications) do
+    local item = notification
+    item.idx = idx
+    item.text = item.title
+    item.preview = {
+      text = item.summaryItemBody,
+      ft = "markdown",
+    }
+    item.relativeLastUpdatedAt = format_relative_time(item.lastUpdatedAt)
+    item.repo = item.url:match("github.com/([^/]+/[^/]+)")
+    table.insert(items, item)
+  end
+
+  -- Open the Snacks picker with the formatted notification items and format the
+  -- items nicely.
+  Snacks.picker({
+    title = "GitHub Notifications",
+    layout = {
+      preset = "default",
+      preview = false,
+    },
+    preview = "preview",
+    items = items,
+    format = function(item, _)
+      -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
+      local icon = { icons.notifications.read, "SnacksPickerGitStatusAdded" }
+      if item.isUnread then
+        icon = { icons.notifications.unread, "SnacksPickerGitStatusAdded" }
+      end
+
+      return {
+        icon,
+        { " [", "SnacksPickerGitStatusIgnored" },
+        { item.subject.__typename, "SnacksPickerGitType" },
+        { "] ", "SnacksPickerGitStatusIgnored" },
+        { item.repo, "SnacksPickerGitStatusIgnored" },
+        { ": ", "SnacksPickerGitStatusIgnored" },
+        { item.title, "SnacksPickerGitScope" },
+        { " (", "SnacksPickerGitStatusIgnored" },
+        { item.reason:lower():gsub("_", " "), "SnacksPickerGitStatusIgnored" },
+        { " - ", "SnacksPickerGitStatusIgnored" },
+        { item.relativeLastUpdatedAt, "SnacksPickerGitStatusIgnored" },
+        { ")", "SnacksPickerGitStatusIgnored" },
+      }
+    end,
+    confirm = function(picker, item)
+      -- If the item is an issue or pull request, we try to open it via Snacks,
+      -- otherwise we open it in the browser.
+      if
+        item.subject.__typename == "Issue"
+        or item.subject.__typename == "PullRequest"
+      then
+        local itemType = item.subject.__typename == "Issue" and "issue" or "pr"
+
+        picker:close()
+        Snacks.picker.gh_actions({
+          type = itemType,
+          repo = item.repo,
+          number = item.subject.number,
+        })
+      else
+        vim.fn.system(string.format("open '%s'", item.url))
+      end
+    end,
+    actions = {
+      picker_yank_url = function(_, item)
+        if not item then
+          return
+        end
+
+        vim.fn.setreg("+", item.url)
+        vim.notify("Yanked " .. item.url, vim.log.levels.INFO)
+      end,
+      picker_mark_as_read = function(_, item)
+        if not item then
+          return
+        end
+
+        local readoutput = vim.fn.system(
+          string.format(
+            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsRead(input: {id: $notificationId}) { success } }'",
+            item.id
+          )
+        )
+        if vim.v.shell_error ~= 0 then
+          vim.notify(
+            "Failed to mark notitifaction as read: " .. readoutput,
+            vim.log.levels.ERROR
+          )
+          return
+        end
+
+        vim.notify("Notitifaction was marked as read", vim.log.levels.INFO)
+      end,
+      picker_mark_as_unread = function(_, item)
+        if not item then
+          return
+        end
+
+        local readoutput = vim.fn.system(
+          string.format(
+            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsUnread(input: {id: $notificationId}) { success } }'",
+            item.id
+          )
+        )
+        if vim.v.shell_error ~= 0 then
+          vim.notify(
+            "Failed to mark notitifaction as unread: " .. readoutput,
+            vim.log.levels.ERROR
+          )
+          return
+        end
+
+        vim.notify("Notitifaction was marked as unread", vim.log.levels.INFO)
+      end,
+      picker_mark_as_done = function(_, item)
+        if not item then
+          return
+        end
+
+        local readoutput = vim.fn.system(
+          string.format(
+            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsDone(input: {id: $notificationId}) { success } }'",
+            item.id
+          )
+        )
+        if vim.v.shell_error ~= 0 then
+          vim.notify(
+            "Failed to mark notitifaction as done: " .. readoutput,
+            vim.log.levels.ERROR
+          )
+          return
+        end
+
+        vim.notify("Notitifaction was marked as done", vim.log.levels.INFO)
+      end,
+    },
+    win = {
+      input = {
+        keys = {
+          ["y"] = "picker_yank_url",
+          ["Y"] = "picker_yank_url",
+          ["r"] = "picker_mark_as_read",
+          ["R"] = "picker_mark_as_unread",
+          ["d"] = "picker_mark_as_done",
+        },
+      },
+    },
+  })
+end, {
+  nargs = "*",
+})
+
+vim.keymap.set("n", "<leader>ghn", "<cmd>GitHubNotifications -is:done<cr>")
+
+-- Fetch search results from GitHub and show them via the Snacks picker. Issues
+-- and PRs are opened via Snacks.
+vim.api.nvim_create_user_command("GitHubSearch", function(opts)
+  -- Fetch search results from GitHub using the "gh" command-line tool and
+  -- handle any errors.
+  local output = vim.fn.system(
+    string.format(
+      "gh search issues --include-prs --limit 100 --json author,body,isPullRequest,number,repository,title,updatedAt,url %s",
+      opts.args
+    )
+  )
+  if vim.v.shell_error ~= 0 then
+    vim.notify(
+      "Failed to fetch GitHub search results: " .. output,
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  local ok, results = pcall(vim.fn.json_decode, output)
+  if not ok or type(results) ~= "table" then
+    vim.notify("Failed to parse GitHub search results", vim.log.levels.ERROR)
+    return
+  end
+
+  if #results == 0 then
+    vim.notify("No GitHub search results found", vim.log.levels.INFO)
+    return
+  end
+
+  -- Prepare the items for the Snacks picker and format them nicely.
+  local items = {}
+  for idx, result in ipairs(results) do
+    local item = result
+    item.idx = idx
+    item.text = result.title
+    item.preview = {
+      text = item.body,
+      ft = "markdown",
+    }
+    item.relativeUpdatedAt = format_relative_time(item.updatedAt)
+    table.insert(items, item)
+  end
+
+  -- Open the Snacks picker with the formatted notification items and format the
+  -- items nicely.
+  Snacks.picker({
+    title = "GitHub Search Results",
+    layout = {
+      preset = "default",
+      preview = false,
+    },
+    preview = "preview",
+    items = items,
+    format = function(item, _)
+      -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
+      return {
+        { "[", "SnacksPickerGitStatusIgnored" },
+        { "#" .. item.number, "SnacksPickerGitType" },
+        { "] ", "SnacksPickerGitStatusIgnored" },
+        { item.repository.nameWithOwner, "SnacksPickerGitStatusIgnored" },
+        { ": ", "SnacksPickerGitStatusIgnored" },
+        { item.title, "SnacksPickerGitScope" },
+        { " (by ", "SnacksPickerGitStatusIgnored" },
+        { item.author.login, "SnacksPickerGitStatusIgnored" },
+        { " - ", "SnacksPickerGitStatusIgnored" },
+        { item.relativeUpdatedAt, "SnacksPickerGitStatusIgnored" },
+        { ")", "SnacksPickerGitStatusIgnored" },
+      }
+    end,
+    confirm = function(picker, item)
+      local itemType = item.isPullRequest and "pr" or "issue"
+
+      picker:close()
+      Snacks.picker.gh_actions({
+        type = itemType,
+        repo = item.repository.nameWithOwner,
+        number = item.number,
+      })
+    end,
+    actions = {
+      picker_yank_url = function(_, item)
+        if not item then
+          return
+        end
+
+        vim.fn.setreg("+", item.url)
+        vim.notify("Yanked " .. item.url, vim.log.levels.INFO)
+      end,
+    },
+    win = {
+      input = {
+        keys = {
+          ["y"] = "picker_yank_url",
+          ["Y"] = "picker_yank_url",
+        },
+      },
+    },
+  })
+end, {
+  nargs = "*",
+})
+
+-- Show pull requests involving, created by, assigned to, mentioning or
+-- requesting a review from me.
+vim.keymap.set(
+  "n",
+  "<leader>ghpi",
+  "<cmd>GitHubSearch is:pr is:open involves:ricoberger<cr>"
+)
+vim.keymap.set(
+  "n",
+  "<leader>ghpc",
+  "<cmd>GitHubSearch is:pr is:open author:ricoberger<cr>"
+)
+vim.keymap.set(
+  "n",
+  "<leader>ghpa",
+  "<cmd>GitHubSearch is:pr is:open assignee:ricoberger<cr>"
+)
+vim.keymap.set(
+  "n",
+  "<leader>ghpm",
+  "<cmd>GitHubSearch is:pr is:open mentions:ricoberger<cr>"
+)
+vim.keymap.set(
+  "n",
+  "<leader>ghpr",
+  "<cmd>GitHubSearch is:pr is:open review-requested:ricoberger<cr>"
+)
+
+-- Show issues involving, created by, assigned to or mentioning me.
+vim.keymap.set(
+  "n",
+  "<leader>ghii",
+  "<cmd>GitHubSearch is:issue is:open involves:ricoberger<cr>"
+)
+vim.keymap.set(
+  "n",
+  "<leader>ghic",
+  "<cmd>GitHubSearch is:issue is:open author:ricoberger<cr>"
+)
+vim.keymap.set(
+  "n",
+  "<leader>ghia",
+  "<cmd>GitHubSearch is:issue is:open assignee:ricoberger<cr>"
+)
+vim.keymap.set(
+  "n",
+  "<leader>ghim",
+  "<cmd>GitHubSearch is:issue is:open mentions:ricoberger<cr>"
+)
 
 --------------------------------------------------------------------------------
 -- MISC
