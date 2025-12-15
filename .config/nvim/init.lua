@@ -478,7 +478,7 @@ require("snacks").setup({
   bigfile = {
     enabled = true,
     notify = true,
-    size = 1 * 1024 * 1024,
+    size = 3 * 1024 * 1024,
   },
   -- GitHub CLI integration.
   gh = {
