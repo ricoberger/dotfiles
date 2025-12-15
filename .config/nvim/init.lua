@@ -58,6 +58,8 @@ local icons = {
     -- Snacks
     commit = "󰜘",
     unmerged = " ",
+    pullrequest = "",
+    issue = "",
   },
   notifications = {
     unread = "",
@@ -1463,8 +1465,29 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         icon = { icons.notifications.unread, "SnacksPickerGitStatusAdded" }
       end
 
+      local type_icon = { " " .. icons.git.issue, "SnacksPickerGitStatusAdded" }
+      if item.subject.pullRequestState ~= nil then
+        if item.subject.isDraft then
+          type_icon =
+            { " " .. icons.git.pullrequest, "SnacksPickerGitStatusIgnored" }
+        elseif item.subject.pullRequestState == "OPEN" then
+          type_icon =
+            { " " .. icons.git.pullrequest, "SnacksPickerGitStatusAdded" }
+        elseif item.subject.pullRequestState == "CLOSED" then
+          type_icon =
+            { " " .. icons.git.pullrequest, "SnacksPickerGitStatusUnmerged" }
+        elseif item.subject.pullRequestState == "MERGED" then
+          type_icon = { " " .. icons.git.pullrequest, "SnacksPickerGitStatus" }
+        end
+      end
+
+      -- "pullRequestState": "MERGED",
+      -- "pullRequestState": "OPEN",
+      -- "pullRequestState": "CLOSED",
+
       return {
         icon,
+        type_icon,
         { " [", "SnacksPickerGitStatusIgnored" },
         { item.subject.__typename, "SnacksPickerGitType" },
         { "] ", "SnacksPickerGitStatusIgnored" },

@@ -68,6 +68,12 @@ fragment InboxSubjectPullRequestFieldsFragment on PullRequest {
   number
   pullRequestHtmlTitle: titleHTML
   url
+  ...PullRequestStateIcon
+}
+fragment PullRequestStateIcon on PullRequest {
+  __typename
+  pullRequestState: state
+  isDraft
 }
 fragment NotificationThreadCommonFieldsFragment on NotificationThread {
   __typename
