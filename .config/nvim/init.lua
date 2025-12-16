@@ -649,6 +649,14 @@ require("snacks").setup({
         follow = false,
         supports_live = true,
       },
+      gh_diff = {
+        auto_close = false,
+        focus = "list",
+        layout = {
+          preset = "sidebar",
+          hidden = { "preview" },
+        },
+      },
       grep = {
         cmd = "rg",
         args = rg_args,
