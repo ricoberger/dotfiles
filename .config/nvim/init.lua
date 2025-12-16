@@ -446,6 +446,15 @@ require("catppuccin").setup({
     return {
       Pmenu = { bg = colors.mantle },
       PmenuBorder = { bg = colors.mantle, fg = colors.blue },
+      -- Add highlights for GitHub notifications and search results.
+      GitHubText = { fg = colors.text },
+      GitHubTextSecondary = { fg = colors.overlay0 },
+      GitHubTextHighlight = { fg = colors.blue },
+      GitHubRead = { fg = colors.green },
+      GitHubOpen = { fg = colors.green },
+      GitHubClosed = { fg = colors.mauve },
+      GitHubMerged = { fg = colors.mauve },
+      GitHubUnmerged = { fg = colors.red },
     }
   end,
 })
@@ -1425,7 +1434,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
 
   if vim.v.shell_error ~= 0 then
     vim.notify(
-      "Failed to fetch GitHub notifications: " .. output,
+      "Failed to fetch notifications: " .. output,
       vim.log.levels.ERROR
     )
     return
@@ -1433,12 +1442,12 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
 
   local ok, notifications = pcall(vim.fn.json_decode, output)
   if not ok or type(notifications) ~= "table" then
-    vim.notify("Failed to parse GitHub notifications", vim.log.levels.ERROR)
+    vim.notify("Failed to parse notifications", vim.log.levels.ERROR)
     return
   end
 
   if #notifications == 0 then
-    vim.notify("No GitHub notifications found", vim.log.levels.INFO)
+    vim.notify("No notifications found", vim.log.levels.INFO)
     return
   end
 
@@ -1469,65 +1478,66 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
     items = items,
     format = function(item, _)
       -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
-      local icon = { icons.notifications.read, "SnacksPickerGitStatusAdded" }
+      local icon = { icons.notifications.read, "GitHubRead" }
       if item.isUnread then
-        icon = { icons.notifications.unread, "SnacksPickerGitStatusAdded" }
+        icon = { icons.notifications.unread, "GitHubRead" }
       end
 
-      local type_icon = { icons.github.unknown, "SnacksPickerGitStatusIgnored" }
+      local type_icon = { icons.github.unknown, "GitHubTextSecondary" }
       if item.subject.__typename == "PullRequest" then
-        type_icon = { icons.github.pr, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.pr, "GitHubTextSecondary" }
         if item.subject.pullRequestState ~= nil then
           if item.subject.isDraft then
-            type_icon = { icons.github.pr, "SnacksPickerGitStatusIgnored" }
+            type_icon = { icons.github.pr, "GitHubTextSecondary" }
           elseif item.subject.pullRequestState == "OPEN" then
-            type_icon = { icons.github.pr, "SnacksPickerGitStatusAdded" }
+            type_icon = { icons.github.pr, "GitHubOpen" }
           elseif item.subject.pullRequestState == "CLOSED" then
-            type_icon = { icons.github.pr, "SnacksPickerGitStatusUnmerged" }
+            type_icon = { icons.github.pr, "GitHubUnmerged" }
           elseif item.subject.pullRequestState == "MERGED" then
-            type_icon = { icons.github.pr, "SnacksPickerGitStatus" }
+            type_icon = { icons.github.pr, "GitHubMerged" }
           end
         end
       elseif item.subject.__typename == "Issue" then
-        type_icon = { icons.github.issue, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.issue, "GitHubTextSecondary" }
         if item.subject.issueState ~= nil then
           if item.subject.issueState == "OPEN" then
-            type_icon = { icons.github.issue, "SnacksPickerGitStatusAdded" }
+            type_icon = { icons.github.issue, "GitHubOpen" }
           elseif item.subject.issueState == "CLOSED" then
-            type_icon = { icons.github.issue, "SnacksPickerGitStatusUnmerged" }
+            type_icon = { icons.github.issue, "GitHubClosed" }
           end
         end
       elseif item.subject.__typename == "Release" then
-        type_icon = { icons.github.release, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.release, "GitHubTextSecondary" }
       elseif item.subject.__typename == "WokflowRun" then
-        type_icon = { icons.github.workflow, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.workflow, "GitHubTextSecondary" }
       elseif item.subject.__typename == "CheckSuite" then
-        type_icon = { icons.github.workflow, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.workflow, "GitHubTextSecondary" }
       elseif item.subject.__typename == "Commit" then
-        type_icon = { icons.github.commit, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.commit, "GitHubTextSecondary" }
       elseif item.subject.__typename == "Gist" then
-        type_icon = { icons.github.gist, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.gist, "GitHubTextSecondary" }
       elseif item.subject.__typename == "TeamDiscussion" then
-        type_icon = { icons.github.discussion, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.discussion, "GitHubTextSecondary" }
       elseif item.subject.__typename == "Discussion" then
-        type_icon = { icons.github.discussion, "SnacksPickerGitStatusIgnored" }
+        type_icon = { icons.github.discussion, "GitHubTextSecondary" }
       end
 
       return {
         icon,
-        { " ", "SnacksPickerGitStatusIgnored" },
+        { " ", "GitHubTextSecondary" },
         type_icon,
-        { " [", "SnacksPickerGitStatusIgnored" },
-        { item.subject.__typename, "SnacksPickerGitType" },
-        { "] ", "SnacksPickerGitStatusIgnored" },
-        { item.repo, "SnacksPickerGitStatusIgnored" },
-        { ": ", "SnacksPickerGitStatusIgnored" },
-        { item.title, "SnacksPickerGitScope" },
-        { " (", "SnacksPickerGitStatusIgnored" },
-        { item.reason:lower():gsub("_", " "), "SnacksPickerGitStatusIgnored" },
-        { " - ", "SnacksPickerGitStatusIgnored" },
-        { item.relativeLastUpdatedAt, "SnacksPickerGitStatusIgnored" },
-        { ")", "SnacksPickerGitStatusIgnored" },
+        { " [", "GitHubTextSecondary" },
+        { item.subject.__typename, "GitHubTextHighlight" },
+        { "] " .. item.repo .. ": ", "GitHubTextSecondary" },
+        { item.title, "GitHubText" },
+        {
+          " ("
+            .. item.reason:lower():gsub("_", " ")
+            .. " - "
+            .. item.relativeLastUpdatedAt
+            .. ")",
+          "GitHubTextSecondary",
+        },
       }
     end,
     confirm = function(picker, item)
@@ -1571,13 +1581,16 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         )
         if vim.v.shell_error ~= 0 then
           vim.notify(
-            "Failed to mark as read: " .. readoutput,
+            "Failed to mark notification as read: " .. readoutput,
             vim.log.levels.ERROR
           )
           return
         end
 
-        vim.notify("Marked as read: " .. item.title, vim.log.levels.INFO)
+        vim.notify(
+          "Marked notification as read: " .. item.title,
+          vim.log.levels.INFO
+        )
       end,
       picker_mark_as_unread = function(_, item)
         if not item then
@@ -1592,13 +1605,16 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         )
         if vim.v.shell_error ~= 0 then
           vim.notify(
-            "Failed to mark as unread: " .. readoutput,
+            "Failed to mark notification as unread: " .. readoutput,
             vim.log.levels.ERROR
           )
           return
         end
 
-        vim.notify("Marked as unread " .. item.title, vim.log.levels.INFO)
+        vim.notify(
+          "Marked notification as unread " .. item.title,
+          vim.log.levels.INFO
+        )
       end,
       picker_mark_as_done = function(_, item)
         if not item then
@@ -1613,13 +1629,16 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         )
         if vim.v.shell_error ~= 0 then
           vim.notify(
-            "Failed to mark as done: " .. readoutput,
+            "Failed to mark notification as done: " .. readoutput,
             vim.log.levels.ERROR
           )
           return
         end
 
-        vim.notify("Marked as done: " .. item.title, vim.log.levels.INFO)
+        vim.notify(
+          "Marked notification as done: " .. item.title,
+          vim.log.levels.INFO
+        )
       end,
       picker_mark_as_undone = function(_, item)
         if not item then
@@ -1634,13 +1653,16 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         )
         if vim.v.shell_error ~= 0 then
           vim.notify(
-            "Failed to mark as undone: " .. readoutput,
+            "Failed to mark notification as undone: " .. readoutput,
             vim.log.levels.ERROR
           )
           return
         end
 
-        vim.notify("Marked as undone: " .. item.title, vim.log.levels.INFO)
+        vim.notify(
+          "Marked notification as undone: " .. item.title,
+          vim.log.levels.INFO
+        )
       end,
     },
     win = {
@@ -1675,7 +1697,7 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
   )
   if vim.v.shell_error ~= 0 then
     vim.notify(
-      "Failed to fetch GitHub search results: " .. output,
+      "Failed to fetch search results: " .. output,
       vim.log.levels.ERROR
     )
     return
@@ -1683,12 +1705,12 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
 
   local ok, results = pcall(vim.fn.json_decode, output)
   if not ok or type(results) ~= "table" then
-    vim.notify("Failed to parse GitHub search results", vim.log.levels.ERROR)
+    vim.notify("Failed to parse search results", vim.log.levels.ERROR)
     return
   end
 
   if #results == 0 then
-    vim.notify("No GitHub search results found", vim.log.levels.INFO)
+    vim.notify("No search results found", vim.log.levels.INFO)
     return
   end
 
@@ -1718,37 +1740,41 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
     items = items,
     format = function(item, _)
       -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
-      local type_icon = { icons.github.unknown, "SnacksPickerGitStatusIgnored" }
+      local type_icon = { icons.github.unknown, "GitHubTextSecondary" }
 
       if item.isPullRequest then
         if item.state == "open" then
-          type_icon = { icons.github.pr, "SnacksPickerGitStatusAdded" }
+          type_icon = { icons.github.pr, "GitHubOpen" }
         elseif item.state == "closed" then
-          type_icon = { icons.github.pr, "SnacksPickerGitStatusUnmerged" }
+          type_icon = { icons.github.pr, "GitHubUnmerged" }
         elseif item.state == "merged" then
-          type_icon = { icons.github.pr, "SnacksPickerGitStatus" }
+          type_icon = { icons.github.pr, "GitHubMerged" }
         end
       else
         if item.state == "open" then
-          type_icon = { icons.github.issue, "SnacksPickerGitStatusAdded" }
+          type_icon = { icons.github.issue, "GitHubOpen" }
         elseif item.state == "closed" then
-          type_icon = { icons.github.issue, "SnacksPickerGitStatusUnmerged" }
+          type_icon = { icons.github.issue, "GitHubClosed" }
         end
       end
 
       return {
         type_icon,
-        { " [", "SnacksPickerGitStatusIgnored" },
-        { "#" .. item.number, "SnacksPickerGitType" },
-        { "] ", "SnacksPickerGitStatusIgnored" },
-        { item.repository.nameWithOwner, "SnacksPickerGitStatusIgnored" },
-        { ": ", "SnacksPickerGitStatusIgnored" },
-        { item.title, "SnacksPickerGitScope" },
-        { " (by ", "SnacksPickerGitStatusIgnored" },
-        { item.author.login, "SnacksPickerGitStatusIgnored" },
-        { " - ", "SnacksPickerGitStatusIgnored" },
-        { item.relativeUpdatedAt, "SnacksPickerGitStatusIgnored" },
-        { ")", "SnacksPickerGitStatusIgnored" },
+        { " [", "GitHubTextSecondary" },
+        { "#" .. item.number, "GitHubTextHighlight" },
+        {
+          "] " .. item.repository.nameWithOwner .. ": ",
+          "GitHubTextSecondary",
+        },
+        { item.title, "GitHubText" },
+        {
+          " (by "
+            .. item.author.login
+            .. " - "
+            .. item.relativeUpdatedAt
+            .. ")",
+          "GitHubTextSecondary",
+        },
       }
     end,
     confirm = function(picker, item)
