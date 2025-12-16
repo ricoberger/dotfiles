@@ -583,6 +583,7 @@ require("snacks").setup({
                 local result = vals[choice]
                 if result then
                   vim.fn.setreg("+", result)
+                  vim.notify("Yanked " .. result, vim.log.levels.INFO)
                 end
               end)
             end,
@@ -1570,13 +1571,13 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         )
         if vim.v.shell_error ~= 0 then
           vim.notify(
-            "Failed to mark notitifaction as read: " .. readoutput,
+            "Failed to mark as read: " .. readoutput,
             vim.log.levels.ERROR
           )
           return
         end
 
-        vim.notify("Notitifaction was marked as read", vim.log.levels.INFO)
+        vim.notify("Marked as read: " .. item.title, vim.log.levels.INFO)
       end,
       picker_mark_as_unread = function(_, item)
         if not item then
@@ -1591,13 +1592,13 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         )
         if vim.v.shell_error ~= 0 then
           vim.notify(
-            "Failed to mark notitifaction as unread: " .. readoutput,
+            "Failed to mark as unread: " .. readoutput,
             vim.log.levels.ERROR
           )
           return
         end
 
-        vim.notify("Notitifaction was marked as unread", vim.log.levels.INFO)
+        vim.notify("Marked as unread " .. item.title, vim.log.levels.INFO)
       end,
       picker_mark_as_done = function(_, item)
         if not item then
@@ -1612,13 +1613,13 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         )
         if vim.v.shell_error ~= 0 then
           vim.notify(
-            "Failed to mark notitifaction as done: " .. readoutput,
+            "Failed to mark as done: " .. readoutput,
             vim.log.levels.ERROR
           )
           return
         end
 
-        vim.notify("Notitifaction was marked as done", vim.log.levels.INFO)
+        vim.notify("Marked as done: " .. item.title, vim.log.levels.INFO)
       end,
     },
     win = {
