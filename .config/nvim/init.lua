@@ -1621,6 +1621,27 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
 
         vim.notify("Marked as done: " .. item.title, vim.log.levels.INFO)
       end,
+      picker_mark_as_undone = function(_, item)
+        if not item then
+          return
+        end
+
+        local readoutput = vim.fn.system(
+          string.format(
+            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsUndone(input: {id: $notificationId}) { success } }'",
+            item.id
+          )
+        )
+        if vim.v.shell_error ~= 0 then
+          vim.notify(
+            "Failed to mark as undone: " .. readoutput,
+            vim.log.levels.ERROR
+          )
+          return
+        end
+
+        vim.notify("Marked as undone: " .. item.title, vim.log.levels.INFO)
+      end,
     },
     win = {
       input = {
@@ -1630,6 +1651,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
           ["r"] = "picker_mark_as_read",
           ["R"] = "picker_mark_as_unread",
           ["d"] = "picker_mark_as_done",
+          ["D"] = "picker_mark_as_undone",
         },
       },
     },
