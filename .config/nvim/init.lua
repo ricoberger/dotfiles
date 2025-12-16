@@ -58,8 +58,16 @@ local icons = {
     -- Snacks
     commit = "󰜘",
     unmerged = " ",
-    pullrequest = "",
+  },
+  github = {
+    unknown = "",
+    pr = "",
     issue = "",
+    release = "",
+    workflow = "",
+    commit = "",
+    gist = "",
+    discussion = "",
   },
   notifications = {
     unread = "",
@@ -1465,28 +1473,48 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         icon = { icons.notifications.unread, "SnacksPickerGitStatusAdded" }
       end
 
-      local type_icon = { " " .. icons.git.issue, "SnacksPickerGitStatusAdded" }
-      if item.subject.pullRequestState ~= nil then
-        if item.subject.isDraft then
-          type_icon =
-            { " " .. icons.git.pullrequest, "SnacksPickerGitStatusIgnored" }
-        elseif item.subject.pullRequestState == "OPEN" then
-          type_icon =
-            { " " .. icons.git.pullrequest, "SnacksPickerGitStatusAdded" }
-        elseif item.subject.pullRequestState == "CLOSED" then
-          type_icon =
-            { " " .. icons.git.pullrequest, "SnacksPickerGitStatusUnmerged" }
-        elseif item.subject.pullRequestState == "MERGED" then
-          type_icon = { " " .. icons.git.pullrequest, "SnacksPickerGitStatus" }
+      local type_icon = { icons.github.unknown, "SnacksPickerGitStatusIgnored" }
+      if item.subject.__typename == "PullRequest" then
+        type_icon = { icons.github.pr, "SnacksPickerGitStatusIgnored" }
+        if item.subject.pullRequestState ~= nil then
+          if item.subject.isDraft then
+            type_icon = { icons.github.pr, "SnacksPickerGitStatusIgnored" }
+          elseif item.subject.pullRequestState == "OPEN" then
+            type_icon = { icons.github.pr, "SnacksPickerGitStatusAdded" }
+          elseif item.subject.pullRequestState == "CLOSED" then
+            type_icon = { icons.github.pr, "SnacksPickerGitStatusUnmerged" }
+          elseif item.subject.pullRequestState == "MERGED" then
+            type_icon = { icons.github.pr, "SnacksPickerGitStatus" }
+          end
         end
+      elseif item.subject.__typename == "Issue" then
+        type_icon = { icons.github.issue, "SnacksPickerGitStatusIgnored" }
+        if item.subject.issueState ~= nil then
+          if item.subject.issueState == "OPEN" then
+            type_icon = { icons.github.issue, "SnacksPickerGitStatusAdded" }
+          elseif item.subject.issueState == "CLOSED" then
+            type_icon = { icons.github.issue, "SnacksPickerGitStatusUnmerged" }
+          end
+        end
+      elseif item.subject.__typename == "Release" then
+        type_icon = { icons.github.release, "SnacksPickerGitStatusIgnored" }
+      elseif item.subject.__typename == "WokflowRun" then
+        type_icon = { icons.github.workflow, "SnacksPickerGitStatusIgnored" }
+      elseif item.subject.__typename == "CheckSuite" then
+        type_icon = { icons.github.workflow, "SnacksPickerGitStatusIgnored" }
+      elseif item.subject.__typename == "Commit" then
+        type_icon = { icons.github.commit, "SnacksPickerGitStatusIgnored" }
+      elseif item.subject.__typename == "Gist" then
+        type_icon = { icons.github.gist, "SnacksPickerGitStatusIgnored" }
+      elseif item.subject.__typename == "TeamDiscussion" then
+        type_icon = { icons.github.discussion, "SnacksPickerGitStatusIgnored" }
+      elseif item.subject.__typename == "Discussion" then
+        type_icon = { icons.github.discussion, "SnacksPickerGitStatusIgnored" }
       end
-
-      -- "pullRequestState": "MERGED",
-      -- "pullRequestState": "OPEN",
-      -- "pullRequestState": "CLOSED",
 
       return {
         icon,
+        { " ", "SnacksPickerGitStatusIgnored" },
         type_icon,
         { " [", "SnacksPickerGitStatusIgnored" },
         { item.subject.__typename, "SnacksPickerGitType" },
@@ -1618,7 +1646,7 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
   -- handle any errors.
   local output = vim.fn.system(
     string.format(
-      "gh search issues --include-prs --limit 100 --json author,body,isPullRequest,number,repository,title,updatedAt,url %s",
+      "gh search issues --include-prs --limit 100 --json author,body,isPullRequest,number,repository,state,title,updatedAt,url %s",
       opts.args
     )
   )
@@ -1667,8 +1695,27 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
     items = items,
     format = function(item, _)
       -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
+      local type_icon = { icons.github.unknown, "SnacksPickerGitStatusIgnored" }
+
+      if item.isPullRequest then
+        if item.state == "open" then
+          type_icon = { icons.github.pr, "SnacksPickerGitStatusAdded" }
+        elseif item.state == "closed" then
+          type_icon = { icons.github.pr, "SnacksPickerGitStatusUnmerged" }
+        elseif item.state == "merged" then
+          type_icon = { icons.github.pr, "SnacksPickerGitStatus" }
+        end
+      else
+        if item.state == "open" then
+          type_icon = { icons.github.issue, "SnacksPickerGitStatusAdded" }
+        elseif item.state == "closed" then
+          type_icon = { icons.github.issue, "SnacksPickerGitStatusUnmerged" }
+        end
+      end
+
       return {
-        { "[", "SnacksPickerGitStatusIgnored" },
+        type_icon,
+        { " [", "SnacksPickerGitStatusIgnored" },
         { "#" .. item.number, "SnacksPickerGitType" },
         { "] ", "SnacksPickerGitStatusIgnored" },
         { item.repository.nameWithOwner, "SnacksPickerGitStatusIgnored" },
@@ -1682,11 +1729,11 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
       }
     end,
     confirm = function(picker, item)
-      local itemType = item.isPullRequest and "pr" or "issue"
+      local item_type = item.isPullRequest and "pr" or "issue"
 
       picker:close()
       Snacks.picker.gh_actions({
-        type = itemType,
+        type = item_type,
         repo = item.repository.nameWithOwner,
         number = item.number,
       })
