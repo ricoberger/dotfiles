@@ -1517,9 +1517,9 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
       elseif item.subject.__typename == "Release" then
         type_icon = { icons.github.release, "GitHubTextSecondary" }
       elseif item.subject.__typename == "WokflowRun" then
-        type_icon = { icons.github.workflow, "GitHubTextSecondary" }
+        type_icon = { icons.github.workflow, "GitHubUnmerged" }
       elseif item.subject.__typename == "CheckSuite" then
-        type_icon = { icons.github.workflow, "GitHubTextSecondary" }
+        type_icon = { icons.github.workflow, "GitHubUnmerged" }
       elseif item.subject.__typename == "Commit" then
         type_icon = { icons.github.commit, "GitHubTextSecondary" }
       elseif item.subject.__typename == "Gist" then
@@ -1576,101 +1576,121 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         vim.fn.setreg("+", item.url)
         vim.notify("Yanked " .. item.url, vim.log.levels.INFO)
       end,
-      picker_mark_as_read = function(_, item)
+      picker_mark_as_read = function(picker, item)
         if not item then
           return
         end
 
-        local readoutput = vim.fn.system(
-          string.format(
-            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsRead(input: {id: $notificationId}) { success } }'",
-            item.id
-          )
-        )
-        if vim.v.shell_error ~= 0 then
-          vim.notify(
-            "Failed to mark notification as read: " .. readoutput,
-            vim.log.levels.ERROR
-          )
-          return
-        end
+        local sel = picker:selected()
+        local items = #sel > 0 and sel or { item }
 
-        vim.notify(
-          "Marked notification as read: " .. item.title,
-          vim.log.levels.INFO
-        )
+        for _, item in ipairs(items) do
+          local readoutput = vim.fn.system(
+            string.format(
+              "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsRead(input: {id: $notificationId}) { success } }'",
+              item.id
+            )
+          )
+          if vim.v.shell_error ~= 0 then
+            vim.notify(
+              "Failed to mark notification as read: " .. readoutput,
+              vim.log.levels.ERROR
+            )
+            return
+          end
+
+          vim.notify(
+            "Marked notification as read: " .. item.title,
+            vim.log.levels.INFO
+          )
+        end
       end,
-      picker_mark_as_unread = function(_, item)
+      picker_mark_as_unread = function(picker, item)
         if not item then
           return
         end
 
-        local readoutput = vim.fn.system(
-          string.format(
-            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsUnread(input: {id: $notificationId}) { success } }'",
-            item.id
-          )
-        )
-        if vim.v.shell_error ~= 0 then
-          vim.notify(
-            "Failed to mark notification as unread: " .. readoutput,
-            vim.log.levels.ERROR
-          )
-          return
-        end
+        local sel = picker:selected()
+        local items = #sel > 0 and sel or { item }
 
-        vim.notify(
-          "Marked notification as unread " .. item.title,
-          vim.log.levels.INFO
-        )
+        for _, item in ipairs(items) do
+          local readoutput = vim.fn.system(
+            string.format(
+              "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsUnread(input: {id: $notificationId}) { success } }'",
+              item.id
+            )
+          )
+          if vim.v.shell_error ~= 0 then
+            vim.notify(
+              "Failed to mark notification as unread: " .. readoutput,
+              vim.log.levels.ERROR
+            )
+            return
+          end
+
+          vim.notify(
+            "Marked notification as unread " .. item.title,
+            vim.log.levels.INFO
+          )
+        end
       end,
-      picker_mark_as_done = function(_, item)
+      picker_mark_as_done = function(picker, item)
         if not item then
           return
         end
 
-        local readoutput = vim.fn.system(
-          string.format(
-            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsDone(input: {id: $notificationId}) { success } }'",
-            item.id
-          )
-        )
-        if vim.v.shell_error ~= 0 then
-          vim.notify(
-            "Failed to mark notification as done: " .. readoutput,
-            vim.log.levels.ERROR
-          )
-          return
-        end
+        local sel = picker:selected()
+        local items = #sel > 0 and sel or { item }
 
-        vim.notify(
-          "Marked notification as done: " .. item.title,
-          vim.log.levels.INFO
-        )
+        for _, item in ipairs(items) do
+          local readoutput = vim.fn.system(
+            string.format(
+              "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsDone(input: {id: $notificationId}) { success } }'",
+              item.id
+            )
+          )
+          if vim.v.shell_error ~= 0 then
+            vim.notify(
+              "Failed to mark notification as done: " .. readoutput,
+              vim.log.levels.ERROR
+            )
+            return
+          end
+
+          vim.notify(
+            "Marked notification as done: " .. item.title,
+            vim.log.levels.INFO
+          )
+        end
       end,
-      picker_mark_as_undone = function(_, item)
+      picker_mark_as_undone = function(picker, item)
         if not item then
           return
         end
 
-        local readoutput = vim.fn.system(
-          string.format(
-            "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsUndone(input: {id: $notificationId}) { success } }'",
-            item.id
-          )
-        )
-        if vim.v.shell_error ~= 0 then
-          vim.notify(
-            "Failed to mark notification as undone: " .. readoutput,
-            vim.log.levels.ERROR
-          )
-          return
-        end
+        local sel = picker:selected()
+        local items = #sel > 0 and sel or { item }
 
-        vim.notify(
-          "Marked notification as undone: " .. item.title,
-          vim.log.levels.INFO
-        )
+        for _, item in ipairs(items) do
+          local readoutput = vim.fn.system(
+            string.format(
+              "gh api graphql -F notificationId=\"%s\" --raw-field query='mutation($notificationId: ID!) { markNotificationAsUndone(input: {id: $notificationId}) { success } }'",
+              item.id
+            )
+          )
+          if vim.v.shell_error ~= 0 then
+            vim.notify(
+              "Failed to mark notification as undone: " .. readoutput,
+              vim.log.levels.ERROR
+            )
+            return
+          end
+
+          vim.notify(
+            "Marked notification as undone: " .. item.title,
+            vim.log.levels.INFO
+          )
+        end
       end,
     },
     win = {
