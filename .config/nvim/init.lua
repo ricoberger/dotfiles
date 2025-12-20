@@ -1464,13 +1464,13 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
   for idx, notification in ipairs(notifications) do
     local item = notification
     item.idx = idx
-    item.text = item.title
+    item.relativeLastUpdatedAt = format_relative_time(item.lastUpdatedAt)
+    item.repo = item.url:match("github.com/([^/]+/[^/]+)")
+    item.text = item.subject.__typename .. " " .. item.repo .. " " .. item.title
     item.preview = {
       text = item.summaryItemBody,
       ft = "markdown",
     }
-    item.relativeLastUpdatedAt = format_relative_time(item.lastUpdatedAt)
-    item.repo = item.url:match("github.com/([^/]+/[^/]+)")
     table.insert(items, item)
   end
 
@@ -1747,12 +1747,19 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
   for idx, result in ipairs(results) do
     local item = result
     item.idx = idx
-    item.text = result.title
+    item.relativeUpdatedAt = format_relative_time(item.updatedAt)
+    item.text = " #"
+      .. item.number
+      .. " "
+      .. item.repository.nameWithOwner
+      .. " "
+      .. item.title
+      .. " "
+      .. item.author.login
     item.preview = {
       text = item.body,
       ft = "markdown",
     }
-    item.relativeUpdatedAt = format_relative_time(item.updatedAt)
     table.insert(items, item)
   end
 
@@ -1796,11 +1803,7 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
         },
         { item.title, "GitHubText" },
         {
-          " (by "
-            .. item.author.login
-            .. " - "
-            .. item.relativeUpdatedAt
-            .. ")",
+          " (" .. item.author.login .. " - " .. item.relativeUpdatedAt .. ")",
           "GitHubTextSecondary",
         },
       }
