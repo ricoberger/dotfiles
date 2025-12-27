@@ -676,6 +676,11 @@ require("snacks").setup({
           },
         },
       },
+      projects = {
+        dev = { "/Users/ricoberger/Documents/GitHub" },
+        recent = false,
+        max_depth = 3,
+      },
     },
   },
   -- When doing "nvim somefile.txt", it will render the file as quickly as
@@ -756,6 +761,9 @@ vim.keymap.set("n", "<leader>fd", function()
 end)
 vim.keymap.set("n", "<leader>fD", function()
   Snacks.picker.diagnostics()
+end)
+vim.keymap.set("n", "<leader>fp", function()
+  Snacks.picker.projects()
 end)
 
 --------------------------------------------------------------------------------
