@@ -65,6 +65,11 @@ setopt hist_save_no_dups
 setopt hist_ignore_dups
 setopt hist_find_no_dups
 
+# Use Ctrl+x + Ctrl+e to edit the command line in $EDITOR
+autoload -z edit-command-line
+zle -N edit-command-line
+bindkey "^X^E" edit-command-line
+
 # Hidden files
 setopt globdots
 
