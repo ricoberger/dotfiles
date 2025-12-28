@@ -1700,6 +1700,22 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
           )
         end
       end,
+      picker_change_cwd_to_repo = function(picker, item)
+        if not item then
+          return
+        end
+
+        local repository_path = "/Users/ricoberger/Documents/GitHub/"
+          .. item.repo:lower()
+        vim.api.nvim_set_current_dir(repository_path)
+
+        vim.notify(
+          "Current working directory was changed to: " .. repository_path,
+          vim.log.levels.INFO
+        )
+
+        picker:close()
+      end,
     },
     win = {
       input = {
@@ -1710,6 +1726,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
           ["R"] = "picker_mark_as_unread",
           ["d"] = "picker_mark_as_done",
           ["D"] = "picker_mark_as_undone",
+          ["c"] = "picker_change_cwd_to_repo",
         },
       },
     },
@@ -1835,12 +1852,29 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
         vim.fn.setreg("+", item.url)
         vim.notify("Yanked " .. item.url, vim.log.levels.INFO)
       end,
+      picker_change_cwd_to_repo = function(picker, item)
+        if not item then
+          return
+        end
+
+        local repository_path = "/Users/ricoberger/Documents/GitHub/"
+          .. item.repository.nameWithOwner:lower()
+        vim.api.nvim_set_current_dir(repository_path)
+
+        vim.notify(
+          "Current working directory was changed to: " .. repository_path,
+          vim.log.levels.INFO
+        )
+
+        picker:close()
+      end,
     },
     win = {
       input = {
         keys = {
           ["y"] = "picker_yank_url",
           ["Y"] = "picker_yank_url",
+          ["c"] = "picker_change_cwd_to_repo",
         },
       },
     },
@@ -1876,6 +1910,9 @@ vim.keymap.set(
   "<leader>ghpr",
   "<cmd>GitHubSearch is:pr is:open review-requested:ricoberger<cr>"
 )
+vim.keymap.set("n", "<leader>ghP", function()
+  Snacks.picker.gh_pr()
+end)
 
 -- Show issues involving, created by, assigned to or mentioning me.
 vim.keymap.set(
@@ -1898,6 +1935,9 @@ vim.keymap.set(
   "<leader>ghim",
   "<cmd>GitHubSearch is:issue is:open mentions:ricoberger<cr>"
 )
+vim.keymap.set("n", "<leader>ghI", function()
+  Snacks.picker.gh_issue()
+end)
 
 --------------------------------------------------------------------------------
 -- MISC
