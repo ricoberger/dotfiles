@@ -40,6 +40,7 @@ brew "helm-ls"
 # brew "ktlint"
 brew "lua-language-server"
 brew "marksman"
+brew "ruff"
 
 ################################################################################
 ### Tools
