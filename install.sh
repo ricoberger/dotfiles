@@ -7,6 +7,8 @@ cp -r $(pwd)/.config/ghostty ~/.config
 
 # Zsh
 echo "\n- Copy Zsh Configuration"
+cp $(pwd)/.zshenv ~/.zshenv
+cp $(pwd)/.zprofile ~/.zprofile
 cp $(pwd)/.zshrc ~/.zshrc
 
 # Starship
