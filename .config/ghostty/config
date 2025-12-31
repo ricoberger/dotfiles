@@ -7,6 +7,13 @@ font-size = 12
 # Window
 window-height = 45
 window-width = 180
+window-position-x = 180
+window-position-y = 180
+window-padding-x = 8
+window-padding-y = 8
+window-padding-balance = true
+window-save-state = never
+window-new-tab-position = current
 
 # Cursor
 cursor-style = block
