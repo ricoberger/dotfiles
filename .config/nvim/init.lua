@@ -73,6 +73,11 @@ local icons = {
     unread = "",
     read = "",
   },
+  githubchecks = {
+    success = "",
+    failed = "✖",
+    pending = "",
+  },
 }
 
 --------------------------------------------------------------------------------
@@ -447,6 +452,7 @@ require("catppuccin").setup({
       Pmenu = { bg = colors.mantle },
       PmenuBorder = { bg = colors.mantle, fg = colors.blue },
       -- Add highlights for GitHub notifications and search results.
+      -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
       GitHubText = { fg = colors.text },
       GitHubTextSecondary = { fg = colors.overlay0 },
       GitHubTextHighlight = { fg = colors.blue },
@@ -455,6 +461,9 @@ require("catppuccin").setup({
       GitHubClosed = { fg = colors.mauve },
       GitHubMerged = { fg = colors.mauve },
       GitHubUnmerged = { fg = colors.red },
+      GitHubCheckSuccess = { fg = colors.green },
+      GitHubCheckFailed = { fg = colors.red },
+      GitHubCheckPending = { fg = colors.yellow },
     }
   end,
 })
@@ -1493,7 +1502,6 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
     preview = "preview",
     items = items,
     format = function(item, _)
-      -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
       local icon = { icons.notifications.read, "GitHubRead" }
       if item.isUnread then
         icon = { icons.notifications.unread, "GitHubRead" }
@@ -1788,8 +1796,8 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
     table.insert(items, item)
   end
 
-  -- Open the Snacks picker with the formatted notification items and format the
-  -- items nicely.
+  -- Open the Snacks picker with the formatted search result items and format
+  -- the items nicely.
   Snacks.picker({
     title = "GitHub Search Results",
     layout = {
@@ -1799,9 +1807,7 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
     preview = "preview",
     items = items,
     format = function(item, _)
-      -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
       local type_icon = { icons.github.unknown, "GitHubTextSecondary" }
-
       if item.isPullRequest then
         if item.state == "open" then
           type_icon = { icons.github.pr, "GitHubOpen" }
@@ -1938,6 +1944,137 @@ vim.keymap.set(
 vim.keymap.set("n", "<leader>ghI", function()
   Snacks.picker.gh_issue()
 end)
+
+-- Fetch checks for the currently open PR and shows them in a Snacks picker. If
+-- a check in the picker is selected we can view the logs of the check.
+vim.api.nvim_create_user_command("GitHubChecks", function(opts)
+  -- Buffer name is: gh://owner/repo/pr/number
+  local buffer = vim.fn.expand("%")
+  local repo = buffer:match("gh://([^/]+/[^/]+)/pr/%d+")
+  local pr_number = buffer:match("gh://[^/]+/[^/]+/pr/(%d+)")
+
+  -- Fetch checks for PR from GitHub using the "gh" command-line tool and handle
+  -- any errors.
+  local output = vim.fn.system(
+    string.format(
+      "gh pr checks %s --repo %s --json bucket,completedAt,link,name,startedAt,state,workflow",
+      pr_number,
+      repo
+    )
+  )
+  if vim.v.shell_error ~= 0 then
+    vim.notify("Failed to fetch checks: " .. output, vim.log.levels.ERROR)
+    return
+  end
+
+  local ok, results = pcall(vim.fn.json_decode, output)
+  if not ok or type(results) ~= "table" then
+    vim.notify("Failed to parse checks", vim.log.levels.ERROR)
+    return
+  end
+
+  if #results == 0 then
+    vim.notify("No checks found", vim.log.levels.INFO)
+    return
+  end
+
+  -- Prepare the items for the Snacks picker and format them nicely.
+  local items = {}
+  for idx, result in ipairs(results) do
+    local item = result
+    if item.description == nil then
+      item.description = ""
+    end
+    item.idx = idx
+    item.text = item.workflow .. " / " .. item.name .. " " .. item.description
+    item.preview = {
+      text = "",
+      ft = "markdown",
+    }
+    table.insert(items, item)
+  end
+
+  -- Open the Snacks picker with the formatted check items and format the items
+  -- nicely.
+  Snacks.picker({
+    title = "GitHub Search Results",
+    layout = {
+      preset = "default",
+      preview = false,
+    },
+    preview = "preview",
+    items = items,
+    format = function(item, _)
+      local state_icon = { icons.githubchecks.pending, "GitHubTextSecondary" }
+      if
+        item.state == "EXPECTED"
+        or item.state == "IN_PROGRESS"
+        or item.state == "QUEUED"
+        or item.state == "REQUESTED"
+        or item.state == "PENDING"
+        or item.state == "WAITING"
+      then
+        state_icon = { icons.githubchecks.pending, "GitHubCheckPending" }
+      elseif item.state == "FAILURE" or item.state == "STARTUP_FAILURE" then
+        state_icon = { icons.githubchecks.failed, "GitHubCheckFailed" }
+      else
+        if item.state == "SUCCESS" then
+          state_icon = { icons.githubchecks.success, "GitHubCheckSuccess" }
+        else
+          state_icon = { icons.githubchecks.failed, "GitHubCheckFailed" }
+        end
+      end
+
+      return {
+        state_icon,
+        { " " .. item.workflow .. " / " .. item.name .. " ", "GitHubText" },
+        { item.description, "GitHubTextSecondary" },
+      }
+    end,
+    confirm = function(picker, item)
+      picker:close()
+
+      -- Get the job id from the link, e.g.
+      -- https://github.com/kubenav/kubenav/actions/runs/20692497976/job/59402584382
+      -- then fetch the summary and logs for the jobs.
+      local job_id = item.link:match("/job/(%d+)$")
+      local summary = vim.fn.system(
+        string.format("gh run view --repo %s --job %s", repo, job_id)
+      )
+      local logs = vim.fn.system(
+        string.format("gh run view --repo %s --job %s --log", repo, job_id)
+      )
+
+      -- Open a new vertical split and show the summary and logs of the jobs.
+      vim.api.nvim_command(string.format("vsplit %s", job_id))
+      vim.api.nvim_put(vim.split(summary, "\n"), "", true, true)
+      vim.api.nvim_put({ "", "", "" }, "", true, true)
+      vim.api.nvim_put(vim.split(logs, "\n"), "", true, true)
+    end,
+    actions = {
+      picker_yank_url = function(_, item)
+        if not item then
+          return
+        end
+
+        vim.fn.setreg("+", item.link)
+        vim.notify("Yanked " .. item.link, vim.log.levels.INFO)
+      end,
+    },
+    win = {
+      input = {
+        keys = {
+          ["y"] = "picker_yank_url",
+          ["Y"] = "picker_yank_url",
+        },
+      },
+    },
+  })
+end, {
+  nargs = "*",
+})
+
+vim.keymap.set("n", "<leader>ghc", "<cmd>GitHubChecks<cr>")
 
 --------------------------------------------------------------------------------
 -- MISC
