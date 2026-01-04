@@ -1571,11 +1571,11 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         item.subject.__typename == "Issue"
         or item.subject.__typename == "PullRequest"
       then
-        local itemType = item.subject.__typename == "Issue" and "issue" or "pr"
+        local item_type = item.subject.__typename == "Issue" and "issue" or "pr"
 
         picker:close()
         Snacks.picker.gh_actions({
-          type = itemType,
+          type = item_type,
           repo = item.repo,
           number = item.subject.number,
         })
