@@ -77,6 +77,7 @@ local icons = {
     success = "",
     failed = "✖",
     pending = "",
+    done = "",
   },
 }
 
@@ -1982,11 +1983,12 @@ vim.api.nvim_create_user_command("GitHubChecks", function(opts)
   local items = {}
   for idx, result in ipairs(results) do
     local item = result
-    if item.description == nil then
-      item.description = ""
-    end
     item.idx = idx
-    item.text = item.workflow .. " / " .. item.name .. " " .. item.description
+    if item.workflow ~= "" then
+      item.text = item.workflow .. " / " .. item.name
+    else
+      item.text = item.name
+    end
     item.preview = {
       text = "",
       ft = "markdown",
@@ -2020,6 +2022,8 @@ vim.api.nvim_create_user_command("GitHubChecks", function(opts)
       else
         if item.state == "SUCCESS" then
           state_icon = { icons.githubchecks.success, "GitHubCheckSuccess" }
+        elseif item.state == "SKIPPED" or item.state == "NEUTRAL" then
+          state_icon = { icons.githubchecks.done, "GitHubTextSecondary" }
         else
           state_icon = { icons.githubchecks.failed, "GitHubCheckFailed" }
         end
@@ -2027,8 +2031,7 @@ vim.api.nvim_create_user_command("GitHubChecks", function(opts)
 
       return {
         state_icon,
-        { " " .. item.workflow .. " / " .. item.name .. " ", "GitHubText" },
-        { item.description, "GitHubTextSecondary" },
+        { " " .. item.text, "GitHubText" },
       }
     end,
     confirm = function(picker, item)
