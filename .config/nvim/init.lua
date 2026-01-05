@@ -607,25 +607,6 @@ require("snacks").setup({
               end)
             end,
           },
-          -- Search in the selected directory using "rg" (ripgrep).
-          explorer_search_in_directory = {
-            action = function(_, item)
-              if not item then
-                return
-              end
-              local dir = vim.fn.fnamemodify(item.file, ":p:h")
-              Snacks.picker.grep({
-                cwd = dir,
-                cmd = "rg",
-                args = rg_args,
-                show_empty = true,
-                hidden = true,
-                ignored = false,
-                follow = false,
-                supports_live = true,
-              })
-            end,
-          },
           -- Show diff between two selected files in a new tab. The files which
           -- should be compared must be selected using "tab" or "shift+tab".
           explorer_diff = {
@@ -644,7 +625,6 @@ require("snacks").setup({
           list = {
             keys = {
               ["Y"] = "explorer_yank_path",
-              ["s"] = "explorer_search_in_directory",
               ["D"] = "explorer_diff",
             },
           },
