@@ -711,20 +711,33 @@ vim.keymap.set("n", "<leader>ew", "<cmd>noautocmd write ++p<cr>")
 
 local find_command =
   "fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store"
+local find_cache = {}
 
 -- Use "fd" to find files with the "find" command. Together with the
 -- "matchfuzzy()" function this should replace any external fuzzy finder plugin.
-function _G.fd_find_files(cmdarg, _)
-  local fnames = vim.fn.systemlist(find_command)
-
-  if #cmdarg == 0 then
-    return fnames
-  else
-    return vim.fn.matchfuzzy(fnames, cmdarg)
+-- The files are cached until the command line is closed. Afterwards the cache
+-- is cleared.
+function _G.fd_find_files(arg, _)
+  if #find_cache == 0 then
+    find_cache = vim.fn.systemlist(find_command)
   end
+  return #arg == 0 and find_cache or vim.fn.matchfuzzy(find_cache, arg)
 end
 
 vim.opt.findfunc = "v:lua.fd_find_files"
+
+vim.api.nvim_create_autocmd({ "CmdlineLeave" }, {
+  pattern = ":",
+  group = vim.api.nvim_create_augroup(
+    "find-command-clear-cache",
+    { clear = true }
+  ),
+  callback = function(ev)
+    if ev.event == "CmdlineLeave" then
+      find_cache = {}
+    end
+  end,
+})
 
 -- Keymaps for finding files, buffers, recent files, etc. using the Snacks
 -- picker.
@@ -764,6 +777,20 @@ end)
 vim.opt.grepprg =
   "rg --vimgrep --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
 vim.opt.grepformat = "%f:%l:%c:%m"
+
+vim.api.nvim_create_autocmd("CmdlineChanged", {
+  pattern = ":",
+  group = vim.api.nvim_create_augroup("livegrep-command", { clear = true }),
+  callback = function()
+    local cmdline = vim.fn.getcmdline()
+    local words = vim.split(cmdline, " ", { trimempty = true })
+    if words[1] == "livegrep" and #words > 1 then
+      vim.cmd("silent grep! " .. vim.fn.escape(words[2], " "))
+      vim.cmd("cwindow")
+      vim.cmd.redraw()
+    end
+  end,
+})
 
 -- Keymaps for searching through files using the Snacks picker.
 vim.keymap.set("n", "<leader>ss", function()
