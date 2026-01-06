@@ -4,15 +4,7 @@ set -e
 
 node=$1
 if [ "$node" = "" ]; then
-  node=$(kubectl get node -o name | sed 's/node\///' | tr '\n' ' ')
-  node=${node::-1}
-
-  if [[ "$node" =~ " " ]]; then
-    echo "Node name must be specified. Choose one of: [$node]"
-    exit 1
-  else
-    echo "Single-node cluster detected. Defaulting to node $node"
-  fi
+  node=$(kubectl get node -o name | sed 's/node\///' | fzf)
 fi
 
 pod=$(
