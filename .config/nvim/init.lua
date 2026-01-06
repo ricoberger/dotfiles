@@ -1732,17 +1732,28 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
 
         picker:close()
       end,
+      picker_browse_url = function(_, item)
+        vim.fn.jobstart({ "open", item.url }, { detach = true })
+      end,
     },
     win = {
       input = {
         keys = {
-          ["y"] = "picker_yank_url",
-          ["Y"] = "picker_yank_url",
-          ["r"] = "picker_mark_as_read",
-          ["R"] = "picker_mark_as_unread",
-          ["d"] = "picker_mark_as_done",
-          ["D"] = "picker_mark_as_undone",
-          ["c"] = "picker_change_cwd_to_repo",
+          ["<c-y>"] = { "picker_yank_url", mode = { "n", "i" } },
+          ["<a-b>"] = { "picker_browse_url", mode = { "n", "i" } },
+          ["<c-r>"] = { "picker_mark_as_read", mode = { "n", "i" } },
+          ["<c-d>"] = { "picker_mark_as_done", mode = { "n", "i" } },
+        },
+      },
+      list = {
+        keys = {
+          ["y"] = { "picker_yaml_url", mode = { "n", "x" } },
+          ["b"] = { "picker_browse_url", mode = { "n", "i" } },
+          ["r"] = { "picker_mark_as_read", mode = { "n", "x" } },
+          ["R"] = { "picker_mark_as_unread", mode = { "n", "x" } },
+          ["d"] = { "picker_mark_as_done", mode = { "n", "x" } },
+          ["D"] = { "picker_mark_as_undone", mode = { "n", "x" } },
+          ["c"] = { "picker_change_cwd_to_repo", mode = { "n", "x" } },
         },
       },
     },
@@ -1882,13 +1893,22 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
 
         picker:close()
       end,
+      picker_browse_url = function(_, item)
+        vim.fn.jobstart({ "open", item.url }, { detach = true })
+      end,
     },
     win = {
       input = {
         keys = {
-          ["y"] = "picker_yank_url",
-          ["Y"] = "picker_yank_url",
-          ["c"] = "picker_change_cwd_to_repo",
+          ["<c-y>"] = { "picker_yank_url", mode = { "n", "i" } },
+          ["<a-b>"] = { "picker_browse_url", mode = { "n", "i" } },
+        },
+      },
+      list = {
+        keys = {
+          ["y"] = { "picker_yaml_url", mode = { "n", "x" } },
+          ["b"] = { "picker_browse_url", mode = { "n", "i" } },
+          ["c"] = { "picker_change_cwd_to_repo", mode = { "n", "x" } },
         },
       },
     },
@@ -2070,12 +2090,21 @@ vim.api.nvim_create_user_command("GitHubChecks", function()
         vim.fn.setreg("+", item.link)
         vim.notify("Yanked " .. item.link, vim.log.levels.INFO)
       end,
+      picker_browse_url = function(_, item)
+        vim.fn.jobstart({ "open", item.link }, { detach = true })
+      end,
     },
     win = {
       input = {
         keys = {
-          ["y"] = "picker_yank_url",
-          ["Y"] = "picker_yank_url",
+          ["<c-y>"] = { "picker_yank_url", mode = { "n", "i" } },
+          ["<a-b>"] = { "picker_browse_url", mode = { "n", "i" } },
+        },
+      },
+      list = {
+        keys = {
+          ["y"] = { "picker_yank_url", mode = { "n", "x" } },
+          ["b"] = { "picker_browse_url", mode = { "n", "i" } },
         },
       },
     },
