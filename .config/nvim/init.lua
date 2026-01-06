@@ -1922,27 +1922,27 @@ end, {
 vim.keymap.set(
   "n",
   "<leader>ghpi",
-  "<cmd>GitHubSearch is:pr is:open involves:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:pr is:open involves:ricoberger<cr>"
 )
 vim.keymap.set(
   "n",
   "<leader>ghpc",
-  "<cmd>GitHubSearch is:pr is:open author:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:pr is:open author:ricoberger<cr>"
 )
 vim.keymap.set(
   "n",
   "<leader>ghpa",
-  "<cmd>GitHubSearch is:pr is:open assignee:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:pr is:open assignee:ricoberger<cr>"
 )
 vim.keymap.set(
   "n",
   "<leader>ghpm",
-  "<cmd>GitHubSearch is:pr is:open mentions:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:pr is:open mentions:ricoberger<cr>"
 )
 vim.keymap.set(
   "n",
   "<leader>ghpr",
-  "<cmd>GitHubSearch is:pr is:open review-requested:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:pr is:open review-requested:ricoberger<cr>"
 )
 vim.keymap.set("n", "<leader>ghP", function()
   Snacks.picker.gh_pr()
@@ -1952,22 +1952,22 @@ end)
 vim.keymap.set(
   "n",
   "<leader>ghii",
-  "<cmd>GitHubSearch is:issue is:open involves:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:issue is:open involves:ricoberger<cr>"
 )
 vim.keymap.set(
   "n",
   "<leader>ghic",
-  "<cmd>GitHubSearch is:issue is:open author:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:issue is:open author:ricoberger<cr>"
 )
 vim.keymap.set(
   "n",
   "<leader>ghia",
-  "<cmd>GitHubSearch is:issue is:open assignee:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:issue is:open assignee:ricoberger<cr>"
 )
 vim.keymap.set(
   "n",
   "<leader>ghim",
-  "<cmd>GitHubSearch is:issue is:open mentions:ricoberger<cr>"
+  "<cmd>GitHubSearch archived:false is:issue is:open mentions:ricoberger<cr>"
 )
 vim.keymap.set("n", "<leader>ghI", function()
   Snacks.picker.gh_issue()
