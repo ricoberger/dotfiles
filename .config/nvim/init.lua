@@ -1741,8 +1741,11 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         keys = {
           ["<c-y>"] = { "picker_yank_url", mode = { "n", "i" } },
           ["<a-b>"] = { "picker_browse_url", mode = { "n", "i" } },
-          ["<c-r>"] = { "picker_mark_as_read", mode = { "n", "i" } },
-          ["<c-d>"] = { "picker_mark_as_done", mode = { "n", "i" } },
+          ["<a-r>"] = { "picker_mark_as_read", mode = { "n", "i" } },
+          ["<a-R>"] = { "picker_mark_as_unread", mode = { "n", "i" } },
+          ["<a-d>"] = { "picker_mark_as_done", mode = { "n", "i" } },
+          ["<a-D>"] = { "picker_mark_as_undone", mode = { "n", "i" } },
+          ["<a-c>"] = { "picker_change_cwd_to_repo", mode = { "n", "i" } },
         },
       },
       list = {
@@ -1902,6 +1905,7 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
         keys = {
           ["<c-y>"] = { "picker_yank_url", mode = { "n", "i" } },
           ["<a-b>"] = { "picker_browse_url", mode = { "n", "i" } },
+          ["<a-c>"] = { "picker_change_cwd_to_repo", mode = { "n", "i" } },
         },
       },
       list = {
