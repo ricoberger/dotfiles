@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+set -e
+
+if [[ $# -ne 2 ]]; then
+  echo "Usage: kubectl k3s [create|delete|logs] [name]"
+  exit 1
+fi
+
+if [[ $1 == "create" ]]; then
+  docker run \
+    -d \
+    --tmpfs /run,/var/run \
+    --ulimit nproc=65535 \
+    --ulimit nofile=65535:65535 \
+    --privileged \
+    -e K3S_TOKEN=token \
+    -e K3S_KUBECONFIG_OUTPUT=/output/kubeconfig.yaml \
+    -e K3S_KUBECONFIG_MODE=666 \
+    -e K3S_NODE_NAME=homelab-k3s-server \
+    -v .:/output \
+    -p 6443:6443 \
+    --name k3s-$2 \
+    rancher/k3s:v1.34.2-k3s1 server --disable-helm-controller --disable servicelb --disable traefik
+
+  echo "export KUBECONFIG=$(pwd)/kubeconfig.yaml"
+  exit 0
+fi
+
+
+if [[ $1 == "delete" ]]; then
+  docker rm -f k3s-$2
+  exit 0
+fi
+
+if [[ $1 == "logs" ]]; then
+  docker logs -f k3s-$2
+  exit 0
+fi
