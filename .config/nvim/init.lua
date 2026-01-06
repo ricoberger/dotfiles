@@ -1955,7 +1955,7 @@ end)
 
 -- Fetch checks for the currently open PR and shows them in a Snacks picker. If
 -- a check in the picker is selected we can view the logs of the check.
-vim.api.nvim_create_user_command("GitHubChecks", function(opts)
+vim.api.nvim_create_user_command("GitHubChecks", function()
   -- Buffer name is: gh://owner/repo/pr/number
   local buffer = vim.fn.expand("%")
   local repo = buffer:match("gh://([^/]+/[^/]+)/pr/%d+")
@@ -2084,7 +2084,30 @@ end, {
   nargs = "*",
 })
 
-vim.keymap.set("n", "<leader>ghc", "<cmd>GitHubChecks<cr>")
+vim.keymap.set("n", "<leader>ghac", "<cmd>GitHubChecks<cr>")
+
+-- Merge the currently open pull request via the "gh-pr-merge" command. Can be
+-- used instead of the Snacks action to squash and merge the pull request with
+-- admin privileges.
+vim.api.nvim_create_user_command("GitHubMerge", function()
+  -- Buffer name is: gh://owner/repo/pr/number
+  local buffer = vim.fn.expand("%")
+  local repo = buffer:match("gh://([^/]+/[^/]+)/pr/%d+")
+  local pr_number = buffer:match("gh://[^/]+/[^/]+/pr/(%d+)")
+
+  local output =
+    vim.fn.system(string.format("gh-pr-merge %s %s ", repo, pr_number))
+  if vim.v.shell_error ~= 0 then
+    vim.notify("Failed to merge pull request: " .. output, vim.log.levels.ERROR)
+    return
+  else
+    vim.notify("Pull request was merged: " .. output, vim.log.levels.INFO)
+  end
+end, {
+  nargs = "*",
+})
+
+vim.keymap.set("n", "<leader>gham", "<cmd>GitHubMerge<cr>")
 
 --------------------------------------------------------------------------------
 -- MISC

@@ -1,5 +1,24 @@
 #!/usr/bin/env bash
 
+# gh-pr-merge merges a GitHub pull request using the GitHub coimmand-line tool
+# (gh). It fetches the title and body of the pull request and uses them as the
+# commit message when merging the pull request with a squash merge. The script
+# also deletes the branch after merging and uses admin privileges to perform
+# the merge.
+#
+# Usage:
+#  gh-pr-merge <pr-number> <repository>
+#  gh-pr-merge <pr-number>
+#  gh-pr-merge
+
 set -e
 
-gh pr merge $1 --squash --delete-branch --admin
+if [[ $# -eq 2 ]]; then
+  pr=$(gh pr view $1 --repo $2 --json title,body)
+  gh pr merge $1 --repo $2 --squash --delete-branch --admin --subject "$(echo "$pr" | jq -r .title)" --body "$(echo "$pr" | jq -r .body)"
+else
+  pr=$(gh pr view $1 --json title,body)
+  gh pr merge $1 --squash --delete-branch --admin --subject "$(echo "$pr" | jq -r .title)" --body "$(echo "$pr" | jq -r .body)"
+fi
+
+
