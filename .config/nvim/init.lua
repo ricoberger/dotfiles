@@ -1949,7 +1949,7 @@ vim.keymap.set(
   "<cmd>GitHubSearch archived:false is:pr is:open review-requested:ricoberger<cr>"
 )
 vim.keymap.set("n", "<leader>ghP", function()
-  Snacks.picker.gh_pr()
+  Snacks.picker.gh_pr({ state = "open", live = false })
 end)
 
 -- Show issues involving, created by, assigned to or mentioning me.
@@ -1974,7 +1974,7 @@ vim.keymap.set(
   "<cmd>GitHubSearch archived:false is:issue is:open mentions:ricoberger<cr>"
 )
 vim.keymap.set("n", "<leader>ghI", function()
-  Snacks.picker.gh_issue()
+  Snacks.picker.gh_issue({ state = "open", live = false })
 end)
 
 -- Fetch checks for the currently open PR and shows them in a Snacks picker. If
