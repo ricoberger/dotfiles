@@ -2117,8 +2117,6 @@ end, {
   nargs = "*",
 })
 
-vim.keymap.set("n", "<leader>ghac", "<cmd>GitHubChecks<cr>")
-
 -- Merge the currently open pull request via the "gh-pr-merge" command. Can be
 -- used instead of the Snacks action to squash and merge the pull request with
 -- admin privileges.
@@ -2140,6 +2138,11 @@ end, {
   nargs = "*",
 })
 
+-- Keymaps for GitHub related actions.
+vim.keymap.set("n", "<leader>ghaa", function()
+  Snacks.picker.gh_actions()
+end)
+vim.keymap.set("n", "<leader>ghac", "<cmd>GitHubChecks<cr>")
 vim.keymap.set("n", "<leader>gham", "<cmd>GitHubMerge<cr>")
 
 --------------------------------------------------------------------------------
