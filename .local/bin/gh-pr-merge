@@ -20,5 +20,3 @@ else
   pr=$(gh pr view $1 --json title,body)
   gh pr merge $1 --squash --delete-branch --admin --subject "$(echo "$pr" | jq -r .title)" --body "$(echo "$pr" | jq -r .body)"
 fi
-
-

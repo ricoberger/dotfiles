@@ -2127,12 +2127,15 @@ vim.api.nvim_create_user_command("GitHubMerge", function()
   local pr_number = buffer:match("gh://[^/]+/[^/]+/pr/(%d+)")
 
   local output =
-    vim.fn.system(string.format("gh-pr-merge %s %s ", repo, pr_number))
+    vim.fn.system(string.format("gh-pr-merge %s %s ", pr_number, repo))
   if vim.v.shell_error ~= 0 then
     vim.notify("Failed to merge pull request: " .. output, vim.log.levels.ERROR)
     return
   else
-    vim.notify("Pull request was merged: " .. output, vim.log.levels.INFO)
+    vim.notify(
+      string.format("Pull request #%s in %s was merged", pr_number, repo),
+      vim.log.levels.INFO
+    )
   end
 end, {
   nargs = "*",
