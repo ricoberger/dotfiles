@@ -21,7 +21,7 @@ if [[ $1 == "create" ]]; then
     -v .:/output \
     -p 6443:6443 \
     --name k3s-$2 \
-    rancher/k3s:v1.34.2-k3s1 server --disable-helm-controller --disable servicelb --disable traefik
+    rancher/k3s:v1.35.0-k3s1 server --disable-helm-controller --disable servicelb --disable traefik
 
   echo "export KUBECONFIG=$(pwd)/kubeconfig.yaml"
   exit 0
