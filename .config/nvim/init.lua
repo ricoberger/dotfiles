@@ -1519,12 +1519,12 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
       if item.subject.__typename == "PullRequest" then
         type_icon = { icons.github.pr, "GitHubTextSecondary" }
         if item.subject.pullRequestState ~= nil then
-          if item.subject.isDraft then
+          if item.subject.pullRequestState == "CLOSED" then
+            type_icon = { icons.github.pr, "GitHubUnmerged" }
+          elseif item.subject.isDraft then
             type_icon = { icons.github.pr, "GitHubTextSecondary" }
           elseif item.subject.pullRequestState == "OPEN" then
             type_icon = { icons.github.pr, "GitHubOpen" }
-          elseif item.subject.pullRequestState == "CLOSED" then
-            type_icon = { icons.github.pr, "GitHubUnmerged" }
           elseif item.subject.pullRequestState == "MERGED" then
             type_icon = { icons.github.pr, "GitHubMerged" }
           end
