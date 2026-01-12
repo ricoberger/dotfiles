@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+
+# fzfe - Fuzzy Finder File Explorer
+#
+# Inspyred by https://github.com/ashish0kumar/fzfm/tree/main and
+# https://thevaluable.dev/practical-guide-fzf-example/
+
+if [[ "$1" == "paste" ]]; then
+  # echo "fzfe paste $2" | pbcopy
+  target_dir="$2"
+  if [[ ! -d "$target_dir" ]]; then
+    target_dir=$(realpath)
+  fi
+
+  command=$(cat /tmp/fzfe-command)
+
+  while IFS="" read -r f || [ -n "$f" ]
+  do
+    if [[ "$command" == "cp" ]]; then
+      cp -r "$f" "$2"
+    elif [[ "$command" == "mv" ]]; then
+      mv "$f" "$2"
+    fi
+  done < /tmp/fzfe-files
+  exit 0
+fi
+
+# Configuration variables with defaults
+MEDIA_OPENER="open"
+TEXT_EDITOR="nvim"
+LIST_COMMAND="ls"
+LIST_ARGS="-a --color"
+PREVIEW_COMMAND="bat"
+
+# Check and open file based on mime type
+open_file() {
+  local file="$1"
+  local mime_type=$(file --mime-type -b "$file")
+
+  case "$mime_type" in
+    text/*|application/json|application/xml|application/javascript|application/x-shellscript)
+      $TEXT_EDITOR "$file"
+      clear
+      ;;
+    image/*|video/*|audio/*|application/pdf)
+      if [[ -n "$MEDIA_OPENER" ]]; then
+          $MEDIA_OPENER "$file" &>/dev/null &
+      else
+          echo "No media opener available. Cannot open $file"
+          read -n 1 -s -r -p "Press any key to continue..."
+          clear
+      fi
+      ;;
+    *)
+      if [ -B "$file" ]; then
+        $TEXT_EDITOR "$file"
+        clear
+      else
+        if [[ -n "$MEDIA_OPENER" ]]; then
+          $MEDIA_OPENER "$file" &>/dev/null || {
+            $TEXT_EDITOR "$file"
+            clear
+          }
+        else
+          $TEXT_EDITOR "$file"
+          clear
+        fi
+      fi
+      ;;
+  esac
+}
+
+# Main function
+fzfe() {
+  local list_command="$LIST_COMMAND $LIST_ARGS"
+
+  while true; do
+    selection=$(eval "$list_command" | fzf \
+      --ansi \
+      --multi \
+      --reverse \
+      --height 100% \
+      --info right \
+      --prompt "󰥨 Search: " \
+      --pointer ">" \
+      --marker "󰄲" \
+      --border "rounded" \
+      --border-label=" 󱉭 $(pwd)/ " \
+      --border-label-pos center \
+      --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4' \
+      --bind "enter:accept" \
+      --bind "ctrl-d:half-page-down" \
+      --bind "ctrl-u:half-page-up" \
+      --bind "ctrl-f:preview-half-page-down" \
+      --bind "ctrl-b:preview-half-page-up" \
+      --bind "tab:toggle+down" \
+      --bind "shift-tab:toggle+up" \
+      --bind "alt-a:select-all" \
+      --bind "alt-x:deselect-all" \
+      --bind "alt-r:reload(eval $list_command)" \
+      --bind "alt-p:toggle-preview" \
+      --bind "alt-d:execute(rm -r {+})" \
+      --bind "alt-d:+reload(eval $list_command)" \
+      --bind "alt-y:execute(echo {+} | xargs realpath | pbcopy)" \
+      --bind "alt-c:execute(echo "cp" > /tmp/fzfe-command  && echo {+} | xargs realpath > /tmp/fzfe-files)" \
+      --bind "alt-c:+deselect-all" \
+      --bind "alt-m:execute(echo "mv" > /tmp/fzfe-command  && echo {+} | xargs realpath > /tmp/fzfe-files)" \
+      --bind "alt-m:+deselect-all" \
+      --bind "alt-p:execute(fzfe paste `realpath`)" \
+      --bind "alt-p:+reload(eval $list_command)" \
+      --preview-window="right:65%" \
+      --preview "
+          file={}
+          if [[ -d \"\$file\" ]]; then
+            echo \"󰉋 Folder: \$file\"
+            echo \"\"
+            $list_command \"\$file\" 2>/dev/null
+          elif [[ -f \"\$file\" ]]; then
+            echo \"󰈙 File: \$file\"
+            echo \"\"
+            $PREVIEW_COMMAND --style=numbers --color=always --line-range :500 \"\$file\" 2>/dev/null || cat \"\$file\"
+          else
+            echo \"Invalid selection: \$file\"
+          fi
+      ")
+
+    [[ -z "$selection" ]] && break
+
+    if [[ "$selection" == ".." ]]; then
+      cd .. || break
+    elif [[ -d "$selection" ]]; then
+      cd "$selection" || break
+    elif [[ -f "$selection" ]]; then
+      open_file "$selection"
+    else
+      break
+    fi
+  done
+}
+
+# Allow configuration through environment variables
+[[ -n "$FZFM_MEDIA_OPENER" ]] && MEDIA_OPENER="$FZFM_MEDIA_OPENER"
+[[ -n "$FZFM_TEXT_EDITOR" ]] && TEXT_EDITOR="$FZFM_TEXT_EDITOR"
+[[ -n "$FZFM_LIST_COMMAND" ]] && LIST_COMMAND="$FZFM_LIST_COMMAND"
+[[ -n "$FZFM_PREVIEW_COMMAND" ]] && PREVIEW_COMMAND="$FZFM_PREVIEW_COMMAND"
+
+clear
+fzfe

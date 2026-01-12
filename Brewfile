@@ -47,6 +47,7 @@ brew "ruff"
 ################################################################################
 
 brew "azure/kubelogin/kubelogin"
+brew "bat"
 brew "btop"
 brew "fd"
 brew "fluxcd/tap/flux"
