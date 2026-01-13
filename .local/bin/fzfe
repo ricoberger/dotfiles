@@ -118,7 +118,7 @@ fzfe() {
           elif [[ -f \"\$file\" ]]; then
             echo \"󰈙 File: \$file\"
             echo \"\"
-            $PREVIEW_COMMAND --style=numbers --color=always --line-range :500 \"\$file\" 2>/dev/null || cat \"\$file\"
+            $PREVIEW_COMMAND --style=numbers --color=always \"\$file\" 2>/dev/null || cat \"\$file\"
           else
             echo \"Invalid selection: \$file\"
           fi
