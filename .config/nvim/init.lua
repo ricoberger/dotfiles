@@ -2335,6 +2335,13 @@ vim.keymap.set("n", "<leader>nf", function()
   })
 end)
 
+vim.keymap.set("n", "<leader>nr", function()
+  Snacks.picker.recent({
+    cwd = notes_dir,
+    filter = { cwd = true },
+  })
+end)
+
 vim.keymap.set("n", "<leader>ns", function()
   Snacks.picker.grep({
     cwd = notes_dir,
