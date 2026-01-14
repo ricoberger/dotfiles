@@ -22,6 +22,10 @@ if [[ "$1" == "paste" ]]; then
       mv "$f" "$2"
     fi
   done < /tmp/fzfe-files
+
+  rm /tmp/fzfe-command
+  rm /tmp/fzfe-files
+
   exit 0
 fi
 
@@ -93,12 +97,12 @@ fzfe() {
       --bind "ctrl-u:half-page-up" \
       --bind "ctrl-f:preview-half-page-down" \
       --bind "ctrl-b:preview-half-page-up" \
+      --bind "ctrl-p:toggle-preview" \
       --bind "tab:toggle+down" \
       --bind "shift-tab:toggle+up" \
       --bind "alt-a:select-all" \
       --bind "alt-x:deselect-all" \
       --bind "alt-r:reload(eval $list_command)" \
-      --bind "alt-p:toggle-preview" \
       --bind "alt-d:execute(rm -r {+})" \
       --bind "alt-d:+reload(eval $list_command)" \
       --bind "alt-y:execute(echo {+} | xargs realpath | pbcopy)" \
