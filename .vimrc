@@ -167,7 +167,7 @@ vnoremap gs` <esc>`>a`<esc>`<i`<esc>
 function s:Find(filename)
   if executable('fd')
     let errorfile = tempname()
-    execute '!fd --full-path --hidden --color never --type f --exclude .git "'.a:filename.'" | sed "s/$/:1:/" > '.errorfile
+    execute '!fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store "'.a:filename.'" | sed "s/$/:1:/" > '.errorfile
     set errorformat=%f:%l:
     exe "cfile ". errorfile
     copen
@@ -197,7 +197,7 @@ nnoremap <leader>fb :buffer<space>
 " If "rg" (ripgrep) is installed we use it to search though files with the
 " "grep" command.
 if executable('rg')
-  set grepprg=rg\ --vimgrep\ --smart-case\ --hidden\ --color=never\ --glob='!.git'
+  set grepprg=rg\ --vimgrep\ --smart-case\ --hidden\ --color=never\ --glob='!.git'\ --glob='!node_modules'\ --glob='!dist'\ --glob='!.DS_Store'
   set grepformat=%f:%l:%c:%m
 endif
 
@@ -219,14 +219,27 @@ nnoremap <leader>st :silent grep! -e='todo:' -e='warn:' -e='info:' -e='xxx:' -e=
 nnoremap <leader>rr :%s///gcI<left><left><left><left><left>
 vnoremap <leader>rr :s///gcI<left><left><left><left><left>
 nnoremap <leader>rw :%s/\<<c-r><c-w>\>//gcI<left><left><left><left>
-vnoremap <leader>rv y:%s/\V<c-r>"//gcI<left><left><left><left>
+vnoremap <leader>rw y:%s/\V<c-r>"//gcI<left><left><left><left>
 nnoremap <leader>rR :cfdo %s///gcI | update<left><left><left><left><left><left><left><left><left><left><left><left><left><left>
 nnoremap <leader>rW :cfdo %s/\<<c-r><c-w>\>//gcI | update<left><left><left><left><left><left><left><left><left><left><left><left><left>
-vnoremap <leader>rV y:cfdo %s/\V<c-r>"//gcI | update<left><left><left><left><left><left><left><left><left><left><left><left><left><left>
+vnoremap <leader>rW y:cfdo %s/\V<c-r>"//gcI | update<left><left><left><left><left><left><left><left><left><left><left><left><left><left>
 
 " ------------------------------------------------------------------------------
 " QUICKFIX LIST
 " ------------------------------------------------------------------------------
+
+" When using `dd` in the quickfix list, remove the item from the quickfix list.
+function! RemoveQFItem()
+  let curqfidx = line('.') - 1
+  let qfall = getqflist()
+  call remove(qfall, curqfidx)
+  call setqflist(qfall, 'r')
+  execute curqfidx + 1 . "cfirst"
+  :copen
+endfunction
+:command! RemoveQFItem :call RemoveQFItem()
+" Use map <buffer> to only map dd in the quickfix window. Requires +localmap
+autocmd FileType qf map <buffer> dd :RemoveQFItem<cr>
 
 " Automatically open the quickfix window if there are any entries in the
 " quickfix list, e.g. after running ":grep".
@@ -238,20 +251,6 @@ augroup END
 " Add keymaps for easier acccess to the Quickfix list.
 nnoremap ]q :cnext<cr>
 nnoremap [q :cprevious<cr>
-nnoremap <leader>qo :copen<cr>
-nnoremap <leader>qc :cclose<cr>
-nnoremap <leader>qh :chistory<cr>
-nnoremap <leader>qn :cnewer<cr>
-nnoremap <leader>qp :colder<cr>
-nnoremap <leader>q1 :1chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q2 :2chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q3 :3chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q4 :4chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q5 :5chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q6 :6chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q7 :7chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q8 :8chistory<cr> <bar> :copen<cr>
-nnoremap <leader>q9 :9chistory<cr> <bar> :copen<cr>
 
 " ------------------------------------------------------------------------------
 " MACROS
