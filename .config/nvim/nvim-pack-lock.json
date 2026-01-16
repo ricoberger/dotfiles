@@ -1,17 +1,17 @@
 {
   "plugins": {
     "catppuccin": {
-      "rev": "6efc53e42cfc97700f19043105bf73ba83c4ae7d",
+      "rev": "beaf41a30c26fd7d6c386d383155cbd65dd554cd",
       "src": "https://github.com/catppuccin/nvim",
       "version": "'main'"
     },
     "gitsigns": {
-      "rev": "6bd29494e3f79ff08be1d35bc1926ed23c22ed9a",
+      "rev": "42d6aed4e94e0f0bbced16bbdcc42f57673bd75e",
       "src": "https://github.com/lewis6991/gitsigns.nvim",
       "version": "'main'"
     },
     "helm-ls": {
-      "rev": "d6f3a8d",
+      "rev": "f0b9a1723890971a6d84890b50dbf5f40974ea1b",
       "src": "https://github.com/qvalentin/helm-ls.nvim",
       "version": "'main'"
     },
@@ -26,7 +26,7 @@
       "version": "'main'"
     },
     "nvim-treesitter": {
-      "rev": "99dfc5acefd7728cec4ad0d0a6a9720f2c2896ff",
+      "rev": "8aada0e3940c573e38b417a226b43bc8675f8958",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     },
