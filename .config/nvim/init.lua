@@ -563,7 +563,7 @@ require("snacks").setup({
         hidden = true,
         layout = {
           preset = "default",
-          preview = false,
+          preview = true,
         },
         actions = {
           -- Overwrite the "explorer_yank" command to provide more options for
