@@ -105,13 +105,13 @@ zstyle ':fzf-tab:*' fzf-flags --color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:
 ################################################################################
 
 eval "$(fzf --zsh)"
-export FZF_DEFAULT_COMMAND='fd --full-path --hidden --color never --type f --exclude .git'
+export FZF_DEFAULT_COMMAND='fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store'
 export FZF_DEFAULT_OPTS='--color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:#ed8796 --color=fg:#cad3f5,header:#ed8796,info:#c6a0f6,pointer:#f4dbd6 --color=marker:#f4dbd6,fg+:#cad3f5,prompt:#c6a0f6,hl+:#ed8796'
 
 
 
 ################################################################################
-### FZF
+### BAT
 ################################################################################
 
 export BAT_THEME="Catppuccin Macchiato"
@@ -155,10 +155,6 @@ websearch() { open -a "Safari" "https://www.google.com/search?q=$(omz_urlencode 
 cdp() {
   REPOS=`find $HOME/Documents/GitHub -type d -maxdepth 2 -mindepth 2`
   cd $(echo "/Users/ricoberger/Desktop\n/Users/ricoberger/Documents\n/Users/ricoberger/Downloads\n$REPOS" | fzf)
-}
-
-ksecret() {
-  kubectl get secret $@ -o go-template='{{range $k,$v := .data}}{{printf "%s: " $k}}{{if not $v}}{{$v}}{{else}}{{$v | base64decode}}{{end}}{{"\n"}}{{end}}'
 }
 
 vaultedit() {
