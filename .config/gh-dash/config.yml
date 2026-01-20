@@ -1,49 +1,40 @@
 ---
+notificationsSections:
+  - title: All
+    filters:
+
 prSections:
   - title: Involves
-    filters: is:open involves:ricoberger
+    filters: archived:false is:open involves:ricoberger
   - title: Created
-    filters: is:open author:ricoberger
+    filters: archived:false is:open author:ricoberger
   - title: Assigned
-    filters: is:open assignee:ricoberger
+    filters: archived:false is:open assignee:ricoberger
   - title: Mentioned
-    filters: is:open mentions:ricoberger
+    filters: archived:false is:open mentions:ricoberger
   - title: Review Requested
-    filters: is:open review-requested:ricoberger
-  - title: FeedDeck
-    filters: owner:feeddeck
-  - title: kubenav
-    filters: owner:kubenav
-  - title: kobs
-    filters: owner:kobsio
-  - title: ricoberger
-    filters: owner:ricoberger
+    filters: archived:false is:open review-requested:ricoberger
 
 issuesSections:
   - title: Involves
-    filters: is:open involves:ricoberger
+    filters: archived:false is:open involves:ricoberger
   - title: Created
-    filters: is:open author:ricoberger
+    filters: archived:false is:open author:ricoberger
   - title: Assigned
-    filters: is:open assignee:ricoberger
+    filters: archived:false is:open assignee:ricoberger
   - title: Mentioned
-    filters: is:open mentions:ricoberger
-  - title: FeedDeck
-    filters: owner:feeddeck
-  - title: kubenav
-    filters: owner:kubenav
-  - title: kobs
-    filters: owner:kobsio
-  - title: ricoberger
-    filters: owner:ricoberger
+    filters: archived:false is:open mentions:ricoberger
 
 defaults:
+  notificationsLimit: 100
   prsLimit: 25
   issuesLimit: 25
   preview:
-    open: true
+    open: false
     width: 120
   refetchIntervalMinutes: 0
+  prApproveComment:
+  view: notifications
 
 smartFilteringAtLaunch: false
 
@@ -55,19 +46,19 @@ keybindings:
     - name: open (nvim)
       key: O
       command: |
-        nvim -c ':lua Snacks.picker.gh_actions({ type = "issue", repo = "{{.RepoName}}", number = "{{.IssueNumber}}" })'
+        nvim -c ':lua Snacks.picker.gh_issue({ repo = "{{.RepoName}}", search = "#{{.IssueNumber}}" })'
   prs:
     - name: open (nvim)
       key: O
       command: |
-        nvim -c ':lua Snacks.picker.gh_actions({ type = "pr", repo = "{{.RepoName}}", number = "{{.PrNumber}}" })'
+        nvim -c ':lua Snacks.picker.gh_pr({ repo = "{{.RepoName}}", search = "#{{.PrNumber}}" })'
     - name: diff (nvim)
       key: D
       command: |
         cd {{.RepoPath}} && git checkout {{.BaseRefName}} && git pull && gh pr checkout {{.PrNumber}} && git difftool -d origin/HEAD...HEAD
     - name: merge (admin)
-      key: M
-      command: cd {{.RepoPath}} && gh-pr-merge {{.PrNumber}}
+      key: m
+      command: gh-pr-merge {{.PrNumber}} {{.RepoName}}
 
 theme:
   colors:
