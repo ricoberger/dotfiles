@@ -121,7 +121,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
   -- Open the Snacks picker with the formatted notification items and format the
   -- items nicely.
   Snacks.picker({
-    title = "GitHub Notifications",
+    title = string.format("GitHub Notifications (%s)", opts.args),
     layout = {
       preset = "default",
       preview = false,
@@ -446,7 +446,7 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
   -- Open the Snacks picker with the formatted search result items and format
   -- the items nicely.
   Snacks.picker({
-    title = "GitHub Search Results",
+    title = string.format("GitHub Search Results (%s)", opts.args),
     layout = {
       preset = "default",
       preview = false,
@@ -608,7 +608,7 @@ vim.api.nvim_create_user_command("GitHubChecks", function()
   -- Open the Snacks picker with the formatted check items and format the items
   -- nicely.
   Snacks.picker({
-    title = "GitHub Search Results",
+    title = string.format("GitHub Checks (#%s in %s)", pr_number, repo),
     layout = {
       preset = "default",
       preview = false,
