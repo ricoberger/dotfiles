@@ -42,6 +42,9 @@ query Inbox(
         url
         subject {
           __typename
+          ... on CheckSuite {
+            ...InboxSubjectCheckSuiteFieldsFragment
+          }
           ... on Issue {
             ...InboxSubjectIssueFieldsFragment
           }
@@ -52,6 +55,13 @@ query Inbox(
       }
     }
   }
+}
+fragment InboxSubjectCheckSuiteFieldsFragment on CheckSuite {
+  __typename
+  id
+  url
+  conclusion
+  status
 }
 fragment InboxSubjectIssueFieldsFragment on Issue {
   __typename

@@ -160,9 +160,13 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
       elseif item.subject.__typename == "Release" then
         type_icon = { icons.github.release, "GitHubTextSecondary" }
       elseif item.subject.__typename == "WokflowRun" then
-        type_icon = { icons.github.workflow, "GitHubUnmerged" }
+        type_icon = { icons.github.workflow, "GitHubCheckFailed" }
       elseif item.subject.__typename == "CheckSuite" then
-        type_icon = { icons.github.workflow, "GitHubUnmerged" }
+        if item.subject.conclusion == "SUCCESS" then
+          type_icon = { icons.github.workflow, "GitHubCheckSuccess" }
+        else
+          type_icon = { icons.github.workflow, "GitHubCheckFailed" }
+        end
       elseif item.subject.__typename == "Commit" then
         type_icon = { icons.github.commit, "GitHubTextSecondary" }
       elseif item.subject.__typename == "Gist" then
