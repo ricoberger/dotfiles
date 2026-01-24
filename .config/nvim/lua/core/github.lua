@@ -659,9 +659,12 @@ vim.api.nvim_create_user_command("GitHubChecks", function()
 
       -- Open a new vertical split and show the summary and logs of the jobs.
       vim.api.nvim_command(string.format("vsplit %s", job_id))
+      local buffer_number = vim.api.nvim_get_current_buf()
       vim.api.nvim_put(vim.split(summary, "\n"), "", true, true)
       vim.api.nvim_put({ "", "", "" }, "", true, true)
       vim.api.nvim_put(vim.split(logs, "\n"), "", true, true)
+      vim.api.nvim_buf_set_option(buffer_number, "readonly", true)
+      vim.api.nvim_buf_set_option(buffer_number, "modified", false)
     end,
     actions = {
       picker_yank_url = function(_, item)
