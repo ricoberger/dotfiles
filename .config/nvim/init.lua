@@ -383,7 +383,7 @@ require("catppuccin").setup({
       Pmenu = { bg = colors.mantle },
       PmenuBorder = { bg = colors.mantle, fg = colors.blue },
       -- Add highlights for GitHub notifications and search results.
-      -- See ": lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
+      -- See ":lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
       GitHubText = { fg = colors.text },
       GitHubTextSecondary = { fg = colors.overlay0 },
       GitHubTextHighlight = { fg = colors.blue },

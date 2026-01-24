@@ -6,7 +6,7 @@
       "version": "'main'"
     },
     "gitsigns": {
-      "rev": "42d6aed4e94e0f0bbced16bbdcc42f57673bd75e",
+      "rev": "abf82a65f185bd54adc0679f74b7d6e1ada690c9",
       "src": "https://github.com/lewis6991/gitsigns.nvim",
       "version": "'main'"
     },
@@ -21,12 +21,12 @@
       "version": "'master'"
     },
     "multicursor": {
-      "rev": "c982cc8375f062e9f98e96a408e0f7ad0c80d4db",
+      "rev": "3b5c79c4eec52ff18ce69923156422c298b9ae5d",
       "src": "https://github.com/jake-stewart/multicursor.nvim",
       "version": "'main'"
     },
     "nvim-treesitter": {
-      "rev": "8aada0e3940c573e38b417a226b43bc8675f8958",
+      "rev": "275b9fe801d56d5fea6d34f5bfea8bb24887b805",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     },
