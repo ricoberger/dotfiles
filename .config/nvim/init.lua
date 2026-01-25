@@ -544,8 +544,8 @@ require("snacks").setup({
               picker:close()
               local sel = picker:selected()
               if #sel > 0 and sel then
-                vim.cmd("tabnew")
-                vim.cmd("DiffTool " .. sel[1].file .. " " .. sel[2].file)
+                vim.cmd("tabnew " .. sel[1].file)
+                vim.cmd("vert diffs " .. sel[2].file)
                 return
               end
             end,
@@ -697,6 +697,9 @@ vim.keymap.set("n", "<leader>fD", function()
 end)
 vim.keymap.set("n", "<leader>fp", function()
   Snacks.picker.projects()
+end)
+vim.keymap.set("n", "<leader>fq", function()
+  Snacks.picker.qflist()
 end)
 
 --------------------------------------------------------------------------------
@@ -1300,12 +1303,10 @@ require("gitsigns").setup({
 
     -- Git diff.
     vim.keymap.set("n", "<leader>gsd", gitsigns.diffthis, { buffer = bufnr })
-    vim.keymap.set("n", "<leader>gsD", function()
-      gitsigns.diffthis("~")
-    end, { buffer = bufnr })
 
     -- Toggle word diff and deleted lines.
     vim.keymap.set("n", "<leader>gst", function()
+      gitsigns.toggle_linehl()
       gitsigns.toggle_word_diff()
       gitsigns.toggle_deleted()
     end, { buffer = bufnr })
@@ -1344,12 +1345,37 @@ vim.keymap.set("n", "<leader>gfS", function()
   Snacks.picker.git_stash()
 end)
 
--- DiffTool is the newly built-in diff tool of Neovim.
---
--- DiffTool is configured as "git difftool" and can be used as follows:
---   - git difftool -d
---   - git difftool -d origin/HEAD...HEAD
-vim.cmd([[packadd nvim.difftool]])
+-- The "GitDiff <base> <head>" command shows the diff of two branches via
+-- gitsigns. If no branches are provided the diff between the current branch
+-- and the default branch is shown. It also populates the quickfix list with the
+-- hunks.
+vim.api.nvim_create_user_command("GitDiff", function(opts)
+  local base = ""
+  local head = ""
+
+  if #vim.fn.split(opts.args, " ") == 2 then
+    base = vim.fn.split(opts.args, " ")[1]
+    head = vim.fn.split(opts.args, " ")[2]
+  else
+    base = vim.fn.system("git branch --show-current"):gsub("[\r\n]", "")
+    head = vim.fn
+      .system("git remote show origin | sed -n '/HEAD branch/s/.*: //p'")
+      :gsub("[\r\n]", "")
+  end
+
+  local result = vim.system({ "git", "merge-base", base, head }):wait()
+  if result.code ~= 0 then
+    return
+  end
+
+  local commit = vim.fn.trim(result.stdout)
+
+  local gitsigns = require("gitsigns")
+  gitsigns.change_base(commit, true)
+  gitsigns.setqflist("all")
+end, { nargs = "*" })
+
+vim.keymap.set("n", "<leader>gsD", "<cmd>GitDiff<cr>")
 
 -- Custom Snacks picker to find all merge conflicts in the current Git
 -- repository.
