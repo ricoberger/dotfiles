@@ -124,7 +124,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
     title = string.format("GitHub Notifications (%s)", opts.args),
     layout = {
       preset = "default",
-      preview = false,
+      preview = true,
     },
     preview = "preview",
     items = items,
@@ -449,7 +449,7 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
     title = string.format("GitHub Search Results (%s)", opts.args),
     layout = {
       preset = "default",
-      preview = false,
+      preview = true,
     },
     preview = "preview",
     items = items,
