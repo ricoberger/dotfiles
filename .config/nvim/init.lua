@@ -66,7 +66,7 @@ local icons = {
 --------------------------------------------------------------------------------
 
 vim.opt.background = "dark"
-vim.opt.shada = "!,'1000,<50,s10,h"
+vim.opt.shada = "!,'100,<50,s10,h"
 vim.opt.cc = "80,120" -- Display rulers
 vim.opt.clipboard = "unnamedplus" -- Sync with system clipboard
 vim.opt.completeopt = { "menuone", "noselect", "fuzzy", "nosort", "popup" } -- Better completion experience
@@ -1511,7 +1511,6 @@ end)
 -- MULTICURSOR
 --------------------------------------------------------------------------------
 
--- Lazy load the multicursor.nvim plugin, when a buffer is opened.
 vim.pack.add({
   {
     src = "https://github.com/jake-stewart/multicursor.nvim",
