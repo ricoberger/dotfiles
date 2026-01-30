@@ -157,6 +157,11 @@ cdp() {
   cd $(echo "/Users/ricoberger/Desktop\n/Users/ricoberger/Documents\n/Users/ricoberger/Downloads\n$REPOS" | fzf)
 }
 
+kctx() {
+  KUBECONFIGS=`fd --full-path --hidden --color never --type f -e yaml "" "${HOME}/Documents/kubeconfig/"`
+  print -z `echo "export KUBECONFIG=$(echo "$KUBECONFIGS" | fzf)"`
+}
+
 vaultedit() {
   TMPFILE=`mktemp /tmp/vaultsecret.XXXXXXXXX`
   vault kv get -format=json $@ | jq .data.data > ${TMPFILE};
