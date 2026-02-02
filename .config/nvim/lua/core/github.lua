@@ -675,6 +675,31 @@ vim.api.nvim_create_user_command("GitHubChecks", function()
         vim.fn.setreg("+", item.link)
         vim.notify("Yanked " .. item.link, vim.log.levels.INFO)
       end,
+      picker_rerun_failed_jobs = function(picker, item)
+        if not item then
+          return
+        end
+
+        local sel = picker:selected()
+        local selitems = #sel > 0 and sel or { item }
+
+        for _, selitem in ipairs(selitems) do
+          -- Get the run id from the link, e.g.
+          -- https://github.com/org/repo/actions/runs/21251747944/job/61154926323
+          local run_id = selitem.link:match("/actions/runs/(%d+)")
+          local readoutput =
+            vim.fn.system(string.format("gh run rerun %s --failed", run_id))
+          if vim.v.shell_error ~= 0 then
+            vim.notify(
+              "Failed to rerun failed jobs: " .. readoutput,
+              vim.log.levels.ERROR
+            )
+            return
+          end
+
+          vim.notify("Rerun failed jobs", vim.log.levels.INFO)
+        end
+      end,
       picker_browse_url = function(_, item)
         vim.fn.jobstart({ "open", item.link }, { detach = true })
       end,
@@ -683,12 +708,14 @@ vim.api.nvim_create_user_command("GitHubChecks", function()
       input = {
         keys = {
           ["<c-y>"] = { "picker_yank_url", mode = { "n", "i" } },
+          ["<a-r>"] = { "picker_rerun_failed_jobs", mode = { "n", "i" } },
           ["<a-b>"] = { "picker_browse_url", mode = { "n", "i" } },
         },
       },
       list = {
         keys = {
           ["y"] = { "picker_yank_url", mode = { "n", "x" } },
+          ["r"] = { "picker_rerun_failed_jobs", mode = { "n", "x" } },
           ["b"] = { "picker_browse_url", mode = { "n", "i" } },
         },
       },
