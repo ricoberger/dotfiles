@@ -608,6 +608,9 @@ require("snacks").setup({
   quickfile = {
     enabled = true,
   },
+  terminal = {
+    enabled = true,
+  },
 })
 
 --------------------------------------------------------------------------------
@@ -1505,6 +1508,11 @@ end
 
 vim.keymap.set("n", "<leader>ms", function()
   toggle_spell("en_us")
+end)
+
+-- Toggle terminal.
+vim.keymap.set("n", "<leader>mt", function()
+  Snacks.terminal.toggle()
 end)
 
 --------------------------------------------------------------------------------
