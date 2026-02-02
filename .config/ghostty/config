@@ -4,6 +4,10 @@ font-family = "Cascadia Mono NF"
 font-synthetic-style = false
 font-size = 12
 
+# Custom Shader
+# See https://github.com/sahaj-b/ghostty-cursor-shaders
+custom-shader = shaders/cursor_warp.glsl
+
 # Window
 window-height = 45
 window-width = 180
