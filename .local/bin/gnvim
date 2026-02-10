@@ -1,0 +1,17 @@
+#!/usr/bin/env zsh
+
+# Source "~/.zprofile" and "~/.zshrc" because by default only "~/.zshenv" is sourced.
+source ~/.zprofile
+source ~/.zshrc
+
+# Open Neovim in Ghostty
+# - Set the window title to "Neovim"
+# - Escape the file for Neovim
+# - Open Neovim with the provided file
+filename=$(echo "$1" | sed 's/ /\\ /g')
+if [[ "$filename" == "" ]]; then
+  open -na ghostty --args --title=Neovim -e zsh -c "nvim"
+else
+  open -na ghostty --args --title=Neovim -e zsh -c "nvim -c ':e $filename'"
+fi
+
