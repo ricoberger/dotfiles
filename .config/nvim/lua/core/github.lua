@@ -770,10 +770,15 @@ vim.api.nvim_create_user_command("GitHubPr", function(opts)
         pr.headRepository.name
       ),
       search = string.format("#%s", pr.number),
+      state = "all",
     })
   else
     local repo, number = opts.args:match("([^%s]+)%s+(%d+)")
-    Snacks.picker.gh_pr({ repo = repo, search = string.format("#%s", number) })
+    Snacks.picker.gh_pr({
+      repo = repo,
+      search = string.format("#%s", number),
+      state = "all",
+    })
   end
 end, {
   nargs = "*",
@@ -785,7 +790,11 @@ end, {
 
 vim.api.nvim_create_user_command("GitHubIssue", function(opts)
   local repo, number = opts.args:match("([^%s]+)%s+(%d+)")
-  Snacks.picker.gh_issue({ repo = repo, search = string.format("#%s", number) })
+  Snacks.picker.gh_issue({
+    repo = repo,
+    search = string.format("#%s", number),
+    state = "all",
+  })
 end, {
   nargs = "*",
 })
