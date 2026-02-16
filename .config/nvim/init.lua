@@ -1000,45 +1000,45 @@ vim.lsp.enable({
   "yamlls",
 })
 
+-- Add additional keymaps to the default LSP keymaps and overwrite some
+-- default keymaps to use Snacks functionalities. Some defaults are
+-- overridden to show a picker, so that the locations can be opened in a
+-- new tab, split, etc.
+--
+-- See: https://neovim.io/doc/user/lsp.html#_global-defaults
+vim.keymap.set("n", "grf", function()
+  vim.lsp.buf.format({
+    timeout_ms = 60000,
+  })
+end)
+vim.keymap.set("n", "gd", function()
+  Snacks.picker.lsp_definitions({ auto_confirm = false })
+end)
+vim.keymap.set("n", "gD", function()
+  Snacks.picker.lsp_declarations({ auto_confirm = false })
+end)
+vim.keymap.set("n", "gri", function()
+  Snacks.picker.lsp_implementations({ auto_confirm = false })
+end)
+vim.keymap.set("n", "grr", function()
+  Snacks.picker.lsp_references({ auto_confirm = false })
+end)
+vim.keymap.set("n", "<leader>grt", function()
+  Snacks.picker.lsp_type_definitions({ auto_confirm = false })
+end)
+vim.keymap.set("n", "gO", function()
+  Snacks.picker.lsp_symbols()
+end)
+vim.keymap.set("n", "grh", function()
+  vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
+end)
+
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(event)
     local client = vim.lsp.get_client_by_id(event.data.client_id)
     local buffer = event.buf
 
     if client then
-      -- Add additional keymaps to the default LSP keymaps and overwrite some
-      -- default keymaps to use Snacks functionalities. Some defaults are
-      -- overridden to show a picker, so that the locations can be opened in a
-      -- new tab, split, etc.
-      --
-      -- See: https://neovim.io/doc/user/lsp.html#_global-defaults
-      vim.keymap.set("n", "grf", function()
-        vim.lsp.buf.format({
-          timeout_ms = 60000,
-        })
-      end, { buffer = buffer })
-      vim.keymap.set("n", "gd", function()
-        Snacks.picker.lsp_definitions({ auto_confirm = false })
-      end, { buffer = buffer })
-      vim.keymap.set("n", "gD", function()
-        Snacks.picker.lsp_declarations({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "gri", function()
-        Snacks.picker.lsp_implementations({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "grr", function()
-        Snacks.picker.lsp_references({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "<leader>grt", function()
-        Snacks.picker.lsp_type_definitions({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "gO", function()
-        Snacks.picker.lsp_symbols()
-      end)
-      vim.keymap.set("n", "grh", function()
-        vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
-      end, { buffer = buffer })
-
       -- Enable completion.
       if
         client:supports_method(vim.lsp.protocol.Methods.textDocument_completion)
