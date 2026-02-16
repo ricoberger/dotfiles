@@ -981,6 +981,7 @@ require("helm-ls").setup({
 
 -- Enable and configure the built-in LSP client.
 vim.lsp.enable({
+  "bashls",
   "copilot",
   "dartls",
   "denols",
