@@ -1,12 +1,12 @@
 {
   "plugins": {
     "catppuccin": {
-      "rev": "beaf41a30c26fd7d6c386d383155cbd65dd554cd",
+      "rev": "0a5de4da015a175f416d6ef1eda84661623e0500",
       "src": "https://github.com/catppuccin/nvim",
       "version": "'main'"
     },
     "gitsigns": {
-      "rev": "abf82a65f185bd54adc0679f74b7d6e1ada690c9",
+      "rev": "9f3c6dd7868bcc116e9c1c1929ce063b978fa519",
       "src": "https://github.com/lewis6991/gitsigns.nvim",
       "version": "'main'"
     },
@@ -21,12 +21,12 @@
       "version": "'master'"
     },
     "multicursor": {
-      "rev": "3b5c79c4eec52ff18ce69923156422c298b9ae5d",
+      "rev": "630dd29dd696bc977cb81d7dd2fa6bb280f60fc4",
       "src": "https://github.com/jake-stewart/multicursor.nvim",
       "version": "'main'"
     },
     "nvim-treesitter": {
-      "rev": "f8bbc3177d929dc86e272c41cc15219f0a7aa1ac",
+      "rev": "4d9466677a5ceadef104eaa0fe08d60d91c4e9a7",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     },

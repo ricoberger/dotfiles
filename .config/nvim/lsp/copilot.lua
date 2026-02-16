@@ -25,7 +25,7 @@ local function sign_in(bufnr, client)
             { bufnr = bufnr },
             function(cmd_err, cmd_result)
               if cmd_err then
-                vim.notify(err.message, vim.log.levels.ERROR)
+                vim.notify(cmd_err.message, vim.log.levels.ERROR)
                 return
               end
               if cmd_result.status == "OK" then

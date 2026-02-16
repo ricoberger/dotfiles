@@ -30,7 +30,7 @@ return {
   },
   workspace_required = true,
   on_attach = function(client, bufnr)
-    vim.api.nvim_buf_create_user_command(0, "LspEslintFixAll", function()
+    vim.api.nvim_buf_create_user_command(bufnr, "LspEslintFixAll", function()
       client:request_sync("workspace/executeCommand", {
         command = "eslint.applyAllFixes",
         arguments = {
@@ -84,6 +84,12 @@ return {
     root_markers = vim.fn.has("nvim-0.11.3") == 1
         and { root_markers, { ".git" } }
       or vim.list_extend(root_markers, { ".git" })
+
+    -- exclude deno
+    if vim.fs.root(bufnr, { "deno.json", "deno.jsonc", "deno.lock" }) then
+      return
+    end
+
     -- We fallback to the current working directory if no project root is found
     local project_root = vim.fs.root(bufnr, root_markers) or vim.fn.getcwd()
 
@@ -184,9 +190,12 @@ return {
       -- Support Yarn2 (PnP) projects
       local pnp_cjs = root_dir .. "/.pnp.cjs"
       local pnp_js = root_dir .. "/.pnp.js"
-      if vim.uv.fs_stat(pnp_cjs) or vim.uv.fs_stat(pnp_js) then
-        local cmd = config.cmd
-        config.cmd = vim.list_extend({ "yarn", "exec" }, cmd)
+      if
+        type(config.cmd) == "table"
+        and (vim.uv.fs_stat(pnp_cjs) or vim.uv.fs_stat(pnp_js))
+      then
+        config.cmd =
+          vim.list_extend({ "yarn", "exec" }, config.cmd --[[@as table]])
       end
     end
   end,
