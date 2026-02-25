@@ -1092,6 +1092,33 @@ vim.api.nvim_create_autocmd("LspAttach", {
   end,
 })
 
+-- Show LSP progress messages. It will also show a progress bar via Ghostty. In
+-- case Neovim is exiting while the LSP is still running, it will send an OSC
+-- sequence to Ghostty to make sure the progress bar is removed.
+vim.api.nvim_create_autocmd("LspProgress", {
+  callback = function(event)
+    local value = event.data.params.value or {}
+    local msg = value.message or "done"
+
+    vim.api.nvim_echo({ { msg } }, false, {
+      id = "lsp",
+      kind = "progress",
+      title = value.title,
+      status = value.kind ~= "end" and "running" or "success",
+      percent = value.percentage,
+    })
+  end,
+})
+
+vim.api.nvim_create_autocmd({ "VimLeavePre", "ExitPre" }, {
+  callback = function()
+    if vim.env.TERM and vim.env.TERM:match("ghostty") then
+      local osc = "\27]9;4;0;100\a"
+      vim.api.nvim_chan_send(vim.v.stderr, osc)
+    end
+  end,
+})
+
 --------------------------------------------------------------------------------
 -- DIAGNOSTICS
 --------------------------------------------------------------------------------
