@@ -994,6 +994,7 @@ vim.lsp.enable({
   "helm_ls",
   "lua_ls",
   "marksman",
+  "my_hover_ls",
   "pyright",
   "rust_analyzer",
   "terraformls",
