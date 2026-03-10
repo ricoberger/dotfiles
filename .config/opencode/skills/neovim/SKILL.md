@@ -8,6 +8,8 @@ description:
   Neovim, or when you need to inspect Neovim state (buffers, windows, options,
   LSP, etc.). Also use when running inside a Neovim terminal and needing to
   communicate with the parent editor.
+metadata:
+  source: https://github.com/fredrikaverpil/dotfiles/blob/main/stow/shared/.claude/skills/neovim/SKILL.md
 ---
 
 # Neovim RPC
