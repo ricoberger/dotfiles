@@ -1661,6 +1661,11 @@ require("sidekick").setup({
         cmd = { "copilot", "--banner" },
         url = "https://github.com/github/copilot-cli",
       },
+      opencode = {
+        cmd = { "opencode" },
+        -- HACK: https://github.com/sst/opencode/issues/445
+        env = { OPENCODE_THEME = "system" },
+      },
     },
   },
 })
@@ -1679,7 +1684,7 @@ end, { expr = true })
 -- the AI chat window and focuses it. The "Space + ap" keymap can be used to
 -- select a predifined prompt / context.
 vim.keymap.set({ "n", "x" }, "<leader>aa", function()
-  require("sidekick.cli").toggle({ name = "copilot", focus = true })
+  require("sidekick.cli").toggle({ name = "opencode", focus = true })
 end)
 vim.keymap.set({ "n", "x" }, "<leader>ap", function()
   require("sidekick.cli").prompt()

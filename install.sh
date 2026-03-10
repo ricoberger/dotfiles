@@ -64,6 +64,10 @@ cp -r $(pwd)/.config/btop ~/.config
 echo "\n- Copy Yazi Configuration"
 cp -r $(pwd)/.config/yazi ~/.config
 
+# OpenCode
+echo "\n- Copy OpenCode Configuration"
+cp -r $(pwd)/.config/opencode ~/.config
+
 # Binaries
 echo "\n- Copy Binaries"
 cp -r $(pwd)/.local/bin ~/.local
