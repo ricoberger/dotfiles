@@ -28,6 +28,11 @@ shell-integration-features = no-cursor
 quick-terminal-position = center
 quick-terminal-animation-duration = 0
 
+# Notifications
+notify-on-command-finish = unfocused
+notify-on-command-finish-action = bell,notify
+notify-on-command-finish-after = 10s
+
 # Misc
 confirm-close-surface = true
 macos-option-as-alt = true
@@ -35,7 +40,7 @@ clipboard-paste-protection = false
 clipboard-paste-bracketed-safe = true
 quick-terminal-size = 70%,70%
 quick-terminal-position = center
-auto-update-channel = tip
+auto-update-channel = stable
 
 # Keybindings
 keybind = clear
