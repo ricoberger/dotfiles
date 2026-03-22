@@ -399,7 +399,7 @@ require("catppuccin").setup({
   end,
 })
 
-vim.cmd.colorscheme("catppuccin")
+vim.cmd.colorscheme("catppuccin-nvim")
 
 --------------------------------------------------------------------------------
 -- SNACKS
@@ -1188,7 +1188,7 @@ vim.pack.add({
 
 require("lualine").setup({
   options = {
-    theme = "catppuccin",
+    theme = "catppuccin-nvim",
     component_separators = { left = "", right = "" },
     section_separators = { left = "", right = "" },
     globalstatus = true,
