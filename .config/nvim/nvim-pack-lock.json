@@ -1,7 +1,7 @@
 {
   "plugins": {
     "catppuccin": {
-      "rev": "384f304c8b04664c9e0091fbfb3923c5f97c1bcf",
+      "rev": "8627d82d2421dd26c227d4f589104fc8b63a8ff4",
       "src": "https://github.com/catppuccin/nvim",
       "version": "'main'"
     },
@@ -26,17 +26,17 @@
       "version": "'main'"
     },
     "nvim-treesitter": {
-      "rev": "2b50ab5ccbcd9e5708deb351308edd738adbf84c",
+      "rev": "e5f65e31a5ec0e8526b2311ff8c7aaea4a581c82",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     },
     "sidekick": {
-      "rev": "f95ba541970c41a631d480062afedb0ebc455e19",
+      "rev": "8ad0ede3ff9065878a853e4b037ba6ac88231fb0",
       "src": "https://github.com/folke/sidekick.nvim",
       "version": "'main'"
     },
     "snacks": {
-      "rev": "a049339328e2599ad6e85a69fa034ac501e921b2",
+      "rev": "ad9ede6a9cddf16cedbd31b8932d6dcdee9b716e",
       "src": "https://github.com/folke/snacks.nvim",
       "version": "'main'"
     }

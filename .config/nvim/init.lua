@@ -1646,11 +1646,17 @@ require("sidekick").setup({
     win = {
       keys = {
         stopinsert = { "<esc><esc>", "stopinsert", mode = "t" },
-        hide_n = { "q", "hide", mode = "n" },
-        hide_t = { "<c-q>", "hide" },
-        win_p = { "<c-w>p", "blur" },
-        blur = { "<c-o>", "blur" },
-        prompt = { "<c-p>", "prompt" },
+        hide_ctrl_z = { "<c-z>", "blur", mode = "nt" },
+        buffers = { "<c-b>", "buffers", mode = "nt" },
+        files = { "<c-f>", "files", mode = "nt" },
+        prompt = false,
+        hide_n = false,
+        hide_ctrl_q = false,
+        hide_ctrl_dot = false,
+        nav_left = false,
+        nav_down = false,
+        nav_up = false,
+        nav_right = false,
       },
     },
     mux = {
