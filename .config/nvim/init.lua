@@ -1041,6 +1041,15 @@ vim.api.nvim_create_autocmd("LspAttach", {
         vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
       end)
 
+      -- Add "<leader>mlo" keymap for tsgo to organize imports, since the
+      -- default code action keymap "gra" does not provide it.
+      vim.keymap.set("n", "<leader>mlo", function()
+        vim.lsp.buf.code_action({
+          context = { only = { "source.organizeImports" }, diagnostics = {} },
+          apply = true,
+        })
+      end)
+
       -- Enable completion.
       if
         client:supports_method(vim.lsp.protocol.Methods.textDocument_completion)
