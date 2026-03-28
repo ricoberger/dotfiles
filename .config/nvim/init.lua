@@ -1073,14 +1073,44 @@ vim.api.nvim_create_autocmd("LspAttach", {
         )
       then
         vim.lsp.inline_completion.enable(true)
+
+        -- Accept the currently shown inline completion with "Ctrl+Enter". If no
+        -- inline completion is currently shown, insert a newline as usual.
         vim.keymap.set("i", "<c-cr>", function()
           if not vim.lsp.inline_completion.get() then
             return "<c-cr>"
           end
-        end, {
-          expr = true,
-          replace_keycodes = true,
-        })
+        end, { expr = true, replace_keycodes = true })
+
+        -- Accept the currently shown inline completion word by word with
+        -- "Ctrl+Right". If no inline completion is currently shown, move the
+        -- cursor to the right as usual.
+        vim.keymap.set("i", "<c-right>", function()
+          if
+            not vim.lsp.inline_completion.get({
+              on_accept = function(item)
+                if type(item.insert_text) ~= "string" then
+                  return item
+                end
+                local cursor = vim.api.nvim_win_get_cursor(0)
+                local prefix_len = item.range
+                    and item.range.start.row == cursor[1] - 1
+                    and math.max(0, cursor[2] - item.range.start.col)
+                  or 0
+                local prefix = item.insert_text:sub(1, prefix_len)
+                local first_word =
+                  item.insert_text:sub(prefix_len + 1):match("^([ \t]*%S+)")
+                if not first_word then
+                  return nil
+                end
+                item.insert_text = prefix .. first_word
+                return item
+              end,
+            })
+          then
+            return "<c-right>"
+          end
+        end, { expr = true, replace_keycodes = true })
       end
 
       -- Add normal-mode keymappings for signature help.
