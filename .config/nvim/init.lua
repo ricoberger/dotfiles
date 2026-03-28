@@ -989,6 +989,7 @@ vim.lsp.enable({
   "docker_compose_language_service",
   "efm",
   "eslint",
+  "filepaths_ls",
   "golangci_lint_ls",
   "gopls",
   "helm_ls",
