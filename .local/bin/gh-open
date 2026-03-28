@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -e
+
+link=$(echo "$1" | sed -e 's|https://github.com/\(.*\)/pull/\(.*\)|gh://\1/pr/\2|' -e 's|https://github.com/\(.*\)/issues/\(.*\)|gh://\1/issue/\2|')
+nvim $link

@@ -46,12 +46,12 @@ keybindings:
     - name: open (nvim)
       key: O
       command: |
-        nvim -c ':lua Snacks.picker.gh_issue({ repo = "{{.RepoName}}", search = "#{{.IssueNumber}}" })'
+        nvim gh://{{.RepoName}}/issue/{{.IssueNumber}}
   prs:
     - name: open (nvim)
       key: O
       command: |
-        nvim -c ':lua Snacks.picker.gh_pr({ repo = "{{.RepoName}}", search = "#{{.PrNumber}}" })'
+        nvim gh://{{.RepoName}}/pr/{{.PrNumber}}
     - name: diff (nvim)
       key: D
       command: |

@@ -201,15 +201,13 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
       -- If the item is an issue or pull request, we try to open it via Snacks,
       -- otherwise we open it in the browser.
       if item.subject.__typename == "Issue" then
-        Snacks.picker.gh_issue({
-          repo = item.repo,
-          search = string.format("#%s", item.subject.number),
-        })
+        vim.cmd(
+          string.format("e gh://%s/issue/%s", item.repo, item.subject.number)
+        )
       elseif item.subject.__typename == "PullRequest" then
-        Snacks.picker.gh_pr({
-          repo = item.repo,
-          search = string.format("#%s", item.subject.number),
-        })
+        vim.cmd(
+          string.format("e gh://%s/pr/%s", item.repo, item.subject.number)
+        )
       else
         vim.fn.system(string.format("open '%s'", item.url))
       end
@@ -490,15 +488,21 @@ vim.api.nvim_create_user_command("GitHubSearch", function(opts)
       picker:close()
 
       if item.isPullRequest then
-        Snacks.picker.gh_pr({
-          repo = item.repository.nameWithOwner,
-          search = string.format("#%s", item.number),
-        })
+        vim.cmd(
+          string.format(
+            "e gh://%s/pr/%s",
+            item.repository.nameWithOwner,
+            item.number
+          )
+        )
       else
-        Snacks.picker.gh_issue({
-          repo = item.repository.nameWithOwner,
-          search = string.format("#%s", item.number),
-        })
+        vim.cmd(
+          string.format(
+            "e gh://%s/issue/%s",
+            item.repository.nameWithOwner,
+            item.number
+          )
+        )
       end
     end,
     actions = {
@@ -763,22 +767,17 @@ vim.api.nvim_create_user_command("GitHubPr", function(opts)
       "gh pr view --json headRepository,headRepositoryOwner,number"
     )
     local _, pr = pcall(vim.fn.json_decode, output)
-    Snacks.picker.gh_pr({
-      repo = string.format(
-        "%s/%s",
+    vim.cmd(
+      string.format(
+        "e gh://%s/%s/pr/%s",
         pr.headRepositoryOwner.login,
-        pr.headRepository.name
-      ),
-      search = string.format("#%s", pr.number),
-      state = "all",
-    })
+        pr.headRepository.name,
+        pr.number
+      )
+    )
   else
     local repo, number = opts.args:match("([^%s]+)%s+(%d+)")
-    Snacks.picker.gh_pr({
-      repo = repo,
-      search = string.format("#%s", number),
-      state = "all",
-    })
+    vim.cmd(string.format("e gh://%s/pr/%s", repo, number))
   end
 end, {
   nargs = "*",
@@ -790,11 +789,7 @@ end, {
 
 vim.api.nvim_create_user_command("GitHubIssue", function(opts)
   local repo, number = opts.args:match("([^%s]+)%s+(%d+)")
-  Snacks.picker.gh_issue({
-    repo = repo,
-    search = string.format("#%s", number),
-    state = "all",
-  })
+  vim.cmd(string.format("e gh://%s/issue/%s", repo, number))
 end, {
   nargs = "*",
 })
