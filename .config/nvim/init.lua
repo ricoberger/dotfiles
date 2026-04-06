@@ -192,6 +192,10 @@ vim.api.nvim_create_autocmd({ "InsertEnter", "WinLeave" }, {
   end,
 })
 
+vim.api.nvim_create_user_command("PackUpdate", function()
+  vim.pack.update()
+end, {})
+
 --------------------------------------------------------------------------------
 -- KEYMAPS
 --------------------------------------------------------------------------------

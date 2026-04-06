@@ -1,12 +1,12 @@
 {
   "plugins": {
     "catppuccin": {
-      "rev": "8627d82d2421dd26c227d4f589104fc8b63a8ff4",
+      "rev": "df2a1f9f3392d688397e945544a30aec8fc9b4c7",
       "src": "https://github.com/catppuccin/nvim",
       "version": "'main'"
     },
     "gitsigns": {
-      "rev": "7c4faa3540d0781a28588cafbd4dd187a28ac6e3",
+      "rev": "db486b42299b2e3f5831809617af21becf268a39",
       "src": "https://github.com/lewis6991/gitsigns.nvim",
       "version": "'main'"
     },
@@ -16,22 +16,22 @@
       "version": "'main'"
     },
     "lualine": {
-      "rev": "47f91c416daef12db467145e16bed5bbfe00add8",
+      "rev": "8811f3f3f4dc09d740c67e9ce399e7a541e2e5b2",
       "src": "https://github.com/nvim-lualine/lualine.nvim",
       "version": "'master'"
     },
     "multicursor": {
-      "rev": "811681faf44d8031685614cc00a148cd3ece697c",
+      "rev": "704b99f10a72cc05d370cfeb294ff83412a8ab55",
       "src": "https://github.com/jake-stewart/multicursor.nvim",
       "version": "'main'"
     },
     "nvim-treesitter": {
-      "rev": "e5f65e31a5ec0e8526b2311ff8c7aaea4a581c82",
+      "rev": "4916d6592ede8c07973490d9322f187e07dfefac",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     },
     "sidekick": {
-      "rev": "8ad0ede3ff9065878a853e4b037ba6ac88231fb0",
+      "rev": "17447a05f9385e5f8372b61530f6f9329cb82421",
       "src": "https://github.com/folke/sidekick.nvim",
       "version": "'main'"
     },
