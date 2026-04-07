@@ -78,19 +78,11 @@ end
 
 -- Fetch notifications from GitHub and show them via the Snacks picker. Issues
 -- and PRs can be opened via Snacks. Discussions are opened in the browser.
-vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
+vim.api.nvim_create_user_command("GitHubNotifications", function()
   -- Fetch notifications from GitHub using the "gh" command-line tool and handle
   -- any errors.
-  local output = ""
-  if opts.args == "all" then
-    output = vim.fn.system(
-      "gh api notifications --method GET -F all=true --paginate=false"
-    )
-  else
-    output = vim.fn.system(
-      "gh api notifications --method GET -F all=false --paginate=true"
-    )
-  end
+  local output = vim.fn.system("gh-notifications")
+
   if vim.v.shell_error ~= 0 then
     vim.notify(
       "Failed to fetch notifications: " .. output,
@@ -115,89 +107,72 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
   for idx, notification in ipairs(notifications) do
     local item = notification
     item.idx = idx
-    item.relativeLastUpdatedAt = format_relative_time(item.updated_at)
-    item.text = item.subject.type
-      .. " "
-      .. item.repository.full_name
-      .. " "
-      .. item.subject.title
-
-    local web_url = item.repository.html_url
-    if
-      item.subject.type == "PullRequest"
-      or item.subject.type == "Issue"
-      or item.subject.type == "Discussion"
-    then
-      item.subject.url
-        :gsub("api%.github%.com/repos", "github.com")
-        :gsub("/pulls/", "/pull/")
-        :gsub("/issues/", "/issue/")
-        :gsub("/discussions/", "/discussions/")
-    elseif item.subject.type == "Release" then
-      web_url = item.repository.html_url .. "/releases"
-    end
-    item.web_url = web_url
-
+    item.relativeLastUpdatedAt = format_relative_time(item.lastUpdatedAt)
+    item.repo = item.url:match("github.com/([^/]+/[^/]+)")
+    item.text = item.subject.__typename .. " " .. item.repo .. " " .. item.title
+    item.preview = {
+      text = item.summaryItemBody,
+      ft = "markdown",
+    }
     table.insert(items, item)
   end
 
   -- Open the Snacks picker with the formatted notification items and format the
   -- items nicely.
   Snacks.picker({
-    title = "GitHub Notifications",
+    title = string.format("GitHub Notifications"),
     layout = {
       preset = "default",
-      preview = false,
+      preview = true,
     },
     preview = "preview",
     items = items,
     format = function(item, _)
       local icon = { icons.notifications.read, "GitHubRead" }
-      if item.unread then
+      if item.isUnread then
         icon = { icons.notifications.unread, "GitHubRead" }
       end
 
       local type_icon = { icons.github.unknown, "GitHubTextSecondary" }
-      if item.subject.type == "PullRequest" then
+      if item.subject.__typename == "PullRequest" then
         type_icon = { icons.github.pr, "GitHubTextSecondary" }
-        -- if item.subject.pullRequestState ~= nil then
-        --   if item.subject.pullRequestState == "CLOSED" then
-        --     type_icon = { icons.github.pr, "GitHubUnmerged" }
-        --   elseif item.subject.isDraft then
-        --     type_icon = { icons.github.pr, "GitHubTextSecondary" }
-        --   elseif item.subject.pullRequestState == "OPEN" then
-        --     type_icon = { icons.github.pr, "GitHubOpen" }
-        --   elseif item.subject.pullRequestState == "MERGED" then
-        --     type_icon = { icons.github.pr, "GitHubMerged" }
-        --   end
-        -- end
-      elseif item.subject.type == "Issue" then
+        if item.subject.pullRequestState ~= nil then
+          if item.subject.pullRequestState == "CLOSED" then
+            type_icon = { icons.github.pr, "GitHubUnmerged" }
+          elseif item.subject.isDraft then
+            type_icon = { icons.github.pr, "GitHubTextSecondary" }
+          elseif item.subject.pullRequestState == "OPEN" then
+            type_icon = { icons.github.pr, "GitHubOpen" }
+          elseif item.subject.pullRequestState == "MERGED" then
+            type_icon = { icons.github.pr, "GitHubMerged" }
+          end
+        end
+      elseif item.subject.__typename == "Issue" then
         type_icon = { icons.github.issue, "GitHubTextSecondary" }
-        -- if item.subject.issueState ~= nil then
-        --   if item.subject.issueState == "OPEN" then
-        --     type_icon = { icons.github.issue, "GitHubOpen" }
-        --   elseif item.subject.issueState == "CLOSED" then
-        --     type_icon = { icons.github.issue, "GitHubClosed" }
-        --   end
-        -- end
-      elseif item.subject.type == "Release" then
+        if item.subject.issueState ~= nil then
+          if item.subject.issueState == "OPEN" then
+            type_icon = { icons.github.issue, "GitHubOpen" }
+          elseif item.subject.issueState == "CLOSED" then
+            type_icon = { icons.github.issue, "GitHubClosed" }
+          end
+        end
+      elseif item.subject.__typename == "Release" then
         type_icon = { icons.github.release, "GitHubTextSecondary" }
-      elseif item.subject.type == "WokflowRun" then
+      elseif item.subject.__typename == "WokflowRun" then
         type_icon = { icons.github.workflow, "GitHubCheckFailed" }
-      elseif item.subject.type == "CheckSuite" then
-        type_icon = { icons.github.workflow, "GitHubTextSecondary" }
-        -- if item.subject.conclusion == "SUCCESS" then
-        --   type_icon = { icons.github.workflow, "GitHubCheckSuccess" }
-        -- else
-        --   type_icon = { icons.github.workflow, "GitHubCheckFailed" }
-        -- end
-      elseif item.subject.type == "Commit" then
+      elseif item.subject.__typename == "CheckSuite" then
+        if item.subject.conclusion == "SUCCESS" then
+          type_icon = { icons.github.workflow, "GitHubCheckSuccess" }
+        else
+          type_icon = { icons.github.workflow, "GitHubCheckFailed" }
+        end
+      elseif item.subject.__typename == "Commit" then
         type_icon = { icons.github.commit, "GitHubTextSecondary" }
-      elseif item.subject.type == "Gist" then
+      elseif item.subject.__typename == "Gist" then
         type_icon = { icons.github.gist, "GitHubTextSecondary" }
-      elseif item.subject.type == "TeamDiscussion" then
+      elseif item.subject.__typename == "TeamDiscussion" then
         type_icon = { icons.github.discussion, "GitHubTextSecondary" }
-      elseif item.subject.type == "Discussion" then
+      elseif item.subject.__typename == "Discussion" then
         type_icon = { icons.github.discussion, "GitHubTextSecondary" }
       end
 
@@ -206,9 +181,9 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         { " ", "GitHubTextSecondary" },
         type_icon,
         { " [", "GitHubTextSecondary" },
-        { item.subject.type, "GitHubTextHighlight" },
-        { "] " .. item.repository.full_name .. ": ", "GitHubTextSecondary" },
-        { item.subject.title, "GitHubText" },
+        { item.subject.__typename, "GitHubTextHighlight" },
+        { "] " .. item.repo .. ": ", "GitHubTextSecondary" },
+        { item.title, "GitHubText" },
         {
           " ("
             .. item.reason:lower():gsub("_", " ")
@@ -224,33 +199,13 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
 
       -- If the item is an issue or pull request, we try to open it via Snacks,
       -- otherwise we open it in the browser.
-      if item.subject.type == "Issue" then
-        vim.fn.system(
-          string.format(
-            'gh api --method PATCH -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2026-03-10" /notifications/threads/%s',
-            item.id
-          )
-        )
-
-        local issue_number = item.subject.url:match("/issues/(%d+)$")
+      if item.subject.__typename == "Issue" then
         vim.cmd(
-          string.format(
-            "e gh://%s/issue/%s",
-            item.repository.full_name,
-            issue_number
-          )
+          string.format("e gh://%s/issue/%s", item.repo, item.subject.number)
         )
-      elseif item.subject.type == "PullRequest" then
-        vim.fn.system(
-          string.format(
-            'gh api --method PATCH -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2026-03-10" /notifications/threads/%s',
-            item.id
-          )
-        )
-
-        local pr_number = item.subject.url:match("/pulls/(%d+)$")
+      elseif item.subject.__typename == "PullRequest" then
         vim.cmd(
-          string.format("e gh://%s/pr/%s", item.repository.full_name, pr_number)
+          string.format("e gh://%s/pr/%s", item.repo, item.subject.number)
         )
       else
         vim.fn.system(string.format("open '%s'", item.url))
@@ -262,8 +217,8 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
           return
         end
 
-        vim.fn.setreg("+", item.web_url)
-        vim.notify("Yanked " .. item.web_url, vim.log.levels.INFO)
+        vim.fn.setreg("+", item.url)
+        vim.notify("Yanked " .. item.url, vim.log.levels.INFO)
       end,
       picker_mark_as_read = function(picker, item)
         if not item then
@@ -274,12 +229,8 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         local selitems = #sel > 0 and sel or { item }
 
         for _, selitem in ipairs(selitems) do
-          local readoutput = vim.fn.system(
-            string.format(
-              'gh api --method PATCH -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2026-03-10" /notifications/threads/%s',
-              selitem.id
-            )
-          )
+          local readoutput =
+            vim.fn.system(string.format("gh-notifications-read %s", selitem.id))
           if vim.v.shell_error ~= 0 then
             vim.notify(
               "Failed to mark notification as read: " .. readoutput,
@@ -289,7 +240,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
           end
 
           vim.notify(
-            "Marked notification as read: " .. selitem.subject.title,
+            "Marked notification as read: " .. selitem.title,
             vim.log.levels.INFO
           )
         end
@@ -303,12 +254,8 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         local selitems = #sel > 0 and sel or { item }
 
         for _, selitem in ipairs(selitems) do
-          local readoutput = vim.fn.system(
-            string.format(
-              'gh api --method DELETE -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2026-03-10" /notifications/threads/%s',
-              selitem.id
-            )
-          )
+          local readoutput =
+            vim.fn.system(string.format("gh-notifications-done %s", selitem.id))
           if vim.v.shell_error ~= 0 then
             vim.notify(
               "Failed to mark notification as done: " .. readoutput,
@@ -318,7 +265,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
           end
 
           vim.notify(
-            "Marked notification as done: " .. selitem.subject.title,
+            "Marked notification as done: " .. selitem.title,
             vim.log.levels.INFO
           )
         end
@@ -329,7 +276,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         end
 
         local repository_path = "/Users/ricoberger/Documents/GitHub/"
-          .. item.repository.full_name:lower()
+          .. item.repo:lower()
         vim.api.nvim_set_current_dir(repository_path)
 
         vim.notify(
@@ -340,7 +287,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function(opts)
         picker:close()
       end,
       picker_browse_url = function(_, item)
-        vim.fn.jobstart({ "open", item.web_url }, { detach = true })
+        vim.fn.jobstart({ "open", item.url }, { detach = true })
       end,
     },
     win = {

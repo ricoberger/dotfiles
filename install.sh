@@ -10,6 +10,7 @@ echo "\n- Copy Zsh Configuration"
 cp $(pwd)/.zshenv ~/.zshenv
 cp $(pwd)/.zprofile ~/.zprofile
 cp $(pwd)/.zshrc ~/.zshrc
+cp $(pwd)/.zshsecrets ~/.zshsecrets
 
 # Starship
 echo "\n- Copy Starship Configuration"

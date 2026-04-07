@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+curl 'https://api.github.com/graphql' \
+  --silent \
+  -X POST \
+  -H 'Host: api.github.com' \
+  -H 'GraphQL-Features: merge_queue,private_profile_setting,project_next_field_configuration,issues_close_state,project_next_recent_connection,file_level_commenting,issue_types,sub_issues,copilot_iap_max_sku,cotd_graphql_injection,graphql_pr_comment_positioning,issues_copilot_assignment_api_support' \
+  -H 'Accept: multipart/mixed;deferSpec=20220824,application/graphql-response+json,application/json,application/vnd.github.merge-info-preview+json,application/vnd.github.shadow-cat-preview+json,application/vnd.github.echo-preview+json,application/vnd.github.starfox-preview+json,application/vnd.github.doctor-strange-preview+json' \
+  -H 'apollographql-client-version: 1.252.0-189964158' \
+  -H 'Authorization: Bearer '$GITHUB_NOTIFICATIONS_TOKEN'' \
+  -H 'Accept-Language: en-DE;q=1.0, de-DE;q=0.9' \
+  -H 'X-APOLLO-OPERATION-TYPE: mutation' \
+  -H 'User-Agent: GitHub/1.252.0 (com.github.stormbreaker.prod; build:189964158; iOS 26.3.1; iPhone16,2)' \
+  -H 'apollographql-client-name: com.github.stormbreaker.prod-apollo-ios' \
+  -H 'Connection: keep-alive' \
+  -H 'X-APOLLO-OPERATION-NAME: MarkNotificationAsRead' \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"operationName":"MarkNotificationAsRead","query":"mutation MarkNotificationAsRead($id: ID!) { markNotificationAsRead(input: { id: $id }) { __typename success } }","variables":{"id":"'$1'"}}'

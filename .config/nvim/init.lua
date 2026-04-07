@@ -1494,7 +1494,6 @@ end)
 require("core.github")
 
 vim.keymap.set("n", "<leader>ghn", "<cmd>GitHubNotifications<cr>")
-vim.keymap.set("n", "<leader>ghN", "<cmd>GitHubNotifications all<cr>")
 
 -- Show pull requests involving, created by, assigned to, mentioning or
 -- requesting a review from me.
