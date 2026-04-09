@@ -188,6 +188,49 @@ yy() {
 	rm -f -- "$tmp"
 }
 
+rg-fzf() {
+  RG_PREFIX="rg --files-with-matches --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
+
+  local search_paths
+  if [[ $# -eq 0 ]]; then
+    search_paths="."
+  else
+    search_paths=$(printf "'%s' " "$@")
+  fi
+
+  local out
+  out=$(
+    FZF_DEFAULT_COMMAND="$RG_PREFIX '' $search_paths" \
+      fzf \
+      --sort \
+      --phony \
+      --ansi \
+      --reverse \
+      --height 100% \
+      --info right \
+      --prompt "󰥨 Search: " \
+      --pointer ">" \
+      --marker "󰄲" \
+      --border "rounded" \
+      --border-label=" 󱉭 $search_paths " \
+      --border-label-pos center \
+      --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4' \
+      --bind "change:reload:$RG_PREFIX {q} $search_paths" \
+      --preview-window="right:65%" \
+      --preview="[[ ! -z {} ]] && rg --pretty --context 5 {q} {}" \
+      --print-query
+  )
+
+  local query=$(echo "$out" | head -n 1)
+  [ -z "$query" ] && return
+
+  local files=$(echo "$out" | tail -n +2)
+
+  if [[ -n "$files" ]]; then
+    nvim "$files"
+  fi
+}
+
 
 
 ################################################################################
