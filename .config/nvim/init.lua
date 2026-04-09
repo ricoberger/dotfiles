@@ -137,6 +137,14 @@ vim.cmd([[let &t_Te = "\e[29m"]])
 vim.cmd([[let &t_Cs = "\e[4:3m"]])
 vim.cmd([[let &t_Ce = "\e[4:0m"]])
 
+-- Enable the new Neovim UI, which is currently experimental.
+require("vim._core.ui2").enable({
+  enable = true,
+  msg = {
+    targets = "cmd",
+  },
+})
+
 --------------------------------------------------------------------------------
 -- FILE HANDLING
 --------------------------------------------------------------------------------
