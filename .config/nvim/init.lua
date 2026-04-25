@@ -1010,6 +1010,7 @@ vim.lsp.enable({
   "my_hover_ls",
   "pyright",
   "rust_analyzer",
+  "sourcekit",
   "terraformls",
   "tsgo",
   "yamlls",
