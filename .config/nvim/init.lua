@@ -1701,9 +1701,9 @@ require("sidekick").setup({
       keys = {
         stopinsert = { "<esc><esc>", "stopinsert", mode = "t" },
         hide_ctrl_z = { "<c-z>", "blur", mode = "nt" },
-        buffers = { "<c-b>", "buffers", mode = "nt" },
-        files = { "<c-f>", "files", mode = "nt" },
-        prompt = false,
+        buffers = { "<a-b>", "buffers", mode = "nt" },
+        files = { "<a-f>", "files", mode = "nt" },
+        prompt = { "<a-p>", "prompt", mode = "t" },
         hide_n = false,
         hide_ctrl_q = false,
         hide_ctrl_dot = false,
