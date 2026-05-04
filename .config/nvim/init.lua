@@ -1102,21 +1102,17 @@ vim.api.nvim_create_autocmd("LspAttach", {
           if
             not vim.lsp.inline_completion.get({
               on_accept = function(item)
-                if type(item.insert_text) ~= "string" then
-                  return item
-                end
-                local cursor = vim.api.nvim_win_get_cursor(0)
-                local prefix_len = item.range
-                    and item.range.start.row == cursor[1] - 1
-                    and math.max(0, cursor[2] - item.range.start.col)
-                  or 0
-                local prefix = item.insert_text:sub(1, prefix_len)
-                local first_word =
-                  item.insert_text:sub(prefix_len + 1):match("^([ \t]*%S+)")
-                if not first_word then
+                local insert_text = item.insert_text
+                if not type(insert_text) == "string" or not item.range then
                   return nil
                 end
-                item.insert_text = prefix .. first_word
+                local end_ = item.range[4]
+
+                local before_text = string.sub(insert_text, 1, end_)
+                local after_text = string.sub(insert_text, end_ + 1)
+                local next_word = string.match(after_text, "(%s?[^%s]+)")
+
+                item.insert_text = before_text .. next_word
                 return item
               end,
             })
