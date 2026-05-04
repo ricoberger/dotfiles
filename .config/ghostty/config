@@ -42,6 +42,11 @@ quick-terminal-size = 70%,70%
 quick-terminal-position = center
 auto-update-channel = stable
 
+# Liquid Glass
+# background-opacity = 0.0
+# background-blur = macos-glass-clear
+# macos-titlebar-style = transparent
+
 # Keybindings
 keybind = clear
 
