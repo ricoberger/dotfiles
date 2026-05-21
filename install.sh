@@ -65,7 +65,11 @@ cp -r $(pwd)/.config/btop ~/.config
 echo "\n- Copy Yazi Configuration"
 cp -r $(pwd)/.config/yazi ~/.config
 
-# OpenCode
+# AI
+echo "\n- Copy Claude Configuration"
+rm -rf ~/.claude/skills
+cp -r $(pwd)/.config/claude/skills ~/.claude/skills
+
 echo "\n- Copy OpenCode Configuration"
 cp -r $(pwd)/.config/opencode ~/.config
 

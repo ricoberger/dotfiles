@@ -1721,6 +1721,9 @@ require("sidekick").setup({
       enabled = false,
     },
     tools = {
+      claude = {
+        cmd = { "claude" },
+      },
       copilot = {
         cmd = { "copilot", "--banner" },
         url = "https://github.com/github/copilot-cli",
@@ -1749,6 +1752,9 @@ end, { expr = true })
 -- select a predifined prompt / context.
 vim.keymap.set({ "n", "x" }, "<leader>aa", function()
   require("sidekick.cli").toggle({ name = "opencode", focus = true })
+end)
+vim.keymap.set({ "n", "x" }, "<leader>ac", function()
+  require("sidekick.cli").toggle({ name = "claude", focus = true })
 end)
 vim.keymap.set({ "n", "x" }, "<leader>ap", function()
   require("sidekick.cli").prompt()
