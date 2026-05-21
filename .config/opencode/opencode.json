@@ -1,5 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
-  "lsp": false
+  "lsp": false,
+  "mcp": {
+    "atlassian": {
+      "type": "remote",
+      "url": "https://mcp.atlassian.com/v1/mcp/authv2",
+      "enabled": true
+    }
+  }
 }
