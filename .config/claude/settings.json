@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(*)",
+      "Search(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Bash(*)"
+    ],
+    "deny": []
+  },
+  "model": "opus[1m]",
+  "theme": "dark",
+  "editorMode": "vim",
+  "verbose": true
+}
