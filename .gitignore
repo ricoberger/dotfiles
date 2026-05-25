@@ -129,4 +129,5 @@ Sessionx.vim
 ################################
 
 .zshsecrets
-.claude
+.claude/*
+!.claude/skills/
