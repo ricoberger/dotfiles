@@ -2,9 +2,6 @@
 ### Taps
 ################################################################################
 
-tap "homebrew/bundle"
-tap "homebrew/cask"
-
 tap "azure/kubelogin"
 tap "fluxcd/tap"
 tap "hashicorp/tap"
@@ -25,9 +22,9 @@ cask "claude-code"
 
 brew "deno"
 brew "go"
-# After node was installed we have to link it and we have to install yarn:
-#   brew link --force --overwrite node@22
-brew "node@22"
+# After node was installed we have to link it:
+#   brew link --force --overwrite node@24
+brew "node@24"
 
 ################################################################################
 ### Language Servers and Linters
@@ -59,7 +56,6 @@ brew "grpcurl"
 brew "hashicorp/tap/terraform"
 brew "helm"
 brew "jq"
-brew "kind"
 brew "kubectx"
 brew "kubernetes-cli"
 brew "kustomize"
