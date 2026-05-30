@@ -1,7 +1,5 @@
 return {
-  -- See: ./.local/bin/yamlls
-  -- cmd = { "yaml-language-server", "--stdio" },
-  cmd = { "yamlls", "--stdio" },
+  cmd = { "yaml-language-server", "--stdio" },
   filetypes = {
     "yaml",
     "yaml.docker-compose",
@@ -26,6 +24,8 @@ return {
         kubernetes = {
           "/kubernetes/**/*.yml",
           "/kubernetes/**/*.yaml",
+          "/k8s/**/*.yml",
+          "/k8s/**/*.yaml",
         },
         ["https://www.schemastore.org/kustomization.json"] = "kustomization.{yml,yaml}",
         ["https://www.schemastore.org/github-action.json"] = ".github/action.{yml,yaml}",
