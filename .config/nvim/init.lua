@@ -969,6 +969,16 @@ vim.api.nvim_create_autocmd("FileType", {
 -- LSP
 --------------------------------------------------------------------------------
 
+-- Handle "docker-compose.yaml" and "docker-compose.yml" files as
+-- "yaml.docker-compose" files, so that they get the correct filetype and the
+-- "docker_compose_language_service" LSP server can be used for them.
+vim.filetype.add({
+  pattern = {
+    ["compose.*%.ya?ml"] = "yaml.docker-compose",
+    ["docker%-compose.*%.ya?ml"] = "yaml.docker-compose",
+  },
+})
+
 -- Install the "helm-ls" plugin, which is required for the Helm Language Server
 -- (helm_ls) to work properly.
 --

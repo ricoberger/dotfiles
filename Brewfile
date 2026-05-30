@@ -39,6 +39,7 @@ brew "helm-ls"
 brew "lua-language-server"
 brew "marksman"
 brew "ruff"
+brew "stylua"
 brew "xcode-build-server"
 
 ################################################################################
