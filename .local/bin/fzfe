@@ -89,7 +89,7 @@ fzfe() {
       --pointer ">" \
       --marker "󰄲" \
       --border "rounded" \
-      --border-label=" 󱉭 $(pwd)/ " \
+      --border-label " 󱉭 $(pwd)/ " \
       --border-label-pos center \
       --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4' \
       --bind "enter:accept" \
@@ -112,7 +112,7 @@ fzfe() {
       --bind "alt-m:+deselect-all" \
       --bind "alt-p:execute(fzfe paste `realpath`)" \
       --bind "alt-p:+reload(eval $list_command)" \
-      --preview-window="right:65%" \
+      --preview-window "right:65%" \
       --preview "
           file={}
           if [[ -d \"\$file\" ]]; then

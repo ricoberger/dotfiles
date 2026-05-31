@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+fgf() {
+	local -r prompt_add=" Add: "
+	local -r prompt_reset=" Reset: "
+
+	local -r git_root_dir=$(git rev-parse --show-toplevel)
+	local -r git_unstaged_files="git ls-files --modified --deleted --other --exclude-standard --deduplicate $git_root_dir"
+
+	local git_staged_files='git status --short | grep "^[A-Z]" | awk "{print \$NF}"'
+
+	local -r git_reset="git reset -- {+}"
+	local -r enter_cmd="($git_unstaged_files | grep {} && git add {+}) || $git_reset"
+
+	local -r mode_reset="change-prompt($prompt_reset)+reload($git_staged_files)+unbind(alt-p)"
+	local -r mode_add="change-prompt($prompt_add)+reload($git_unstaged_files)+rebind(alt-p)"
+
+	eval "$git_unstaged_files" | fzf \
+    --ansi \
+    --multi \
+    --reverse \
+    --no-sort \
+    --height 100% \
+    --info right \
+    --pointer ">" \
+    --marker "󰄲" \
+    --border "rounded" \
+    --border-label " 󱉭 $(pwd $git_root_dir)/ " \
+    --prompt=" Add: " \
+    --preview-window "right:65%" \
+    --preview "git diff --no-ext-diff -- {} 2>/dev/null | grep -q . && git diff --no-ext-diff --color -- {} || bat --style=numbers --color=always {}" \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind="ctrl-s:transform:[[ \$FZF_PROMPT =~ '$prompt_add' ]] && echo '$mode_reset' || echo '$mode_add'" \
+    --bind='alt-d:change-preview(git diff --no-ext-diff -- {} 2>/dev/null | grep -q . && git diff --no-ext-diff --color -- {} || bat --style=numbers --color=always {})' \
+    --bind='alt-b:change-preview(git blame --color-by-age {})' \
+    --bind="enter:execute($enter_cmd)" \
+    --bind="enter:+reload([[ \$FZF_PROMPT =~ '$prompt_add' ]] && $git_unstaged_files || $git_staged_files)" \
+    --bind="enter:+refresh-preview" \
+    --bind='alt-p:execute(git add --patch {+})' \
+    --bind="alt-p:+reload($git_unstaged_files)" \
+    --bind='alt-c:execute(git commit)+abort' \
+    --bind='alt-a:execute(git commit --amend)+abort' \
+    --bind='alt-e:execute(${EDITOR:-vim} {+})'
+}
+
+fgf
