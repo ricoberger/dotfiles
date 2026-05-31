@@ -84,6 +84,7 @@ ln -sfn ~/Library/Mobile\ Documents/com\~apple\~CloudDocs ~/iCloud
 
 # Language Servers and Linters
 echo "\n- Run the Following Commands to Install Language Servers, Linters and Formatters:"
+echo "  - npm install -g prettier"
 echo "  - npm install -g vscode-langservers-extracted@4.8.0"
 echo "  - npm install -g dockerfile-language-server-nodejs"
 echo "  - npm install -g @microsoft/compose-language-service"
