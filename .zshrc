@@ -26,7 +26,6 @@ path=(
   $HOME/flutter/bin
   $HOME/.pub-cache/bin
   /opt/homebrew/opt/openjdk/bin
-  $HOME/.istioctl/bin
   $HOME/.cargo/bin
   /opt/homebrew/opt/python@3.10/libexec/bin
   $path
