@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+set -e
+
+namespace_filter=""
+while getopts "n:" opt; do
+  case "$opt" in
+    n) namespace_filter="$OPTARG" ;;
+    *) echo "Usage: $(basename "$0") [-n NAMESPACE]" >&2; exit 1 ;;
+  esac
+done
+
+if [ -n "$namespace_filter" ]; then
+  scope=(-n "$namespace_filter")
+else
+  scope=(--all-namespaces)
+fi
+
+selection=$(kubectl get statefulset "${scope[@]}" -l app.kubernetes.io/component=mongodb --no-headers -o custom-columns=":metadata.namespace,:metadata.name" | fzf)
+
+if [ -z "$selection" ]; then
+  exit 0
+fi
+
+namespace=$(echo "$selection" | awk '{print $1}')
+statefulset=$(echo "$selection" | awk '{print $2}')
+replicas=$(kubectl get sts -n "$namespace" "$statefulset" -o jsonpath='{.spec.replicas}')
+
+primary=""
+for i in $(seq 0 $((replicas - 1))); do
+  candidate="${statefulset}-${i}"
+  is_primary=$(kubectl exec -n "$namespace" "$candidate" -- bash -c 'mongosh --quiet --username "$MONGODB_ROOT_USER" --password "$(cat "$MONGODB_ROOT_PASSWORD_FILE")" --authenticationDatabase admin --eval "db.hello().isWritablePrimary"' 2>/dev/null || true)
+  if [ "$is_primary" = "true" ]; then
+    primary="$candidate"
+    break
+  fi
+done
+
+if [ -z "$primary" ]; then
+  echo "No primary pod found in statefulset ${statefulset}" >&2
+  exit 1
+fi
+
+kubectl exec -it -n "$namespace" "$primary" -- bash -c 'mongosh --username "$MONGODB_ROOT_USER" --password "$(cat "$MONGODB_ROOT_PASSWORD_FILE")" --authenticationDatabase admin'

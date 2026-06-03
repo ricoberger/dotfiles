@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+set -e
+
+namespace_filter=""
+while getopts "n:" opt; do
+  case "$opt" in
+    n) namespace_filter="$OPTARG" ;;
+    *) echo "Usage: $(basename "$0") [-n NAMESPACE]" >&2; exit 1 ;;
+  esac
+done
+
+if [ -n "$namespace_filter" ]; then
+  scope=(-n "$namespace_filter")
+else
+  scope=(--all-namespaces)
+fi
+
+selection=$(kubectl get statefulset "${scope[@]}" -l application=spilo --no-headers -o custom-columns=":metadata.namespace,:metadata.name" | fzf)
+
+if [ -z "$selection" ]; then
+  exit 0
+fi
+
+namespace=$(echo "$selection" | awk '{print $1}')
+statefulset=$(echo "$selection" | awk '{print $2}')
+
+primary=$(kubectl get pod -n "$namespace" -l "application=spilo,cluster-name=$statefulset,spilo-role=master" -o jsonpath='{.items[0].metadata.name}')
+
+if [ -z "$primary" ]; then
+  echo "No primary pod found in statefulset ${statefulset}" >&2
+  exit 1
+fi
+
+kubectl exec -it -n "$namespace" "$primary" -- bash
