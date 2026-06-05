@@ -12,7 +12,7 @@ curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
     "queries": [{
       "refId": "A",
       "datasource": { "uid": "'"$DATASOURCEUID"'", "type": "grafana-pyroscope-datasource" },
-      "queryType": "metrics",A
+      "queryType": "metrics",
       "zone": "'"$ZONE"'",
       "limit": '"${LIMIT:-1000}"',
       "name": "'"$METRICNAME"'",
@@ -148,3 +148,29 @@ The following fields can be use within the `dimensions` field:
 
 If the metrics should be analyzed over time always include a datetime dimension,
 e.g. `datetimeFiveMinutes` or `datetimeHour`.
+
+### Examples
+
+- Get the number of requests per host, sorted by the number of requests:
+
+```json
+{
+  "queries": [
+    {
+      "queryType": "metrics",
+      "zone": "",
+      "limit": 10,
+      "datasource": { "type": "", "uid": "" },
+      "refId": "A",
+      "name": "httpRequests_visits",
+      "aggregation": "count",
+      "filterType": "code",
+      "filter": "{ requestSource: \"eyeball\" }",
+      "dimensions": ["clientRequestHTTPHost"],
+      "orderBy": ["count_DESC"]
+    }
+  ],
+  "from": "",
+  "to": ""
+}
+```
