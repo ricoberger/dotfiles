@@ -148,8 +148,3 @@ The following fields can be use within the `dimensions` field:
 
 If the metrics should be analyzed over time always include a datetime dimension,
 e.g. `datetimeFiveMinutes` or `datetimeHour`.
-
-## References
-
-- [GitHub Repository](https://github.com/ricoberger/grafana-cloudflare-plugin)
-- [Cloudflare GraphQL API](https://developers.cloudflare.com/analytics/graphql-api/)
