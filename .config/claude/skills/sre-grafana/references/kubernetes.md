@@ -8,7 +8,7 @@ curl -sS -H "Authorization: $TOKEN" \
   "$GRAFANA/api/datasources/proxy/uid/$DATASOURCEUID/proxy/$KUBERNETESAPIPATH"
 ```
 
-### Kubenretes Query Patterns
+### Kubernetes Query Patterns
 
 The `$KUBERNETESAPIPATH` is the path component of the Kubernetes API URL. Some
 useful paths are:

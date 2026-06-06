@@ -11,7 +11,7 @@ curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
   -d '{
     "queries": [{
       "refId": "A",
-      "datasource": { "uid": "'"$DATASOURCEUID"'", "type": "grafana-pyroscope-datasource" },
+      "datasource": { "uid": "'"$DATASOURCEUID"'", "type": "ricoberger-cloudflare-datasource" },
       "queryType": "metrics",
       "zone": "'"$ZONE"'",
       "limit": '"${LIMIT:-1000}"',
@@ -83,7 +83,7 @@ traffic patterns that may be affected by bots or when requested by the user.
 #### Examples
 
 - Only show logs / metrics where the `edgeResponseContentTypeName` is `json`,
-  `xml`, `grpc`, or `grpcweb` and where the data is comming from an `eyeball`
+  `xml`, `grpc`, or `grpcweb` and where the data is coming from an `eyeball`
   request:
 
 ```graphql
@@ -131,7 +131,7 @@ The `dimensions` field is a list of fields to group the returned logs or metrics
 by. The syntax is a list of field names, e.g.
 `["datetimeFiveMinutes", "clientCountryName"]`.
 
-The following fields can be use within the `dimensions` field:
+The following fields can be used within the `dimensions` field:
 `botManagementDecision`, `cacheStatus`, `clientASNDescription`, `clientAsn`,
 `clientCountryName`, `clientDeviceType`, `clientIP`, `clientRefererHost`,
 `clientRequestHTTPHost`, `clientRequestHTTPMethodName`,

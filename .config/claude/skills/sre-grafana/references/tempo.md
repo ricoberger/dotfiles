@@ -11,7 +11,7 @@ curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
   -d '{
     "queries": [{
       "refId": "A",
-      "datasource": { "uid": "victoriatraces", "type": "tempo" },
+      "datasource": { "uid": "'"$DATASOURCEUID"'", "type": "tempo" },
       "queryType": "traceql",
       "limit": '"${LIMIT:-20}"',
       "metricsQueryType": "range",

@@ -16,7 +16,7 @@ Paste the Grafana url and API token to the skill:
 
 ```markdown
 - Grafana URL: https://grafana.example.com
-- Grafana API Token: glsa\_…
+- Grafana Credentials: Bearer glsa\_…
 ```
 
 ### Option 2: `GRAFANA_INSTANCES` Environment Variable

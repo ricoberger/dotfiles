@@ -151,8 +151,8 @@ kubectl --server="$API" --token="$TOKEN" -n "$NS" logs "$POD" \
   -c "$CONTAINER" --previous --tail=200
 ```
 
-For larger log volumes, prefer the `sre-grafana` skill (Loki) — direct
-`kubectl logs` is bounded to a single container instance.
+For larger log volumes, prefer the `sre-grafana` skill — direct `kubectl logs`
+is bounded to a single container instance.
 
 ### 6. Resource Pressure
 
