@@ -13,5 +13,25 @@
       "type": "remote",
       "url": "https://backstage.staffbase.com/api/mcp-server/mcp"
     }
+  },
+  "tools": {
+    "atlassian_*": false,
+    "backstage_*": false
+  },
+  "agent": {
+    "atlassian": {
+      "description": "Agent for handling Atlassian-related tasks, such as managing Jira tickets and Confluence pages.",
+      "mode": "primary",
+      "tools": {
+        "atlassian_*": true
+      }
+    },
+    "backstage": {
+      "description": "Agent for handling Backstage-related tasks, such as managing finding documentation in Backstage.",
+      "mode": "primary",
+      "tools": {
+        "backstage_*": true
+      }
+    }
   }
 }

@@ -1712,7 +1712,7 @@ require("sidekick").setup({
   cli = {
     win = {
       keys = {
-        stopinsert = { "<esc><esc>", "stopinsert", mode = "t" },
+        stopinsert = { "<c-q>", "stopinsert", mode = "t" },
         hide_ctrl_z = { "<c-z>", "blur", mode = "nt" },
         buffers = { "<a-b>", "buffers", mode = "nt" },
         files = { "<a-f>", "files", mode = "nt" },
