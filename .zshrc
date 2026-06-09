@@ -162,6 +162,31 @@ kctx() {
   print -z `echo "export KUBECONFIG=$(echo "$KUBECONFIGS" | fzf)"`
 }
 
+# Completion for fzfk - suggest available Kubernetes resources for the first
+# argument and delegate the rest to kubectl's own completion when available.
+_fzfk() {
+  local curcontext="$curcontext" state line
+  _arguments -C \
+    '1:resource:->resource' \
+    '*::kubectl-args:->args'
+
+  case $state in
+    resource)
+      local -a resources
+      resources=(${(f)"$(kubectl api-resources --no-headers --verbs=get -o name 2>/dev/null)"})
+      _describe -t resources 'kubernetes resource' resources
+      ;;
+    args)
+      if (( $+functions[_kubectl] )); then
+        words=(kubectl get "${words[@]:1}")
+        (( CURRENT += 1 ))
+        _kubectl
+      fi
+      ;;
+  esac
+}
+compdef _fzfk fzfk
+
 vaultedit() {
   TMPFILE=`mktemp /tmp/vaultsecret.XXXXXXXXX`
   vault kv get -format=json $@ | jq .data.data > ${TMPFILE};

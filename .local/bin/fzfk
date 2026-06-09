@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+
+# fzfk - Fuzzy Finder for Kubernetes
+#
+# Usage: fzfk <resource> [kubectl get args...]
+
+SCRIPT="$(realpath "$0")"
+
+# ---------- Action handlers ----------
+#
+# Called recursively from fzf bindings as:
+#   fzfk __action <action> <resource> <namespace_or_-> <name>
+#
+# The sentinel "-" is used for the namespace when no namespace was given
+# (i.e. the current kubectl context's namespace should be used).
+
+if [[ "$1" == "__action" ]]; then
+  shift
+  action="$1"
+  resource="$2"
+  namespace="$3"
+  name="$4"
+
+  ns_arg=()
+  if [[ -n "$namespace" && "$namespace" != "-" ]]; then
+    ns_arg=(-n "$namespace")
+  fi
+
+  case "$action" in
+    describe)
+      kubectl describe "${ns_arg[@]}" "$resource" "$name" | nvim
+      ;;
+
+    yaml)
+      kubectl get "${ns_arg[@]}" "$resource" "$name" -o yaml | nvim
+      ;;
+
+    delete)
+      ns_label=""
+      [[ -n "$namespace" && "$namespace" != "-" ]] && ns_label=" (ns: $namespace)"
+      printf "Delete %s/%s%s? [y/N]: " "$resource" "$name" "$ns_label"
+      read -r confirm
+      if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        kubectl delete "${ns_arg[@]}" "$resource" "$name"
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    logs)
+      containers=$(kubectl get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].name} {.spec.template.spec.containers[*].name} {.spec.initContainers[*].name} {.spec.template.spec.initContainers[*].name}' 2>/dev/null \
+        | tr ' ' '\n' | awk 'NF && !seen[$0]++')
+      if [[ -z "$containers" ]]; then
+        echo "No containers found for $resource/$name"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      container=$(echo "$containers" | fzf \
+        --prompt "󰆧 Container: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4')
+      [[ -z "$container" ]] && exit 0
+      kubectl logs "${ns_arg[@]}" "$resource/$name" -c "$container" --tail=500 -f
+      ;;
+
+    exec)
+      containers=$(kubectl get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].name} {.spec.template.spec.containers[*].name}' 2>/dev/null \
+        | tr ' ' '\n' | awk 'NF && !seen[$0]++')
+      if [[ -z "$containers" ]]; then
+        echo "No containers found for $resource/$name"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      container=$(echo "$containers" | fzf \
+        --prompt "󰆧 Container: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4')
+      [[ -z "$container" ]] && exit 0
+      kubectl exec "${ns_arg[@]}" -it "$resource/$name" -c "$container" -- \
+        sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
+      ;;
+
+    portforward)
+      ports=$(kubectl get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].ports[*].containerPort} {.spec.template.spec.containers[*].ports[*].containerPort} {.spec.ports[*].port}' 2>/dev/null \
+        | tr ' ' '\n' | awk 'NF && !seen[$0]++' | sort -n)
+      if [[ -z "$ports" ]]; then
+        echo "No ports found for $resource/$name"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      port=$(echo "$ports" | fzf \
+        --prompt "󰮏 Port: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4')
+      [[ -z "$port" ]] && exit 0
+      printf "Local port [%s]: " "$port"
+      read -r local_port
+      local_port=${local_port:-$port}
+      echo "Forwarding $resource/$name $local_port -> $port (Ctrl-C to stop)"
+      kubectl port-forward "${ns_arg[@]}" "$resource/$name" "$local_port:$port"
+      read -n 1 -s -r -p "Press any key to continue..."
+      ;;
+
+    *)
+      echo "Unknown action: $action"
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Main mode ----------
+
+usage() {
+  cat <<'EOF'
+fzfk - Fuzzy Finder for Kubernetes
+
+Usage: fzfk <resource> [kubectl get args...]
+
+Examples:
+  fzfk pods
+  fzfk pods -A
+  fzfk pods -n kube-system
+  fzfk deployments -l app=foo
+
+Keybindings:
+  enter   : describe the selected resource
+  alt-p   : port-forward (pick port via fzf)
+  alt-e   : exec into container (pick container via fzf)
+  alt-l   : show container logs (pick container via fzf)
+  alt-y   : open YAML manifest in nvim
+  alt-d   : delete the resource (with confirmation)
+  alt-r   : reload the list
+  ctrl-p  : toggle preview
+  ctrl-d  : half page down
+  ctrl-u  : half page up
+  ctrl-f  : preview half page down
+  ctrl-b  : preview half page up
+EOF
+}
+
+if [[ -z "$1" || "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+RESOURCE="$1"
+shift
+KUBECTL_ARGS=("$@")
+
+# Parse namespace flags from kubectl args, so action handlers can
+# operate on the same namespace as the listing.
+NAMESPACE=""
+ALL_NS=false
+i=0
+while [[ $i -lt ${#KUBECTL_ARGS[@]} ]]; do
+  arg="${KUBECTL_ARGS[$i]}"
+  case "$arg" in
+    -A|--all-namespaces)
+      ALL_NS=true
+      ;;
+    -n|--namespace)
+      i=$((i+1))
+      NAMESPACE="${KUBECTL_ARGS[$i]}"
+      ;;
+    --namespace=*)
+      NAMESPACE="${arg#*=}"
+      ;;
+  esac
+  i=$((i+1))
+done
+
+# Determine field positions used by the fzf bindings.
+#   - With -A / --all-namespaces the kubectl output starts with the
+#     NAMESPACE column, so we read it from field {1} and the name from {2}.
+#   - Otherwise the namespace is fixed (or "-" for the context default)
+#     and the name is the first field.
+if $ALL_NS; then
+  NS_FIELD="{1}"
+  NAME_FIELD="{2}"
+elif [[ -n "$NAMESPACE" ]]; then
+  NS_FIELD="$NAMESPACE"
+  NAME_FIELD="{1}"
+else
+  NS_FIELD="-"
+  NAME_FIELD="{1}"
+fi
+
+LIST_CMD="kubectl get $RESOURCE ${KUBECTL_ARGS[*]}"
+
+# Build the per-row preview command (kubectl describe under the cursor).
+if $ALL_NS; then
+  PREVIEW_CMD="kubectl describe $RESOURCE -n {1} {2}"
+elif [[ -n "$NAMESPACE" ]]; then
+  PREVIEW_CMD="kubectl describe $RESOURCE -n $NAMESPACE {1}"
+else
+  PREVIEW_CMD="kubectl describe $RESOURCE {1}"
+fi
+
+ACTION="$SCRIPT __action"
+
+clear
+fzf \
+  --ansi \
+  --reverse \
+  --height 100% \
+  --header-lines=1 \
+  --info right \
+  --prompt "󱃾 $RESOURCE: " \
+  --pointer ">" \
+  --border "rounded" \
+  --border-label " 󱃾 $LIST_CMD " \
+  --border-label-pos center \
+  --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4' \
+  --bind "ctrl-d:half-page-down" \
+  --bind "ctrl-u:half-page-up" \
+  --bind "ctrl-f:preview-half-page-down" \
+  --bind "ctrl-b:preview-half-page-up" \
+  --bind "ctrl-p:toggle-preview" \
+  --bind "alt-r:reload($LIST_CMD)" \
+  --bind "enter:execute($ACTION describe $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-p:execute($ACTION portforward $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-e:execute($ACTION exec $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-l:execute($ACTION logs $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-y:execute($ACTION yaml $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-d:execute($ACTION delete $RESOURCE $NS_FIELD $NAME_FIELD)+reload($LIST_CMD)" \
+  --preview-window "right:65%" \
+  --preview "$PREVIEW_CMD" \
+  < <(eval "$LIST_CMD")
