@@ -4,19 +4,15 @@
   "lsp": false,
   "mcp": {
     "atlassian": {
-      "enabled": true,
+      "enabled": false,
       "type": "remote",
       "url": "https://mcp.atlassian.com/v1/mcp/authv2"
     },
     "backstage": {
-      "enabled": true,
+      "enabled": false,
       "type": "remote",
       "url": "https://backstage.staffbase.com/api/mcp-server/mcp"
     }
-  },
-  "tools": {
-    "atlassian_*": false,
-    "backstage_*": false
   },
   "agent": {
     "atlassian": {
