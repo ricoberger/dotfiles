@@ -2,12 +2,12 @@
 ### Taps
 ################################################################################
 
-tap "azure/kubelogin"
-tap "fluxcd/tap"
-tap "hashicorp/tap"
-tap "jetbrains/utils"
-tap "stripe/stripe-cli"
-tap "supabase/tap"
+tap "azure/kubelogin", trusted: true
+tap "fluxcd/tap", trusted: true
+tap "hashicorp/tap", trusted: true
+tap "jetbrains/utils", trusted: true
+tap "stripe/stripe-cli", trusted: true
+tap "supabase/tap", trusted: true
 
 ################################################################################
 ### Applications
