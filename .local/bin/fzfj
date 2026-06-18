@@ -1,0 +1,416 @@
+#!/usr/bin/env bash
+
+# fzfj - Fuzzy Finder for Jira (acli)
+#
+# Usage: fzfj [JQL]
+#
+# Requires: acli jira auth login --web
+
+SCRIPT="$(realpath "$0")"
+
+# Status names offered by the transition picker (override via FZFJ_STATUSES).
+if [[ -z "$FZFJ_STATUSES" ]]; then
+  FZFJ_STATUSES="Open,Backlog,Ready for Implementation,In Progress,In Review,Delivery,Discovery,On Hold,Done,Won't do"
+fi
+# Maximum number of work items to fetch (override via FZFJ_LIMIT).
+FZFJ_LIMIT="${FZFJ_LIMIT:-250}"
+# Project used when creating new work items (override via FZFJ_PROJECT).
+FZFJ_PROJECT="${FZFJ_PROJECT:-CORE}"
+
+# Named JQL filters shown in a picker when fzfj is launched without a JQL
+# argument. Each entry is "Name|JQL". Override the whole list at runtime via
+# the FZFJ_FILTERS env var (newline-separated "Name|JQL" entries); otherwise
+# these baked defaults are used.
+FZFJ_DEFAULT_FILTERS=(
+  "Current|project = CORE AND statusCategory != Done AND status != \"Backlog\" AND issuetype != \"Epic\" ORDER BY updated DESC"
+  "Assigned|project = CORE AND assignee = currentUser() AND statusCategory != Done AND status != Backlog ORDER BY priority DESC, updated DESC"
+  "Backlog|project = CORE AND status = \"Backlog\" AND issuetype != \"Sub-Task\" AND issuetype != \"Epic\" ORDER BY created DESC"
+)
+
+FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
+
+# ---------- List mode ----------
+#
+# Called for the initial feed and on every reload. Reads the JQL from the
+# environment (FZFJ_JQL) so the fzf reload binding stays quoting-safe.
+
+if [[ "$1" == "__list" ]]; then
+  err="$(mktemp)"
+  out="$(acli jira workitem search \
+    --jql "$FZFJ_JQL" \
+    --limit "$FZFJ_LIMIT" \
+    --json 2>"$err")"
+  status=$?
+
+  if [[ $status -ne 0 ]]; then
+    cat "$err" >&2
+    rm -f "$err"
+    exit 1
+  fi
+  rm -f "$err"
+
+  printf '%s' "$out" | jq -r '
+    def pad(s; n): (s + (" " * 60))[0:n];
+    def color(c):
+      {
+        green: "32",
+        yellow: "33",
+        "blue-gray": "34",
+        brown: "33",
+        "medium-gray": "37",
+        "warm-red": "31"
+      }[c] // "37";
+    .[]
+    | (.fields.status.statusCategory.colorName // "medium-gray") as $c
+    | pad(.key; 12) + " "
+      + "\u001b[" + color($c) + "m" + pad((.fields.status.name // "-"); 14) + "\u001b[0m" + " "
+      + (.fields.summary // "-" | gsub("[\t\n\r]"; " "))
+  '
+  exit 0
+fi
+
+# ---------- Preview mode ----------
+#
+# Renders the work item details followed by its comment thread. Called from
+# the fzf --preview binding as: fzfj __preview <key>
+
+if [[ "$1" == "__preview" ]]; then
+  key="$2"
+  [[ -z "$key" ]] && exit 0
+
+  acli jira workitem view "$key" --fields "*all"
+
+  comments="$(acli jira workitem comment list --key "$key" --json 2>/dev/null)"
+  if [[ -n "$comments" ]]; then
+    echo
+    printf '%s' "$comments" | jq -r '
+      "─── Comments (\(.total // 0)) ───",
+      "",
+      (.comments[]?
+        | "▌ \(.author)",
+          ((.body // "") | gsub("\r"; "") | split("\n")[] | "  " + .),
+          ""
+      )
+    '
+  fi
+  exit 0
+fi
+
+# ---------- Action handlers ----------
+#
+# Called recursively from fzf bindings as:
+#   fzfj __action <action> <key>
+
+if [[ "$1" == "__action" ]]; then
+  shift
+  action="$1"
+  key="$2"
+
+  if [[ "$action" != "create" && -z "$key" ]]; then
+    exit 0
+  fi
+
+  case "$action" in
+    view)
+      acli jira workitem view "$key" --fields "*all" | nvim
+      ;;
+
+    web)
+      acli jira workitem view "$key" --web >/dev/null 2>&1
+      ;;
+
+    assign)
+      choice=$(printf '%s\n' "@me" "default" "remove assignee" "custom…" | fzf \
+        --prompt "󰋐 Assign $key: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")
+      [[ -z "$choice" ]] && exit 0
+
+      assign_args=(--key "$key" --yes)
+      case "$choice" in
+        "@me")             assign_args+=(--assignee "@me") ;;
+        "default")         assign_args+=(--assignee "default") ;;
+        "remove assignee") assign_args+=(--remove-assignee) ;;
+        "custom…")
+          printf "Assignee (email or account ID): "
+          read -r email
+          [[ -z "$email" ]] && exit 0
+          assign_args+=(--assignee "$email")
+          ;;
+      esac
+
+      if ! acli jira workitem assign "${assign_args[@]}"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    transition)
+      status=$(printf '%s' "$FZFJ_STATUSES" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | fzf \
+        --prompt "󰒍 Transition $key: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")
+      [[ -z "$status" ]] && exit 0
+
+      if ! acli jira workitem transition --key "$key" --status "$status" --yes; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    comment)
+      if ! acli jira workitem comment create --key "$key" --editor; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    edit)
+      field=$(printf '%s\n' "Type" "Summary" "Description" | fzf \
+        --prompt "󰏫 Edit $key: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")
+      [[ -z "$field" ]] && exit 0
+
+      case "$field" in
+        Type)
+          new_type=$(acli jira project view --key "$FZFJ_PROJECT" --json 2>/dev/null \
+            | jq -r '(if type == "array" then .[0] else . end)
+                     | .issueTypes[] | select(.subtask | not) | .name' \
+            | fzf \
+                --prompt "󰜢 Type ($key): " \
+                --height 100% \
+                --reverse \
+                --border rounded \
+                --color "$FZF_COLORS")
+          [[ -z "$new_type" ]] && exit 0
+          if ! acli jira workitem edit --key "$key" --type "$new_type" --yes; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+
+        Summary)
+          tmp="$(mktemp)"
+          acli jira workitem view "$key" --fields "summary" --json 2>/dev/null \
+            | jq -r '.fields.summary // ""' > "$tmp"
+          orig="$(cat "$tmp")"
+          nvim "$tmp"
+          IFS= read -r new_summary < "$tmp"
+          rm -f "$tmp"
+          if [[ -z "$new_summary" || "$new_summary" == "$orig" ]]; then
+            exit 0
+          fi
+          if ! acli jira workitem edit --key "$key" --summary "$new_summary" --yes; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+
+        Description)
+          tmp="$(mktemp)"
+          acli jira workitem view "$key" --fields "description" --json 2>/dev/null | jq -r '
+            def toText:
+              if type == "object" then
+                if .type == "text" then (.text // "")
+                elif .type == "hardBreak" then "\n"
+                elif .type == "inlineCard" then (.attrs.url // .attrs.data.url // "")
+                elif .type == "mention" then (.attrs.text // "")
+                elif (.type == "paragraph" or .type == "heading") then ((.content // [] | map(toText) | join("")) + "\n")
+                elif .type == "listItem" then ("- " + (.content // [] | map(toText) | join("")))
+                elif .content then (.content | map(toText) | join(""))
+                else "" end
+              elif type == "array" then (map(toText) | join(""))
+              else "" end;
+            (.fields.description // empty) | toText
+          ' > "$tmp"
+          orig="$(cat "$tmp")"
+          nvim "$tmp"
+          if [[ "$(cat "$tmp")" == "$orig" ]]; then
+            rm -f "$tmp"
+            exit 0
+          fi
+          if ! acli jira workitem edit --key "$key" --description-file "$tmp" --yes; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          rm -f "$tmp"
+          ;;
+      esac
+      ;;
+
+    create)
+      project="$FZFJ_PROJECT"
+
+      type=$(acli jira project view --key "$project" --json 2>/dev/null \
+        | jq -r '(if type == "array" then .[0] else . end)
+                 | .issueTypes[] | select(.subtask | not) | .name' \
+        | fzf \
+            --prompt "󰜢 Type ($project): " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")
+      [[ -z "$type" ]] && exit 0
+
+      printf "Summary: "
+      read -r summary
+      [[ -z "$summary" ]] && exit 0
+
+      create_args=(--project "$project" --type "$type" --summary "$summary")
+
+      printf "Add description? [y/N]: "
+      read -r adddesc
+      desc_file=""
+      if [[ "$adddesc" =~ ^[Yy]$ ]]; then
+        desc_file="$(mktemp)"
+        nvim "$desc_file"
+        [[ -s "$desc_file" ]] && create_args+=(--description-file "$desc_file")
+      fi
+
+      out=$(acli jira workitem create "${create_args[@]}" 2>&1)
+      printf '%s\n' "$out"
+      [[ -n "$desc_file" ]] && rm -f "$desc_file"
+      read -n 1 -s -r -p "Press any key to continue..."
+      ;;
+
+    *)
+      echo "Unknown action: $action"
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Main mode ----------
+
+usage() {
+  cat <<'EOF'
+fzfj - Fuzzy Finder for Jira (acli)
+
+Usage: fzfj [JQL]
+
+Examples:
+  fzfj
+  fzfj "project = CORE AND status != Done ORDER BY updated DESC"
+  fzfj "assignee = currentUser() AND sprint in openSprints()"
+
+If no JQL is given, a picker of named filters is shown
+(Current, Assigned, Backlog). Edit the FZFJ_DEFAULT_FILTERS
+array in this script, or override via the FZFJ_FILTERS env
+var, to configure them.
+
+Keybindings:
+  enter   : view the work item (opens in nvim)
+  alt-a   : assign the work item (@me / default / remove / custom)
+  alt-t   : transition the work item (pick a status)
+  alt-c   : add a comment to the work item (opens in nvim)
+  alt-e   : edit the work item (type / summary / description)
+  alt-n   : create a new work item
+  alt-o   : open the work item in the web browser
+  alt-r   : reload the list
+  ctrl-p  : toggle preview
+  ctrl-d  : half page down
+  ctrl-u  : half page up
+  ctrl-f  : preview half page down
+  ctrl-b  : preview half page up
+
+The preview shows the work item details followed by its comment thread.
+
+Environment:
+  FZFJ_LIMIT     Max work items to fetch (default: 250)
+  FZFJ_PROJECT   Project for newly created work items (default: CORE)
+  FZFJ_FILTERS   Override the filter picker entries. Newline-separated
+                 "Name|JQL" entries, e.g.
+                 $'Mine|assignee = currentUser()\nBugs|type = Bug'
+  FZFJ_STATUSES  Comma-separated transition statuses
+                 (default: CORE project statuses, e.g.
+                 "Open,Backlog,In Progress,In Review,Done,Won't do")
+EOF
+}
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ -n "$1" ]]; then
+  # An explicit JQL argument bypasses the filter picker.
+  FZFJ_JQL="$1"
+else
+  # Filters come from the FZFJ_FILTERS env var (newline-separated "Name|JQL"
+  # entries) when set, otherwise from the baked defaults.
+  filters=()
+  if [[ -n "$FZFJ_FILTERS" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && filters+=("$line")
+    done <<< "$FZFJ_FILTERS"
+  else
+    filters=("${FZFJ_DEFAULT_FILTERS[@]}")
+  fi
+
+  # No JQL given: pick from the configured named filters.
+  selected=$(printf '%s\n' "${filters[@]%%|*}" | fzf \
+    --prompt "󰈲 Filter: " \
+    --height 100% \
+    --reverse \
+    --border rounded \
+    --border-label " 󰌪 Jira Filters " \
+    --border-label-pos center \
+    --color "$FZF_COLORS")
+  [[ -z "$selected" ]] && exit 0
+
+  FZFJ_JQL=""
+  for f in "${filters[@]}"; do
+    if [[ "${f%%|*}" == "$selected" ]]; then
+      FZFJ_JQL="${f#*|}"
+      break
+    fi
+  done
+  [[ -z "$FZFJ_JQL" ]] && exit 1
+fi
+
+export FZFJ_JQL
+export FZFJ_LIMIT
+export FZFJ_STATUSES
+export FZFJ_PROJECT
+
+# Pre-flight: validate the query / auth and bail out cleanly on errors or no
+# results, rather than dropping into an empty picker.
+ROWS="$("$SCRIPT" __list)" || exit 1
+if [[ -z "$ROWS" ]]; then
+  echo "No work items found for JQL: $FZFJ_JQL" >&2
+  exit 1
+fi
+
+ACTION="$SCRIPT __action"
+
+clear
+fzf \
+  --ansi \
+  --reverse \
+  --height 100% \
+  --info right \
+  --header "KEY          STATUS         SUMMARY" \
+  --prompt "󰌪 Jira: " \
+  --pointer ">" \
+  --border "rounded" \
+  --border-label " 󰌪 $FZFJ_JQL " \
+  --border-label-pos center \
+  --color "$FZF_COLORS" \
+  --bind "ctrl-d:half-page-down" \
+  --bind "ctrl-u:half-page-up" \
+  --bind "ctrl-f:preview-half-page-down" \
+  --bind "ctrl-b:preview-half-page-up" \
+  --bind "ctrl-p:toggle-preview" \
+  --bind "alt-r:reload($SCRIPT __list)" \
+  --bind "enter:execute($ACTION view {1})" \
+  --bind "alt-a:execute($ACTION assign {1})+reload($SCRIPT __list)" \
+  --bind "alt-t:execute($ACTION transition {1})+reload($SCRIPT __list)" \
+  --bind "alt-c:execute($ACTION comment {1})+refresh-preview" \
+  --bind "alt-e:execute($ACTION edit {1})+reload($SCRIPT __list)+refresh-preview" \
+  --bind "alt-n:execute($ACTION create)+reload($SCRIPT __list)" \
+  --bind "alt-o:execute($ACTION web {1})" \
+  --preview-window "right:65%" \
+  --preview "$SCRIPT __preview {1}" \
+  <<< "$ROWS"

@@ -2,6 +2,7 @@
 ### Taps
 ################################################################################
 
+tap "atlassian/homebrew-acli", trusted: true
 tap "azure/kubelogin", trusted: true
 tap "fluxcd/tap", trusted: true
 tap "hashicorp/tap", trusted: true
@@ -46,6 +47,7 @@ brew "xcode-build-server"
 ### Tools
 ################################################################################
 
+brew "acli"
 brew "azure/kubelogin/kubelogin"
 brew "bat"
 brew "btop"
