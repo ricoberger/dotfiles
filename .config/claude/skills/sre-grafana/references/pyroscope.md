@@ -5,25 +5,34 @@ go through `/api/ds/query`.
 
 ## Request
 
+Build the JSON body with `jq -n` and pipe it into `curl --data-binary @-`.
+**Never** interpolate `$LABELSELECTOR` directly into a `-d '{...}'` string —
+selectors like `{service_name="frontend"}` contain a `"` that closes the
+surrounding JSON string and silently corrupts the body; the API then returns an
+empty result indistinguishable from "no profiles":
+
 ```bash
-curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
-  -X POST "$GRAFANA/api/ds/query" \
-  -d '{
-    "queries": [{
-      "refId": "A",
-      "datasource": { "uid": "'"$DATASOURCEUID"'", "type": "grafana-pyroscope-datasource" },
-      "labelSelector": "'"$LABELSELECTOR"'",
-      "groupBy": [],
-      "spanSelector": [],
-      "includeExemplars": false,
-      "queryType": "both",
-      "profileTypeId": "'"$PROFILETYPEID"'",
-      "intervalMs": 2000,
-      "maxDataPoints": '"'"${MAXDATAPOINTS:-1000}"'"
-    }],
-    "from": "'"$FROM"'",
-    "to": "'"$TO"'"
-  }'
+jq -n \
+  --arg uid           "$DATASOURCEUID" \
+  --arg labelSelector "$LABELSELECTOR" \
+  --arg profileTypeId "$PROFILETYPEID" \
+  --arg from          "$FROM" \
+  --arg to            "$TO" \
+  --argjson intervalMs    2000 \
+  --argjson maxDataPoints "${MAXDATAPOINTS:-1000}" \
+  '{queries:[{refId:"A",
+              datasource:{uid:$uid, type:"grafana-pyroscope-datasource"},
+              labelSelector:$labelSelector,
+              groupBy:[],
+              spanSelector:[],
+              includeExemplars:false,
+              queryType:"both",
+              profileTypeId:$profileTypeId,
+              intervalMs:$intervalMs,
+              maxDataPoints:$maxDataPoints}],
+    from:$from, to:$to}' \
+| curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
+       -X POST "$GRAFANA/api/ds/query" --data-binary @-
 ```
 
 ## Pyroscope Query Patterns

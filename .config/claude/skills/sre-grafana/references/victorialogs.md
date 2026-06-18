@@ -10,21 +10,71 @@ silently fails and returns nothing. Full reference:
 
 ## Request
 
+Build the JSON body with `jq -n` and pipe it into `curl --data-binary @-`.
+**Never** interpolate `$LOGSQL` directly into a `-d '{...}'` string — exact
+field matches like `k8s.namespace.name:="grafana"` contain a `"` that closes the
+surrounding JSON string and silently corrupts the body; the API then returns an
+empty result that looks identical to a legitimate "no logs" answer:
+
 ```bash
-curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
-  -X POST "$GRAFANA/api/ds/query" \
-  -d '{
-    "queries": [{
-      "refId": "A",
-      "datasource": { "uid": "'"$DATASOURCEUID"'", "type": "victoriametrics-logs-datasource" },
-      "expr": "'"$LOGSQL"'",
-      "queryType": "instant",
-      "maxLines": '"${MAXLINES:-1000}"'
-    }],
-    "from": "'"$FROM"'",
-    "to": "'"$TO"'"
-  }'
+jq -n \
+  --arg uid   "$DATASOURCEUID" \
+  --arg expr  "$LOGSQL" \
+  --arg from  "$FROM" \
+  --arg to    "$TO" \
+  --argjson maxLines "${MAXLINES:-1000}" \
+  '{queries:[{refId:"A",
+              datasource:{uid:$uid, type:"victoriametrics-logs-datasource"},
+              expr:$expr,
+              queryType:"instant",
+              maxLines:$maxLines}],
+    from:$from, to:$to}' \
+| curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
+       -X POST "$GRAFANA/api/ds/query" --data-binary @-
 ```
+
+### Rendering the Response
+
+Always end the LogsQL with an explicit projection (`| fields _time, _msg`, plus
+any extra fields) — without it the column order in the response frame is
+unpredictable and the rendered output interleaves the wrong fields.
+
+Copy this tested program verbatim (expects `refId` `A`; first projected field
+must be `_time`); it prints one line per entry, collapses whitespace, and
+truncates long messages so a single noisy log line cannot flood the output:
+
+```bash
+curl -sS ... | jq -r '
+  .results.A.frames[0] as $f
+  | if $f == null then "no logs" else
+      ($f.data.values | transpose[]
+       | "\(.[0] / 1000 | floor | strftime("%m-%d %H:%M:%S"))  \(.[1:]
+            | map(tostring | gsub("\\s+"; " ") | .[0:300]) | join("  "))")
+    end'
+```
+
+For `| stats ...` queries the plugin still returns the standard log-frame shape
+(`Time, Line, id, labels`) — **not** a flat table. The stats fields are packed
+as a JSON object inside the `Line` column, e.g. `Line = "{\"n\":\"7523190\"}"`.
+Always parse the `Line` JSON with `fromjson` before reading the stats fields; a
+bare `transpose | @tsv` produces garbage.
+
+Copy this tested program verbatim (works for any number of stat fields and for
+time-bucketed `_time:Xh` stats):
+
+```bash
+curl -sS ... | jq -r '
+  .results.A.frames[0] as $f
+  | if $f == null then "no stats" else
+      $f.data.values | transpose[]
+      | (.[1] | fromjson) as $s
+      | "\(.[0] / 1000 | floor | strftime("%m-%d %H:%M:%S"))\t\($s | to_entries | map("\(.key)=\(.value)") | join("  "))"
+    end'
+```
+
+For non-time-bucketed stats (e.g. `| stats by (severity_text) count(*) as n`),
+the dimension values land in the `labels` column instead of `Time`; replace the
+`strftime` with `.[3] | to_entries | map("\(.key)=\(.value)") | join(",")`.
 
 ## LogsQL Query Patterns
 
@@ -48,7 +98,9 @@ Combine with `AND` / `OR` / `NOT`:
 - `field:range(4.2, Inf)`: numeric range match on a field.
 - `field:*`: field exists.
 - `field:""`: field does not exist.
-- `*:"word"`: word match across all fields.
+- `*:"word"`: word match across all fields. (prefer this when it is not clear
+  which field contains the value, e.g. for error messages that may be in `_msg`
+  or `error.message` or `log.error`).
 
 ### Combining Filters
 

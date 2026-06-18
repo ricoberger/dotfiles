@@ -1,13 +1,15 @@
 ---
 name: sre-kubernetes
 description: |
-  Inspect a Kubernetes cluster — reachable via either an API server URL and
-  bearer token, or a context name from `~/.kube/config` — for failing pods,
-  warning events, recent rollouts, resource pressure, and other state relevant
-  to an SRE alert or question. Triggers when the user asks about pod /
-  deployment / node health, references a cluster URL + token, names a
-  kubeconfig context, or when `sre-analyze-alert` needs cluster-side evidence.
-  Read-only by default; destructive actions require explicit confirmation.
+  Inspect a Kubernetes cluster — reachable via an API server URL and bearer
+  token, a context name from `~/.kube/config`, or a Grafana datasource proxy —
+  for failing pods, warning events, recent rollouts, resource pressure, and
+  other state relevant to an SRE alert or question. Triggers when the user
+  asks about pod / deployment / node health, references a cluster URL +
+  token, names a kubeconfig context, points at a Grafana instance with a
+  Kubernetes datasource, or when `sre-analyze-alert` needs cluster-side
+  evidence. Read-only by default; destructive actions require explicit
+  confirmation.
 ---
 
 # SRE: Kubernetes
@@ -18,7 +20,7 @@ cluster state without explicit user approval.
 
 ## Inputs
 
-The skill accepts **one of two** input modes. Ask the user which they want to
+The skill accepts **one of three** input modes. Ask the user which they want to
 use if it is not clear, and require the corresponding fields before issuing API
 calls:
 
@@ -43,6 +45,29 @@ kubectl config get-contexts -o name | grep -Fx "$CONTEXT"
 
 If the lookup returns nothing, ask the user to correct the context name or
 switch to Mode A — do not silently fall back to the current context.
+
+### Mode C — Grafana Datasource Proxy
+
+Use this mode when the user has provided a Grafana instance (URL + bearer token)
+that exposes a Kubernetes datasource, and you have no direct `kube-apiserver`
+reachability or kubeconfig context. The Grafana plugin proxies arbitrary
+API-server requests through Grafana's auth:
+
+| Input            | Example                                                        |
+| ---------------- | -------------------------------------------------------------- |
+| Grafana base URL | `https://grafana.example.com`                                  |
+| Grafana token    | Bearer token for Grafana (not the cluster's serviceaccount)    |
+| Datasource UID   | UID of a `ricoberger-kubernetes-datasource`, e.g. `kubernetes` |
+
+The proxy endpoint is
+`<GRAFANA>/api/datasources/proxy/uid/<DSUID>/proxy/<KUBE-API-PATH>`, and the
+caller is whichever serviceaccount the datasource is configured with — so the
+available verbs are whatever that SA was granted (typically read-only).
+
+Resolve the datasource UID via the `sre-grafana` skill (Step 0) if not supplied;
+the Kubernetes datasource has `type: ricoberger-kubernetes-datasource`.
+`sre-analyze-alert` invocations always pass the alert's `Grafana URL` /
+`Grafana Credentials` plus the well-known UID `kubernetes` — use those verbatim.
 
 ## Choosing the Access Method
 
@@ -72,12 +97,44 @@ Pick the path that matches the input mode the user provided:
      "$API/api/v1/namespaces/$NS/pods" | jq '.items[] | {name: .metadata.name, phase: .status.phase}'
    ```
 
+4. **Raw `curl` through the Grafana proxy** (Mode C). The path component after
+   `proxy/` is the **literal Kubernetes API path** — same paths you would hit
+   directly, just prefixed with the proxy URL:
+
+   ```bash
+   curl -sS -H "Authorization: Bearer $GRAFANA_TOKEN" \
+     "$GRAFANA/api/datasources/proxy/uid/$DSUID/proxy/api/v1/namespaces/$NS/pods" \
+     | jq '.items[] | {name: .metadata.name, phase: .status.phase}'
+   ```
+
+   `kubectl` is **not usable in Mode C** — the proxy expects raw API paths, not
+   kubectl URL shapes. Translate the kubectl commands in the triage checklist
+   below to their equivalent REST paths:
+
+   | kubectl shorthand        | REST path                                                         |
+   | ------------------------ | ----------------------------------------------------------------- |
+   | `get pods -n $NS`        | `/api/v1/namespaces/$NS/pods`                                     |
+   | `get pod $POD -n $NS`    | `/api/v1/namespaces/$NS/pods/$POD`                                |
+   | `get events -n $NS`      | `/api/v1/namespaces/$NS/events?fieldSelector=type=Warning`        |
+   | `get deploy $D -n $NS`   | `/apis/apps/v1/namespaces/$NS/deployments/$D`                     |
+   | `get sts $S -n $NS`      | `/apis/apps/v1/namespaces/$NS/statefulsets/$S`                    |
+   | `logs $POD -c $C -n $NS` | `/api/v1/namespaces/$NS/pods/$POD/log?container=$C&tailLines=200` |
+   | `get <crd> -n $NS`       | `/apis/<group>/<version>/namespaces/$NS/<plural>`                 |
+
+   `kubectl top` and `kubectl describe` have no proxy equivalent — for resource
+   pressure in Mode C, prefer the `sre-grafana` skill
+   (`container_memory_working_set_bytes`, `container_cpu_usage_seconds_total`);
+   for "describe" output, fetch the resource JSON and inspect
+   `.status.conditions`, `.status.containerStatuses[]`, and an `events` query
+   filtered by `involvedObject.name=$POD`.
+
 All paths require **read-only** verbs (`get`, `list`, `describe`, `logs`, `top`)
 unless the user explicitly approves a write.
 
 > The command examples in the rest of this skill use the Mode A form
 > (`--server` + `--token`). When operating in Mode B, replace those flags with
-> `--context="$CONTEXT"`.
+> `--context="$CONTEXT"`. When operating in Mode C, translate to the REST path
+> through the Grafana proxy as shown above.
 
 ## Standard Triage Checklist
 

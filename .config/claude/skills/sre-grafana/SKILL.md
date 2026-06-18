@@ -107,6 +107,14 @@ Handle the common inputs as follows:
 If only one bound is provided, fill the other from context: a lone start
 defaults the end to `now`; a lone end defaults the start to `end - 1h`.
 
+Convert RFC3339 to Unix-ms with this one-liner (BSD/macOS first, GNU fallback)
+instead of re-deriving the `date` flags each time:
+
+```bash
+TS=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "2026-06-03T12:00:00Z" +%s 2>/dev/null \
+  || date -u -d "2026-06-03T12:00:00Z" +%s)000
+```
+
 ## Step 2 — Run the Query
 
 Every query goes through one of two HTTP patterns:
@@ -119,6 +127,37 @@ Every query goes through one of two HTTP patterns:
 
 Pass the `from` / `to` window resolved in Step 1 explicitly on every request; do
 not rely on Grafana defaults.
+
+### Command Mechanics
+
+Two rules that prevent the most common self-inflicted round-trips:
+
+1. **Shell state does not persist between tool invocations.** Exported variables
+   are gone by the next command. When resolving credentials from
+   `$GRAFANA_INSTANCES`, prefix **every** command with the resolution block
+   (never echo the token):
+
+   ```bash
+   GRAFANA=$(printenv GRAFANA_INSTANCES | jq -r '."<instance>".url')
+   TOKEN=$(eval "$(printenv GRAFANA_INSTANCES | jq -r '."<instance>".auth.tokenCommand')")
+   ```
+
+2. **Copy templates verbatim; do not re-derive them.** The request bodies and
+   the response-rendering `jq` programs in the per-datasource references are
+   tested — hand-rewriting them (escaped-quote JSON bodies, ad-hoc
+   frame-alignment jq) is the top source of wasted iterations. Copy the matching
+   reference's snippet and change only the marked parts.
+
+3. **Construct request bodies with `jq -n`, never with shell `-d '...'`
+   interpolation.** Every datasource reference's request template uses
+   `jq -n --arg expr "$QUERY" '…' | curl --data-binary @-` for a reason: the
+   moment a query contains a `"` — and almost every real query does
+   (`{job="api"}`, `k8s.namespace.name:="grafana"`,
+   `{resource.service.name = "frontend"}`, `{ requestSource: "eyeball" }`) —
+   shell interpolation closes the JSON string early, the body becomes malformed,
+   and the API returns an **empty result indistinguishable from "no matches"**.
+   If you find yourself debugging an empty response, first verify the body you
+   actually sent is valid JSON.
 
 The exact request body, query syntax, gotchas, and worked examples differ per
 datasource. After resolving the UID in Step 0, open the matching reference and
@@ -136,8 +175,8 @@ follow it:
 ### Discovering Existing Dashboards
 
 Existing dashboards capture the queries the team already trusts — reuse them
-instead of inventing your own. There are two situations where you should look
-for one:
+instead of inventing your own. Trigger a dashboard search in any of these
+situations:
 
 **1. When investigating an alert.** Check the alert's annotations in this order:
 
@@ -151,6 +190,31 @@ for one:
   through as template variables (`scopedVars`) when running the dashboard's
   queries so they resolve to the labels the alert is actually about.
 
+Once you have the dashboard JSON, **enumerate every panel grouped by its row** —
+do not stop at the first text/timeseries panel. Runbook dashboards typically
+hide the operationally useful checks (resource list, recent events, container
+logs, related metrics) behind collapsed rows further down. A row's nested panels
+live in `panels[].panels` when the row is collapsed and as the next sibling
+panels in document order when it is expanded; handle both:
+
+```bash
+curl -sS -H "Authorization: $TOKEN" "$GRAFANA/api/dashboards/uid/$UID" \
+  | jq -r '
+      [.dashboard.panels[]] as $top
+      | $top
+      | reduce .[] as $p ({row: "(no row)", out: []};
+          if $p.type == "row"
+            then .row = $p.title
+                 | .out += [($p.panels // [])[] | {row: $p.title, title, type}]
+            else .out += [{row: .row, title: $p.title, type: $p.type}]
+          end)
+      | .out[] | "\(.row)\t\(.type)\t\(.title)"'
+```
+
+Then run each panel's `targets[]` queries (passing the `var-*` values from the
+runbook URL as `scopedVars`) so you cover the runbook's full checklist, not just
+its intro.
+
 **2. When asked to analyze the health of a service.** Search for dashboards that
 already describe that service, in this order:
 
@@ -159,6 +223,14 @@ already describe that service, in this order:
 2. Folder match — list folders via `/api/folders`, and if one matches the
    service name, list its dashboards with `query=&folderUIDs=<uid>`.
 3. Free-text search — `query=<service>` as a fallback.
+
+**3. When asked a broad / exploratory question about a system, traffic pattern,
+or datasource.** Questions like "what does Cloudflare traffic look like on
+prod-de1", "show me the top X by Y", "how is namespace Z doing", or "is anything
+unusual on cluster N" almost always have a curated dashboard behind them. Before
+crafting ad-hoc queries, search by the most prominent noun in the question
+(datasource name, namespace, cluster, subsystem) using the same tag → folder →
+free-text order as #2.
 
 If exactly one dashboard is found, **ask the user** whether to use it before
 running its queries. If multiple are found, list them (title + folder + UID) and
@@ -196,10 +268,63 @@ Raw API output is verbose. Always reduce it before reporting:
 
 When in doubt, include the exact query you ran so the user can re-execute it.
 
+### Rolling Hourly Buckets Into Daily Totals
+
+Multi-day rate analyses almost always want a per-day summary. Copy this jq
+verbatim — it works on any single-frame `[timestamps, values]` response
+(Prometheus, single-series Cloudflare, VictoriaLogs `| stats by (_time:1h)`
+after `fromjson`-extracting the count into a numeric array):
+
+```bash
+jq -r '
+  .results.A.frames[0].data.values as $v
+  | [range(0; ($v[0] | length))]
+  | map({t: $v[0][.], n: ($v[1][.] | tonumber)})
+  | group_by(((.t/1000) | strftime("%Y-%m-%d")))
+  | map({
+      day:   (((.[0].t/1000) | strftime("%Y-%m-%d (%a)"))),
+      total: (map(.n) | add),
+      hours: length,
+      peak:  (map(.n) | max),
+      min:   (map(.n) | min)
+    })
+  | .[] | "\(.day)  total=\(.total)  hours=\(.hours)  peak/h=\(.peak)  min/h=\(.min)"'
+```
+
+For VictoriaLogs `| stats` results the count lives inside the `Line` JSON, so
+swap the `map(...)` line for
+`map({t: $v[0][.], n: ($v[1][.] | fromjson.n | tonumber)})`.
+
+### Correlating Two Signals
+
+When the question is "does signal A look like signal B?" (e.g. Cloudflare edge
+vs Istio origin request rate, error rate vs latency, two clusters side-by-side):
+
+1. Query **both signals into identical time buckets** — pick the same step
+   (`_time:1h`, `datetimeHour`, Prometheus `step=1h`) on both sides so rows line
+   up without resampling.
+2. Aggregate each side to the same granularity you intend to compare at (usually
+   per-day totals — reuse the day-rollup snippet above).
+3. Render as a **side-by-side table** with one column per signal and a **ratio**
+   column (`B/A`). The ratio is the actual insight.
+4. Call out whether the ratio is **stable** across the window (expected
+   relationship — e.g. ~88 % cache pass-through) or **varies** (something
+   diverged on a specific day/hour — that is the lead).
+5. Confirm the same shape: peak hours, weekday/weekend rhythm, and trough timing
+   should match on both sides. A shape mismatch with a stable ratio is
+   suspicious.
+
+Do not just paste both tables and let the user diff them — the ratio and the
+stability assessment are the work.
+
 ## Common Pitfalls
 
 - **Wrong UID**: the Grafana UI shows datasource _names_; the API uses _UIDs_.
   Resolve UIDs first (or use the well-known UIDs from Step 0).
+- **Malformed body from shell interpolation**:
+  `-d '{... "expr": "'"$QUERY"'" ...}'` silently corrupts as soon as `$QUERY`
+  contains a `"`. Always build the body with `jq -n --arg …` and pipe into
+  `curl --data-binary @-` (see Step 2, Command Mechanics rule 3).
 - **Wrong syntax dialect**: LogsQL is **not** LogQL / Loki.
   `{namespace="x"} |= "error"` returns nothing because the parser silently
   fails. Use `k8s.namespace.name:="x" AND error | sort by (_time) desc` instead.
@@ -209,6 +334,13 @@ When in doubt, include the exact query you ran so the user can re-execute it.
 - **Empty result != healthy**: an empty LogsQL response can mean "no logs match"
   OR "wrong field selector". Always sanity-check with a broader query (drop the
   field filter, widen the time window).
+- **Sparse series vanish in range queries**: a range query with coarse steps
+  (e.g. daily `increase(metric[1d])`) can return zero or no series for a
+  low-volume counter (a handful of events per day) even though the events are
+  real — the evaluation timestamps miss the samples. Before trusting a zero,
+  cross-check with an instant query over the whole window
+  (`increase(metric[24h])` with `"instant": true`); if the instant query
+  disagrees, narrow with instant queries instead of range steps.
 - **Cardinality explosions**: avoid `by (pod)` aggregations across the whole
   cluster — scope to a namespace first.
 - **Token redaction**: never echo the bearer token, never write it to a temp

@@ -20,16 +20,22 @@ expects a structured investigation that ends with a root cause and a fix.
 Alerts are usually pasted as a markdown block from Grafana Alertmanager. Parse
 out at least the following fields before you start investigating:
 
-| Field                     | Where to find it                  | Used for                                          |
-| ------------------------- | --------------------------------- | ------------------------------------------------- |
-| `alertname`               | Title and `Labels`                | Naming the incident, finding runbook              |
-| `Grafana URL`             | Top of payload                    | Base URL for all Grafana API calls                |
-| `Grafana Credentials`     | Top of payload (`Bearer <token>`) | Authentication header                             |
-| `Started` timestamp       | Top of payload                    | Anchors the time window for queries               |
-| `Summary` / `Description` | Body                              | First-pass hypothesis, often contains the runbook |
-| `runbook_url`             | `Annotations`                     | Pre-existing playbook — always check it first     |
+| Field                     | Where to find it                                                                        | Used for                                          |
+| ------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `alertname`               | Title and `Labels`                                                                      | Naming the incident, finding runbook              |
+| `Grafana URL`             | Top of payload                                                                          | Base URL for all Grafana API calls                |
+| `Grafana Credentials`     | Top of payload (`Bearer <token>`)                                                       | Authentication header                             |
+| `Started` / `activeAt`    | Top of payload (alertmanager) / `data.groups[].rules[].alerts[].activeAt` (Grafana API) | Anchors the time window for queries               |
+| `Summary` / `Description` | Body                                                                                    | First-pass hypothesis, often contains the runbook |
+| `runbook_url`             | `Annotations`                                                                           | Pre-existing playbook — always check it first     |
 
 If any of these are missing, ask the user before guessing.
+
+> When the alert was fetched via `references/grafana-alert-source.md` (URL-only
+> input), the alertmanager-style `Started` field is not present — use the
+> alert's `activeAt` timestamp as `Started` everywhere downstream (time window,
+> report header). They refer to the same event: the moment the alert first
+> became active in this firing cycle.
 
 > **Note:** If the user only provides an alert url in the format
 > `<grafana-url>/alerting/<grafana-alertmanager-datasource>/<alert-id>/view`
@@ -50,6 +56,16 @@ obvious, confirm it with data before claiming a root cause.
   (widen if the alert has been firing for hours).
 - Open the runbook URL if present and follow its check-list — those checks are
   authored by the team that owns the alert and usually point at the real cause.
+
+> **`Started` is when the alert threshold was crossed, not when the underlying
+> failure began.** Many alerts are rate- or quantile-based
+> (`rate(...)[30m] > 0`, `for: 10m`, `keep_firing_for: 30m`) and can flap in/out
+> of firing while the underlying resource has been broken for days. Once you
+> have identified the offending object in phase 3 or 4, **check its
+> `creationTimestamp`, `deletionTimestamp`, last rollout revision, or
+> last-modified timestamp**. If any of those predate `Started`, widen the query
+> window back to that earlier event for the next round of queries and note the
+> lag in the report — anchoring only on `Started` will hide the real onset.
 
 ### 2. Form a Hypothesis
 
@@ -146,6 +162,20 @@ One short paragraph connecting the cause to the alert expression.
 
 high / medium / low, with the main remaining unknown if not high.
 ```
+
+Use the rubric below to pick a level — do not freestyle it. If the evidence fits
+multiple rows, take the **lowest** matching level:
+
+| Level      | All of these are true                                                                                                                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **high**   | The failing object is named (pod / CR / query / config file). At least one log line, error message, or status condition literally names the failure mode. The metric anomaly is reproducible with the exact query in the report. No contradictions between metrics, logs, and cluster state. |
+| **medium** | The failing component is localized (one workload, one node, one client) but the precise trigger is inferred from circumstantial evidence (e.g. a rollout timestamp aligns, but no error message confirms causation). One signal class (metrics / logs / cluster) is missing or partial.      |
+| **low**    | Only correlation, no naming evidence. Or: two signals disagree and the chosen cause requires discounting one of them. Or: the alert's metric is reproducible but the underlying cause is a guess from a known failure-mode catalogue rather than from this incident's data.                  |
+
+For anything below `high`, the report's confidence line must state the single
+strongest remaining unknown (e.g. "did the 13:42 rollout actually run on this
+node?", "is the 409 from the receiver-still-referenced check or something
+else?") — that is the next investigation step if confidence needs raising.
 
 ## Hard Rules
 

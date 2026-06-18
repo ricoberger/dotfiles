@@ -5,21 +5,28 @@ Use this reference for datasource `type` values `tempo`. Queries go through
 
 ## Request
 
+Build the JSON body with `jq -n` and pipe it into `curl --data-binary @-`.
+**Never** interpolate `$TRACEQL` directly into a `-d '{...}'` string — any
+TraceQL filter containing a `"` (e.g. `{resource.service.name = "frontend"}`)
+silently corrupts the JSON and the API returns an empty result indistinguishable
+from "no traces":
+
 ```bash
-curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
-  -X POST "$GRAFANA/api/ds/query" \
-  -d '{
-    "queries": [{
-      "refId": "A",
-      "datasource": { "uid": "'"$DATASOURCEUID"'", "type": "tempo" },
-      "queryType": "traceql",
-      "limit": '"${LIMIT:-20}"',
-      "metricsQueryType": "range",
-      "query": "'"$TRACEQL"'"
-    }],
-    "from": "'"$FROM"'",
-    "to": "'"$TO"'"
-  }'
+jq -n \
+  --arg uid    "$DATASOURCEUID" \
+  --arg query  "$TRACEQL" \
+  --arg from   "$FROM" \
+  --arg to     "$TO" \
+  --argjson limit "${LIMIT:-20}" \
+  '{queries:[{refId:"A",
+              datasource:{uid:$uid, type:"tempo"},
+              queryType:"traceql",
+              limit:$limit,
+              metricsQueryType:"range",
+              query:$query}],
+    from:$from, to:$to}' \
+| curl -sS -H "Authorization: $TOKEN" -H "Content-Type: application/json" \
+       -X POST "$GRAFANA/api/ds/query" --data-binary @-
 ```
 
 ## TraceQL Query Patterns
