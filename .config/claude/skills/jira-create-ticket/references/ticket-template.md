@@ -6,6 +6,10 @@ Every ticket follows this exact structure, in order:
 
 ---
 
+**Title:** `<concise ticket title>`
+
+---
+
 **[User Story]**
 
 As a `<persona>`, I want to `<goal>`, so that `<benefit>`.
@@ -28,6 +32,8 @@ As a `<persona>`, I want to `<goal>`, so that `<benefit>`.
 
 ## Writing Rules
 
+- **Title**: One concise line summarizing the work. Maps to the Jira summary
+  (acli `--summary`). Do not duplicate it inside the description.
 - **User story**: Fill in the three blanks with concrete, specific language.
   `persona` is a role (e.g. "logged-in user", "admin", "data analyst"). `goal`
   is an action. `benefit` is the business or user value.

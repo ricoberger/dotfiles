@@ -3,11 +3,6 @@
   "autoupdate": false,
   "lsp": false,
   "mcp": {
-    "atlassian": {
-      "enabled": false,
-      "type": "remote",
-      "url": "https://mcp.atlassian.com/v1/mcp/authv2"
-    },
     "backstage": {
       "enabled": false,
       "type": "remote",
