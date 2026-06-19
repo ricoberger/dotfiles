@@ -5,6 +5,7 @@
 # Usage: fzfj [JQL]
 #
 # Requires: acli jira auth login --web
+# Reference: https://developer.atlassian.com/cloud/acli/reference/commands/jira/
 
 SCRIPT="$(realpath "$0")"
 
@@ -27,6 +28,24 @@ FZFJ_DEFAULT_FILTERS=(
   "Backlog|project = CORE AND status = \"Backlog\" AND issuetype != \"Sub-Task\" AND issuetype != \"Epic\" ORDER BY created DESC"
 )
 
+# Link types offered by the link-create picker. Each entry is
+# "Label|TypeName|direction" where direction is "out" (the selected work item
+# is the outward/source side) or "in" (the selected work item is the inward
+# side). The stable TypeName is passed to acli; the direction decides which
+# work item becomes --out and which becomes --in. Override the whole list at
+# runtime via the FZFJ_LINK_TYPES env var (newline-separated entries).
+FZFJ_DEFAULT_LINK_TYPES=(
+  "blocks|Blocks|out"
+  "is blocked by|Blocks|in"
+  "relates to|Relates|out"
+  "duplicates|Duplicate|out"
+  "is duplicated by|Duplicate|in"
+  "clones|Cloners|out"
+  "is cloned by|Cloners|in"
+  "tests|Tests|out"
+  "is tested by|Tests|in"
+)
+
 FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
 
 # ---------- List mode ----------
@@ -35,9 +54,12 @@ FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,la
 # environment (FZFJ_JQL) so the fzf reload binding stays quoting-safe.
 
 if [[ "$1" == "__list" ]]; then
+  # An optional second argument overrides FZFJ_JQL (used by the link-create
+  # target picker to feed a project-wide query through the same renderer).
+  list_jql="${2:-$FZFJ_JQL}"
   err="$(mktemp)"
   out="$(acli jira workitem search \
-    --jql "$FZFJ_JQL" \
+    --jql "$list_jql" \
     --limit "$FZFJ_LIMIT" \
     --json 2>"$err")"
   status=$?
@@ -79,6 +101,37 @@ if [[ "$1" == "__preview" ]]; then
   [[ -z "$key" ]] && exit 0
 
   acli jira workitem view "$key" --fields "*all"
+
+  links="$(acli jira workitem view "$key" --fields issuelinks --json 2>/dev/null)"
+  if [[ -n "$links" ]]; then
+    echo
+    printf '%s' "$links" | jq -r '
+      def pad(s; n): (s + (" " * 60))[0:n];
+      def color(c):
+        {
+          green: "32",
+          yellow: "33",
+          "blue-gray": "34",
+          brown: "33",
+          "medium-gray": "37",
+          "warm-red": "31"
+        }[c] // "37";
+      (.fields.issuelinks // []) as $links
+      | "─── Links (\($links | length)) ───",
+        "",
+        ($links[]
+          | select(.outwardIssue or .inwardIssue)
+          | (if .outwardIssue
+             then {dir: (.type.outward // .type.name), iss: .outwardIssue}
+             else {dir: (.type.inward // .type.name), iss: .inwardIssue} end) as $l
+          | ($l.iss.fields.status.statusCategory.colorName // "medium-gray") as $c
+          | "  " + pad(($l.dir // "-"); 16) + " "
+            + pad(($l.iss.key // "-"); 12) + " "
+            + "\u001b[" + color($c) + "m" + pad(($l.iss.fields.status.name // "-"); 14) + "\u001b[0m" + " "
+            + (($l.iss.fields.summary // "-") | gsub("[\t\n\r]"; " "))
+        )
+    '
+  fi
 
   comments="$(acli jira workitem comment list --key "$key" --json 2>/dev/null)"
   if [[ -n "$comments" ]]; then
@@ -274,6 +327,147 @@ if [[ "$1" == "__action" ]]; then
       read -n 1 -s -r -p "Press any key to continue..."
       ;;
 
+    link)
+      # Render the work item's existing links as tab-delimited rows:
+      #   <linkId>\t<linkedKey>\t<display>
+      # The two machine fields stay hidden from the picker (--with-nth 3) but
+      # remain addressable in bindings via {1}/{2} (extracted from the
+      # original line). An empty list yields a single placeholder row.
+      rows="$(acli jira workitem view "$key" --fields issuelinks --json 2>/dev/null | jq -r '
+        def pad(s; n): (s + (" " * 60))[0:n];
+        def color(c):
+          {
+            green: "32",
+            yellow: "33",
+            "blue-gray": "34",
+            brown: "33",
+            "medium-gray": "37",
+            "warm-red": "31"
+          }[c] // "37";
+        (.fields.issuelinks // []) as $links
+        | if ($links | length) == 0 then
+            "\t\t(no links, use alt-n to create a new link)"
+          else
+            $links[]
+            | select(.outwardIssue or .inwardIssue)
+            | (if .outwardIssue
+               then {dir: (.type.outward // .type.name), iss: .outwardIssue}
+               else {dir: (.type.inward // .type.name), iss: .inwardIssue} end) as $l
+            | ($l.iss.fields.status.statusCategory.colorName // "medium-gray") as $c
+            | (.id // "") + "\t" + ($l.iss.key // "") + "\t"
+              + pad(($l.dir // "-"); 16) + " "
+              + pad(($l.iss.key // "-"); 12) + " "
+              + "\u001b[" + color($c) + "m" + pad(($l.iss.fields.status.name // "-"); 14) + "\u001b[0m" + " "
+              + (($l.iss.fields.summary // "-") | gsub("[\t\n\r]"; " "))
+          end
+      ')"
+
+      out="$(printf '%s\n' "$rows" | fzf \
+        --ansi \
+        --delimiter $'\t' \
+        --with-nth 3 \
+        --prompt "󰌹 Links $key: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS" \
+        --expect=alt-n,alt-d)"
+      [[ $? -ne 0 ]] && exit 0
+
+      pressed="$(printf '%s\n' "$out" | sed -n '1p')"
+      selline="$(printf '%s\n' "$out" | sed -n '2p')"
+      linkid="$(printf '%s' "$selline" | cut -f1)"
+      linkedkey="$(printf '%s' "$selline" | cut -f2)"
+
+      case "$pressed" in
+        alt-d)
+          [[ -z "$linkid" ]] && exit 0
+          confirm="$(printf '%s\n' "No" "Yes" | fzf \
+            --prompt "󰩺 Delete link to ${linkedkey:-?}: " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")"
+          [[ "$confirm" != "Yes" ]] && exit 0
+          if ! acli jira workitem link delete --id "$linkid" --yes; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+
+        alt-n)
+          # 1. Pick a target work item from the project (project-wide recent
+          #    query through the same renderer), excluding the current key.
+          #    --print-query lets a typed key that isn't in the window be used.
+          target_rows="$("$SCRIPT" __list "project = $FZFJ_PROJECT AND statusCategory != Done ORDER BY updated DESC" 2>/dev/null \
+            | awk -v k="$key" 'NF && $1 != k')"
+          tsel="$(printf '%s\n' "$target_rows" | fzf \
+            --ansi \
+            --print-query \
+            --prompt "󰌹 Link $key: " \
+            --header "KEY          STATUS         SUMMARY" \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")"
+          case $? in
+            0) target="$(printf '%s\n' "$tsel" | sed -n '2p' | awk '{print $1}')" ;;
+            1) target="$(printf '%s\n' "$tsel" | sed -n '1p' | tr -d '[:space:]')" ;;
+            *) exit 0 ;;
+          esac
+          [[ -z "$target" ]] && exit 0
+
+          # 2. Pick a directional link type from the curated list.
+          ltypes=()
+          if [[ -n "$FZFJ_LINK_TYPES" ]]; then
+            while IFS= read -r ltline; do
+              [[ -n "$ltline" ]] && ltypes+=("$ltline")
+            done <<< "$FZFJ_LINK_TYPES"
+          else
+            ltypes=("${FZFJ_DEFAULT_LINK_TYPES[@]}")
+          fi
+
+          ltlabel="$(printf '%s\n' "${ltypes[@]%%|*}" | fzf \
+            --prompt "󰌹 $key … $target: " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")"
+          [[ -z "$ltlabel" ]] && exit 0
+
+          ltname=""
+          ltdir=""
+          for lt in "${ltypes[@]}"; do
+            if [[ "${lt%%|*}" == "$ltlabel" ]]; then
+              rest="${lt#*|}"
+              ltname="${rest%%|*}"
+              ltdir="${rest##*|}"
+              break
+            fi
+          done
+          [[ -z "$ltname" ]] && exit 0
+
+          # 3. Map direction to --out / --in and create the link.
+          if [[ "$ltdir" == "in" ]]; then
+            link_out="$target"
+            link_in="$key"
+          else
+            link_out="$key"
+            link_in="$target"
+          fi
+          if ! acli jira workitem link create \
+            --out "$link_out" --in "$link_in" --type "$ltname" --yes; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+
+        *)
+          # enter (or any other accept): open the linked work item.
+          [[ -z "$linkedkey" ]] && exit 0
+          acli jira workitem view "$linkedkey" --fields "*all" | nvim
+          ;;
+      esac
+      ;;
+
     *)
       echo "Unknown action: $action"
       exit 1
@@ -307,6 +501,7 @@ Keybindings:
   alt-c   : add a comment to the work item (opens in nvim)
   alt-e   : edit the work item (type / summary / description)
   alt-n   : create a new work item
+  alt-l   : manage links (list / delete / create)
   alt-o   : open the work item in the web browser
   alt-r   : reload the list
   ctrl-p  : toggle preview
@@ -315,17 +510,28 @@ Keybindings:
   ctrl-f  : preview half page down
   ctrl-b  : preview half page up
 
-The preview shows the work item details followed by its comment thread.
+The preview shows the work item details, its links, and its comment thread.
+
+In the links picker (alt-l):
+  enter   : open the linked work item
+  alt-d   : delete the highlighted link (after confirmation)
+  alt-n   : create a new link (pick a target work item, then a link type)
+  esc     : back to the list
 
 Environment:
-  FZFJ_LIMIT     Max work items to fetch (default: 250)
-  FZFJ_PROJECT   Project for newly created work items (default: CORE)
-  FZFJ_FILTERS   Override the filter picker entries. Newline-separated
-                 "Name|JQL" entries, e.g.
-                 $'Mine|assignee = currentUser()\nBugs|type = Bug'
-  FZFJ_STATUSES  Comma-separated transition statuses
-                 (default: CORE project statuses, e.g.
-                 "Open,Backlog,In Progress,In Review,Done,Won't do")
+  FZFJ_LIMIT      Max work items to fetch (default: 250)
+  FZFJ_PROJECT    Project for newly created work items (default: CORE)
+  FZFJ_FILTERS    Override the filter picker entries. Newline-separated
+                  "Name|JQL" entries, e.g.
+                  $'Mine|assignee = currentUser()\nBugs|type = Bug'
+  FZFJ_STATUSES   Comma-separated transition statuses
+                  (default: CORE project statuses, e.g.
+                  "Open,Backlog,In Progress,In Review,Done,Won't do")
+  FZFJ_LINK_TYPES Override the link-type picker entries. Newline-separated
+                  "Label|TypeName|direction" entries, where direction is
+                  "out" (selected item is the outward side) or "in"
+                  (selected item is the inward side), e.g.
+                  $'blocks|Blocks|out\nis blocked by|Blocks|in'
 EOF
 }
 
@@ -374,6 +580,7 @@ export FZFJ_JQL
 export FZFJ_LIMIT
 export FZFJ_STATUSES
 export FZFJ_PROJECT
+export FZFJ_LINK_TYPES
 
 # Pre-flight: validate the query / auth and bail out cleanly on errors or no
 # results, rather than dropping into an empty picker.
@@ -410,6 +617,7 @@ fzf \
   --bind "alt-c:execute($ACTION comment {1})+refresh-preview" \
   --bind "alt-e:execute($ACTION edit {1})+reload($SCRIPT __list)+refresh-preview" \
   --bind "alt-n:execute($ACTION create)+reload($SCRIPT __list)" \
+  --bind "alt-l:execute($ACTION link {1})+refresh-preview" \
   --bind "alt-o:execute($ACTION web {1})" \
   --preview-window "right:65%" \
   --preview "$SCRIPT __preview {1}" \
