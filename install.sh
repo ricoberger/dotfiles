@@ -68,6 +68,7 @@ cp -r $(pwd)/.config/yazi ~/.config
 # AI
 echo "\n- Copy Claude Configuration"
 rm -rf ~/.claude/skills
+mkdir -p ~/.claude/skills
 cp -r $(pwd)/.config/claude/settings.json ~/.claude/settings.json
 cp -r $(pwd)/.config/claude/skills ~/.claude/skills
 
