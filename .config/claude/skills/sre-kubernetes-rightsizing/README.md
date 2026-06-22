@@ -1,0 +1,30 @@
+# SRE: Kubernetes Right-Sizing
+
+Analyze the resource usage of a Kubernetes `Deployment`, `StatefulSet`, or
+`DaemonSet` over the last 30 days and recommend right-sized CPU/memory requests
+and limits plus autoscaling (KEDA / HPA) improvements. Triggers when the user
+asks to "right-size", "analyze resource usage", "tune requests/limits", "is this
+workload over/under-provisioned", or "improve autoscaling" for a named workload.
+Reads the live cluster spec and 30-day metrics through a single Grafana instance
+(delegating to the `sre-grafana` and `sre-kubernetes` skills), treats the live
+cluster as authoritative and an optional manifest as the verification + apply
+target, and never edits cluster resources directly.
+
+## Prerequisites
+
+Set the `GRAFANA_INSTANCES` environment variable:
+
+```bash
+export GRAFANA_INSTANCES="{\"my-grafana\":{\"url\":\"https://grafana.example.com\",\"auth\":{\"tokenCommand\":\"cat $HOME/.kube/cache/kubectl-grafana/grafana.example.com_kubernetes.json | jq -r '.status.token'\"}}}"
+```
+
+```json
+{
+  "my-grafana": {
+    "url": "https://grafana.example.com",
+    "auth": {
+      "tokenCommand": "cat $HOME/.kube/cache/kubectl-grafana/grafana.example.com_kubernetes.json | jq -r '.status.token'"
+    }
+  }
+}
+```
