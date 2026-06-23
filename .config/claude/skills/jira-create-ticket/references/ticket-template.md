@@ -10,7 +10,7 @@ Every ticket follows this exact structure, in order:
 
 ---
 
-**[User Story]**
+**User Story**
 
 As a `<persona>`, I want to `<goal>`, so that `<benefit>`.
 
@@ -45,4 +45,6 @@ As a `<persona>`, I want to `<goal>`, so that `<benefit>`.
   numbered/counted items (e.g. avoid "at least 3 options" or "2 retries").
 - **Tone**: Short, precise, no filler words. Omit phrases like "In order to" or
   "This ticket aims to".
-- **Format**: Output in Markdown, ready to paste directly into JIRA.
+- **Format**: Show the ticket to the user as Markdown. When creating it in Jira
+  via `acli`, encode the same content as Atlassian Document Format (ADF) so it
+  renders cleanly in the web UI — see `adf-format.md`.

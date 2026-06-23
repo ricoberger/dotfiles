@@ -2,9 +2,10 @@
 name: jira-create-ticket
 description:
   This skill should be used when the user wants to write, create, or generate a
-  Jira ticket. It produces well-structured tickets in Markdown with a user
-  story, background paragraph, and acceptance criteria checklist — ready to
-  paste directly into Jira.
+  Jira ticket. It produces well-structured tickets with a user story, background
+  paragraph, and acceptance criteria checklist — shown as Markdown and created
+  in Jira via Atlassian Document Format (ADF) so they render cleanly in the web
+  UI.
 ---
 
 # Jira Create Ticket
@@ -34,28 +35,22 @@ criteria.
    `acli` in the `CORE` project or if the ticket should be adjusted.
    - If the user wants to create the ticket automatically, ask for the ticket
      type, which can be "Epic", "Story", "Bug", or "Task". Then:
-     1. Write the ticket description to a temporary file (e.g.
-        `/tmp/jira-description.md`). Passing the description via a file instead
-        of an inline `--description` flag avoids broken commands when the
-        description contains double quotes, apostrophes, backticks, or other
-        shell-special characters. Write only the User Story, Background, and
-        Acceptance Criteria sections to this file — never the title, which is
-        passed separately as the summary.
-     2. Create the ticket using `--description-file`:
+     1. Read `references/adf-format.md` to load the ADF structure and the
+        `--from-json` creation strategy.
+     2. Write a single work item JSON file (e.g. `/tmp/jira-workitem.json`)
+        containing `projectKey`, `type`, `summary`, and an ADF `description`.
+        Convert the User Story, Background, and Acceptance Criteria sections
+        into ADF nodes (headings, paragraphs, and a bullet list) — never include
+        the title in the description, since it is the `summary`. Passing the
+        whole work item via a JSON file (instead of inline
+        `--summary`/`--description` flags) avoids broken commands when the title
+        or description contains double quotes, apostrophes, backticks, or other
+        shell-special characters, and ADF ensures the ticket renders cleanly in
+        the Jira web UI.
+     3. Create the ticket using `--from-json`:
         ```bash
-        acli jira workitem create \
-          --project CORE \
-          --type "<ticket-type>" \
-          --summary "<ticket-title>" \
-          --description-file /tmp/jira-description.md
+        acli jira workitem create --from-json /tmp/jira-workitem.json
         ```
-        Replace `<ticket-type>` and `<ticket-title>` with the appropriate values
-        from the generated ticket. `<ticket-title>` is the ticket's **Title**
-        field, which becomes the Jira summary and is never repeated in the
-        description file. Keep the title free of double quotes; if a
-        title must contain them, write it into the file as well and use
-        `--from-file` (first line = summary, remaining lines = description)
-        instead of `--summary`/`--description-file`.
    - If the user wants to adjust the ticket, always output the full updated
      ticket in Markdown again and ask if they want to create it in Jira.
 
@@ -72,5 +67,7 @@ criteria.
 - A ticket title is always suggested as the first line of the ticket
   (`**Title:** ...`). It becomes the Jira summary and is not duplicated in the
   description.
-- Output is Markdown only — no explanations or commentary around the ticket
-  unless the user asks.
+- The ticket shown to the user is Markdown only — no explanations or commentary
+  around it unless the user asks. When creating the ticket in Jira, the same
+  content is encoded as ADF (see `references/adf-format.md`); the wording stays
+  identical, only the format changes.
