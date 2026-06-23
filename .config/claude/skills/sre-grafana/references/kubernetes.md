@@ -5,7 +5,7 @@ Queries go through `/api/datasources/proxy/uid/.../proxy/...`.
 
 ```bash
 curl -sS -H "Authorization: $TOKEN" \
-  "$GRAFANA/api/datasources/proxy/uid/$DATASOURCEUID/proxy/$KUBERNETESAPIPATH"
+  "$GRAFANA/api/datasources/proxy/uid/$DSUID/proxy/$KUBERNETESAPIPATH"
 ```
 
 ### Kubernetes Query Patterns

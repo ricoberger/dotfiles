@@ -14,7 +14,7 @@ indistinguishable from "no data":
 
 ```bash
 jq -n \
-  --arg uid    "$DATASOURCEUID" \
+  --arg uid    "$DSUID" \
   --arg zone   "$ZONE" \
   --arg name   "$METRICNAME" \
   --arg filter "${FILTER:-}" \
@@ -45,7 +45,7 @@ queries and not the zone name:
 
 ```bash
 jq -n \
-  --arg uid  "$DATASOURCEUID" \
+  --arg uid  "$DSUID" \
   --arg from "$FROM" \
   --arg to   "$TO" \
   '{queries:[{refId:"A",

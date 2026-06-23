@@ -13,7 +13,7 @@ from "no traces":
 
 ```bash
 jq -n \
-  --arg uid    "$DATASOURCEUID" \
+  --arg uid    "$DSUID" \
   --arg query  "$TRACEQL" \
   --arg from   "$FROM" \
   --arg to     "$TO" \

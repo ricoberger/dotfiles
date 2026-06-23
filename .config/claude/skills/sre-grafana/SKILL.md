@@ -130,7 +130,7 @@ not rely on Grafana defaults.
 
 ### Command Mechanics
 
-Two rules that prevent the most common self-inflicted round-trips:
+Rules that prevent the most common self-inflicted round-trips:
 
 1. **Shell state does not persist between tool invocations.** Exported variables
    are gone by the next command. When resolving credentials from
@@ -148,7 +148,13 @@ Two rules that prevent the most common self-inflicted round-trips:
    frame-alignment jq) is the top source of wasted iterations. Copy the matching
    reference's snippet and change only the marked parts.
 
-3. **Construct request bodies with `jq -n`, never with shell `-d '...'`
+3. **Never name a shell variable `UID`.** `UID` is a read-only variable in
+   bash/zsh (assigning it errors out and aborts the command). Use a descriptive,
+   non-reserved name for every identifier — `DSUID` for a datasource UID,
+   `DASHBOARD_UID` for a dashboard UID, `FOLDER_UID` for a folder UID. The same
+   applies to other reserved names (`PATH`, `PWD`, `HOME`, `STATUS`).
+
+4. **Construct request bodies with `jq -n`, never with shell `-d '...'`
    interpolation.** Every datasource reference's request template uses
    `jq -n --arg expr "$QUERY" '…' | curl --data-binary @-` for a reason: the
    moment a query contains a `"` — and almost every real query does
@@ -198,7 +204,7 @@ live in `panels[].panels` when the row is collapsed and as the next sibling
 panels in document order when it is expanded; handle both:
 
 ```bash
-curl -sS -H "Authorization: $TOKEN" "$GRAFANA/api/dashboards/uid/$UID" \
+curl -sS -H "Authorization: $TOKEN" "$GRAFANA/api/dashboards/uid/$DASHBOARD_UID" \
   | jq -r '
       [.dashboard.panels[]] as $top
       | $top
@@ -239,7 +245,7 @@ investigation in the wrong direction.
 
 ```bash
 # Fetch a dashboard by UID
-curl -sS -H "Authorization: $TOKEN" "$GRAFANA/api/dashboards/uid/$UID"
+curl -sS -H "Authorization: $TOKEN" "$GRAFANA/api/dashboards/uid/$DASHBOARD_UID"
 
 # Search by tag (preferred for service lookups)
 curl -sS -G -H "Authorization: $TOKEN" "$GRAFANA/api/search" \
@@ -324,7 +330,7 @@ stability assessment are the work.
 - **Malformed body from shell interpolation**:
   `-d '{... "expr": "'"$QUERY"'" ...}'` silently corrupts as soon as `$QUERY`
   contains a `"`. Always build the body with `jq -n --arg …` and pipe into
-  `curl --data-binary @-` (see Step 2, Command Mechanics rule 3).
+  `curl --data-binary @-` (see Step 2, Command Mechanics rule 4).
 - **Wrong syntax dialect**: LogsQL is **not** LogQL / Loki.
   `{namespace="x"} |= "error"` returns nothing because the parser silently
   fails. Use `k8s.namespace.name:="x" AND error | sort by (_time) desc` instead.

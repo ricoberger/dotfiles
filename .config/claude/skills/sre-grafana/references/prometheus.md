@@ -13,7 +13,7 @@ that looks identical to a legitimate "no matches" answer:
 
 ```bash
 jq -n \
-  --arg uid   "$DATASOURCEUID" \
+  --arg uid   "$DSUID" \
   --arg expr  "$PROMQL" \
   --arg from  "$FROM" \
   --arg to    "$TO" \

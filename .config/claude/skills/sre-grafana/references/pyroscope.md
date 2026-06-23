@@ -13,7 +13,7 @@ empty result indistinguishable from "no profiles":
 
 ```bash
 jq -n \
-  --arg uid           "$DATASOURCEUID" \
+  --arg uid           "$DSUID" \
   --arg labelSelector "$LABELSELECTOR" \
   --arg profileTypeId "$PROFILETYPEID" \
   --arg from          "$FROM" \

@@ -18,7 +18,7 @@ empty result that looks identical to a legitimate "no logs" answer:
 
 ```bash
 jq -n \
-  --arg uid   "$DATASOURCEUID" \
+  --arg uid   "$DSUID" \
   --arg expr  "$LOGSQL" \
   --arg from  "$FROM" \
   --arg to    "$TO" \
