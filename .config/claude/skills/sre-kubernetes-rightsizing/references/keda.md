@@ -70,6 +70,16 @@ With the config read above and the 30-day series from `queries.md`:
      threshold or the floor.
    - Metric sits above the threshold most of the time → it is pinned high; the
      threshold is too low or `maxReplicaCount` too small.
+
+   > Trigger queries are frequently **high-cardinality** (mesh/ingress counters
+   > like `istio_requests_total` — thousands of series per workload). Use a
+   > coarse `[30d:1h]` subquery with `rate(...[5m])`, and if a known-present
+   > metric returns an empty frame, **retry once in isolation** before
+   > concluding "never triggers" — an empty there is usually a transient fan-out
+   > timeout, not a real zero (see `queries.md` gotchas). Divide the aggregate
+   > `sum(rate(...))` by the replica count to compare against a per-replica
+   > `threshold`.
+
 3. **Signal vs. real constraint.** If it scales on a domain metric (queue depth,
    RPS) but the 30-day data shows the pods OOMing or CPU-bound, flag that the
    autoscaler will not protect against the binding constraint — recommend either

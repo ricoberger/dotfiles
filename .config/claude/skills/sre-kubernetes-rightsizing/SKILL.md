@@ -10,6 +10,12 @@ description: |
   Grafana instance (delegating to the sre-grafana and sre-kubernetes skills),
   treats the live cluster as authoritative and an optional manifest as the
   verification + apply target, and never edits cluster resources directly.
+  Detects common database and JVM engines (MongoDB, PostgreSQL, Redis, Kafka,
+  ClickHouse, Elasticsearch/OpenSearch, generic JVM) and sizes memory from the
+  engine's own cache/heap model instead of raw working set when an exporter is
+  present. Also recognises page-cache-sensitive non-engine services (Vault,
+  etcd, Loki, BoltDB-backed Go services) that thrash without OOM/PSI, using
+  major page faults as the memory-pressure guard.
 ---
 
 # SRE: Kubernetes Right-Sizing
@@ -32,13 +38,14 @@ apply recommendations to. **This skill never mutates cluster resources.**
 Collect — and confirm — the following before running any queries. Ask the user
 for anything missing; never guess.
 
-| Input            | Required | Notes                                                                               |
-| ---------------- | -------- | ----------------------------------------------------------------------------------- |
-| Grafana instance | yes      | Name resolved from `$GRAFANA_INSTANCES` (same mechanism as the `sre-grafana` skill) |
-| Namespace        | yes      | e.g. `grafana`                                                                      |
-| Workload name    | yes      | e.g. `grafana`                                                                      |
-| Workload kind    | no       | **Auto-detected** from the cluster; only ask if the name is ambiguous               |
-| Manifest file    | no       | Plain rendered YAML of the workload; unlocks drift-check + apply                    |
+| Input            | Required | Notes                                                                                                |
+| ---------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| Grafana instance | yes      | Name resolved from `$GRAFANA_INSTANCES` (same mechanism as the `sre-grafana` skill)                  |
+| Namespace        | yes      | e.g. `grafana`                                                                                       |
+| Workload name    | yes      | e.g. `grafana`                                                                                       |
+| Workload kind    | no       | **Auto-detected** from the cluster; only ask if the name is ambiguous                                |
+| Engine           | no       | **Auto-detected** (DB / JVM) from image + labels + a metric probe; drives engine-aware memory sizing |
+| Manifest file    | no       | Plain rendered YAML of the workload; unlocks drift-check + apply                                     |
 
 ### How To Reach the Data
 
@@ -61,7 +68,7 @@ Do these phases in order. Delegate every metric query to `sre-grafana` and every
 cluster read to `sre-kubernetes` — this skill decides _what_ to ask for and how
 to interpret it, never re-implements API access.
 
-### 1. Resolve the Target
+### 1. Resolve & Classify the Target
 
 Auto-detect the workload kind by looking the name up in the namespace (via
 `sre-kubernetes`, Mode C). Check `Deployment`, then `StatefulSet`, then
@@ -75,6 +82,22 @@ Auto-detect the workload kind by looking the name up in the namespace (via
 
 If more than one kind matches the name, ask the user which one. Record the
 matched kind — it drives pod selection and autoscaling applicability.
+
+**Then classify the engine** (see
+[`references/workloads.md`](references/workloads.md)). Database and JVM
+workloads do not size like stateless services — their memory is a deliberate
+cache/heap ceiling, and the observed working set is partly a function of the
+limit already granted, so trimming it degrades latency while firing **neither
+OOMKills nor PSI** (the generic downsize guards). Match the container image +
+labels to a candidate engine, then **confirm by probing** for that engine's
+exporter metric:
+
+- **Confirmed** → use the engine's memory model, signal metrics and downsize
+  guard in steps 4–5; never replace the generic working-set/PSI analysis, only
+  augment it.
+- **Detected but exporter absent** → fall back to the generic method and state
+  in the report that the engine's memory model was not applied (no exporter).
+- **No engine match** → plain generic method.
 
 ### 2. Read the Live Spec (Authoritative Current Config)
 
@@ -112,15 +135,25 @@ instant queries (do **not** pull raw range series for the stats):
 
 - CPU usage cores: p50, p95, p99, max.
 - Memory working set bytes: p50, p95, p99, max.
-- CPU pressure (PSI) — optional, when `container_pressure_cpu_*` exists
-  (cgroup v2); probe first: some/full-wait p95 + peak. The CPU bottleneck signal
-  that **replaces CFS throttling**, which is structurally dead here (no CPU
-  limits + `cpuCFSQuota` disabled cluster-wide, so the throttling series never
-  exist).
+- CPU pressure (PSI) — optional, when `container_pressure_cpu_*` exists (cgroup
+  v2); probe first: some/full-wait p95 + peak. The CPU bottleneck signal that
+  **replaces CFS throttling**, which is structurally dead here (no CPU limits +
+  `cpuCFSQuota` disabled cluster-wide, so the throttling series never exist).
 - OOMKill and restart signals.
 - Memory pressure (PSI) — optional, when `container_pressure_memory_*` exists
   (cgroup v2); probe first: full-stall p95 + peak. A leading bottleneck signal
   that catches pressure happening _between_ scrapes.
+- **Major page faults** —
+  `container_memory_failures_total{failure_type="pgmajfault"}`; the
+  page-cache-thrash signal that OOMKills **and** PSI both miss. Pull it for any
+  mmap-heavy / page-cache-sensitive workload (a DB/JVM engine, or the non-engine
+  list in `references/workloads.md` — Vault, etcd, Loki, BoltDB-backed Go
+  services) as a memory downsize **guard** (see `references/queries.md`).
+- **Engine signal metrics** — when an engine was confirmed in step 1, also pull
+  its exporter metrics from [`references/workloads.md`](references/workloads.md)
+  (configured cache/heap ceiling, fill ratio, GC time, evictions, cache-hit
+  ratio, query-memory failures, …). These size the memory limit and provide the
+  engine's own downsize guard.
 
 Selection must be **robust to pod churn over 30 days** (rollouts change pod
 names) — prefer the kube-prometheus mixin recording rules when present: the
@@ -145,6 +178,23 @@ The `p95` in the recommendation rules below is the **typical-replica**
 (`avg`-aggregated) p95; the memory-limit `max` is the **hottest-replica**
 (`max`-aggregated) peak.
 
+**Active/standby & leader-elected workloads — size every replica for the hot
+role.** The `avg`-aggregated "typical replica" assumes a load-balanced fleet
+where every pod does comparable work. That breaks for HA sets with one active
+member and idle standbys (Vault, etcd, Redis master/replica, Postgres
+primary/replica, RabbitMQ, most leader-elected controllers): the fleet average
+is diluted by the standbys, but **any** replica can be promoted to the hot role,
+so each must be sized to run it. For these, base **both** the request and the
+limit on the **hottest-replica** (`max`-aggregated) series, not the fleet avg —
+and apply the same numbers to every replica (the StatefulSet/Deployment template
+is uniform). Detect this from the workload kind (often a StatefulSet) plus a
+leader/role signal (`vault_core_active`, `pg_replication_is_replica`,
+`redis_instance_info{role}`, …) or simply a working-set/CPU series where one pod
+is persistently hot and the others sit flat. Verified live: a 3-replica Vault HA
+set showed avg-p95 working set 202Mi but the active leader peaked at the 300Mi
+limit — sizing off the avg would have under-fed whichever pod next won
+leadership.
+
 ### 5. Compute Resource Recommendations
 
 Per container, judge CPU and memory independently:
@@ -157,7 +207,9 @@ Per container, judge CPU and memory independently:
 | Memory limit   | `max × 1.25` (never below peak)    | Memory is incompressible; clear the real peak |
 
 Round CPU to a sane unit (e.g. nearest 10m / 50m) and memory to a sane unit
-(e.g. nearest 8Mi / 16Mi). Verdict per resource:
+(e.g. nearest 8Mi / 16Mi).
+
+Verdict per resource:
 
 - **over-provisioned:** request > usage-p95 × ~2 (or memory limit ≫ max),
   **and** near-zero CPU/memory PSI.
@@ -178,12 +230,44 @@ When memory PSI is available, use it to **disambiguate the memory remediation**
 request _and_ limit; PSI p95 ≈ 0 with peaks + OOMKills ⇒ bursty spikes, raise
 the _limit_ for headroom (request may be fine); PSI ≈ 0 with working set well
 under the limit ⇒ genuine headroom, so trimming is safe. **Never recommend
-downsizing memory without near-zero PSI** — it is the proof the current limit is
-not already biting.
+downsizing memory without near-zero PSI _and_ a baseline (non-elevated)
+major-page-fault rate** — together they are the proof the current limit is not
+already biting; on an mmap-heavy workload PSI can read ≈ 0 while major faults
+are loud (see `references/queries.md` and the page-cache-sensitive section of
+`references/workloads.md`).
 
 **Init containers:** report and size separately, by per-container max — they do
 not run concurrently with app containers, so never fold their usage into the
 main containers' totals.
+
+**Engine-aware memory override (when an engine was confirmed in step 1).** For
+database and JVM engines the `max × 1.25` memory rule above is a **floor, not
+the target** — size the limit from the engine's own ceiling and use the engine's
+pressure signal as the downsize guard, per
+[`references/workloads.md`](references/workloads.md):
+
+- **Memory limit** =
+  `max(engine_ceiling × overhead_factor, working_set_max × 1.25)`, where
+  `engine_ceiling` is the configured cache/heap (WiredTiger cache,
+  `shared_buffers`, `maxmemory`, JVM `-Xmx`, `max_server_memory_usage`). The
+  generic working-set max only floors it.
+- **Downsize guard:** **never** recommend a memory limit below
+  `engine_ceiling × overhead_factor` on working-set/PSI evidence alone — these
+  engines stay resident and degrade on cache eviction / GC thrash / page-cache
+  loss **without OOM or PSI**. Use the engine's own signal (cache-hit ratio,
+  evictions, GC time fraction, query-memory failures) as the proof slack is
+  real; if it shows pressure, raise. The only safe reclaim is to _also_ lower
+  the engine's config — present that as a paired change, never a silent trim.
+- **CPU** keeps the generic `p95 × 1.15` rule, but databases are latency-
+  sensitive: starvation shows as query-latency growth before usage saturates —
+  rely on CPU PSI and never trim a DB's CPU request without near-zero CPU PSI.
+- **JVM heap (any JVM engine — Generic JVM, Kafka, Elasticsearch/OpenSearch):**
+  size `-Xmx` from the **post-GC live set**, not the sampled heap max (a pre-GC
+  peak that overstates need). The live set is the only signal that flags an
+  _over_-sized heap as well as an under-sized one — see **JVM Heap Right-Sizing
+  — Post-GC Live Set** in `references/workloads.md`. Heap and the container
+  limit move together; for ES masters, dropping Xmx (which also frees ~½-heap of
+  direct memory) is often cheaper than enlarging the box.
 
 ### 6. Autoscaling Analysis (Always Run)
 
@@ -195,12 +279,25 @@ greenfield template. Always produce an autoscaling section:
   history the % of time pinned at the floor (over-provisioned floor) vs the
   ceiling (capacity-starved → raise max). Run the trigger's own PromQL over 30
   days to judge whether the `threshold` actually triggers, never crosses, or is
-  always exceeded. Cross-check the scaling signal against the real constraint —
-  if it scales on a custom metric but the pods are the thing OOMing, flag that
-  the autoscaler will not protect against the binding constraint.
+  always exceeded — trigger metrics are often high-cardinality (mesh/ingress
+  counters), so use a coarse `[30d:1h]` step and **retry once** on an empty
+  frame before calling it "never triggers" (see `references/queries.md` fan-out
+  gotcha). Cross-check the scaling signal against the real constraint — if it
+  scales on a custom metric but the pods are the thing OOMing, flag that the
+  autoscaler will not protect against the binding constraint.
 - **VPA present in `Auto` / `Recreate`:** the cluster is already right-sizing —
   **defer**: report findings but recommend no manual resource change to avoid
   fighting the VPA.
+- **VPA present in `Off` (or `Initial`):** it is **not** mutating running pods,
+  so it does not fight a manual change — do **not** defer. Instead read its
+  computed recommendation (`status.recommendation.containerRecommendations[]`:
+  `target`, `lowerBound`, `upperBound`) and use it as an **independent
+  cross-check** on your own numbers. Agreement raises confidence; a large
+  divergence is worth explaining (the VPA cannot see a page-cache-thrash or
+  HA-failover need, and it bins usage that may itself be censored by the current
+  limit). Report it as corroboration, not as the recommendation. Verified live:
+  on a Vault StatefulSet an `Off` VPA recommended mem target ~378Mi / upperBound
+  ~566Mi, corroborating a manual raise from 300Mi to 512Mi.
 - **Nothing found:** a short "no HPA / KEDA / VPA found" note. Then, **for
   Deployments only**, gate on variability (step 4's trend series): if load
   varies meaningfully (e.g. peak ≥ ~2× trough or a clear diurnal pattern),
@@ -223,6 +320,9 @@ recommendation plus enough evidence to trust it, not a narration.
 **Window:** last 30 days · **Source:** <grafana-instance> · **Replicas:**
 observed <min>–<max> (current <N>)
 
+**Engine:** <engine> (exporter present/absent) · ceiling <cache/heap/maxmemory>
+= <value> <!-- only if an engine was classified; omit otherwise -->
+
 ### Drift Check <!-- only if a manifest was provided -->
 
 Manifest vs. live cluster requests/limits — match / differ (table; differences
@@ -234,7 +334,10 @@ flagged).
 | --------- | -------- | ----------- | ----------- | --- | --- | --- | --- | ------- |
 
 Risk flags: OOMKills (count + last seen), CPU pressure (PSI some/full %),
-restarts, memory pressure (full-PSI p95 / peak %, when available).
+restarts, memory pressure (full-PSI p95 / peak %, when available), major page
+faults (p95 / peak per s, for mmap-heavy / page-cache-sensitive workloads).
+Engine signal when classified (cache-hit ratio · evictions · GC time fraction ·
+query-memory failures · cache fill vs ceiling).
 
 ### Recommended Resources <!-- per container -->
 
@@ -244,7 +347,8 @@ restarts, memory pressure (full-PSI p95 / peak %, when available).
 - CPU request X → Y (p95×1.15)
 - CPU limit remove (policy) <!-- only if currently set -->
 - mem request X → Y (p95×1.1)
-- mem limit X → Y (max×1.25)
+- mem limit X → Y (max×1.25, or engine model: cache/heap ceiling — see
+  workloads.md)
 
 ### Autoscaling Analysis
 
@@ -306,10 +410,24 @@ Only after the report, and only when the user explicitly asks to apply:
 - **Never invent usage numbers, percentiles, or timestamps.** If a query
   returned nothing, say so — an empty metric result is a finding (and may mean a
   wrong selector, not "zero usage"). Cross-check suspicious zeros with a broader
-  query.
+  query. For a metric you have **already confirmed is present** (via a `count`
+  probe), an empty result is a **retry signal, not a finding** — re-run it in
+  isolation (and check the per-refId `error`/`status`) before reporting; never
+  let a scripted `// "EMPTY"`-style default disguise a transient fan-out timeout
+  as "no data".
 - **Always include the time window and the exact query / API path** for each
   number, so the user can reproduce it.
 - **Respect controllers.** Do not recommend changes that fight an HPA (CPU
   request coupling) or a VPA in `Auto` mode without flagging the conflict.
+- **Never downsize a classified engine's memory on working set / PSI alone.**
+  Cache- and heap-backed engines (DB / JVM) degrade on eviction, GC thrash, or
+  page-cache loss **without** OOMKills or PSI. Size from the engine's ceiling
+  (`references/workloads.md`), use the engine's own pressure signal as the
+  downsize guard, and only reclaim memory as a change paired with lowering the
+  engine's own config. If the engine was detected but its exporter is absent,
+  say the engine model was not applied. The same caution applies to
+  **page-cache-sensitive non-engine** services (Vault, etcd, Loki, BoltDB-backed
+  Go apps): they too thrash without OOM/PSI — use the major-page-fault rate as
+  the downsize guard (`references/queries.md`, `references/workloads.md`).
 - **Never** echo, log, or write the Grafana bearer token to disk.
 - **Flag QoS-class changes** any recommendation would cause.
