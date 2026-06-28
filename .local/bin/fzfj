@@ -23,7 +23,7 @@ FZFJ_PROJECT="${FZFJ_PROJECT:-CORE}"
 # the FZFJ_FILTERS env var (newline-separated "Name|JQL" entries); otherwise
 # these baked defaults are used.
 FZFJ_DEFAULT_FILTERS=(
-  "Current|project = CORE AND statusCategory != Done AND status != \"Backlog\" AND issuetype != \"Epic\" ORDER BY updated DESC"
+  "Board|project = CORE AND statusCategory != Done AND status != \"Backlog\" AND issuetype != \"Epic\" ORDER BY updated DESC"
   "Assigned|project = CORE AND assignee = currentUser() AND statusCategory != Done AND status != Backlog ORDER BY priority DESC, updated DESC"
   "Backlog|project = CORE AND status = \"Backlog\" AND issuetype != \"Sub-Task\" AND issuetype != \"Epic\" ORDER BY created DESC"
 )
