@@ -60,3 +60,30 @@ BREAKING CHANGE: The /v1/users endpoint has been removed.
 ## Scope
 
 Optional. Use to specify area of change (e.g., `api`, `ui`, `auth`, `db`).
+
+## Pull Request
+
+After committing, check whether a pull request already exists for the current
+branch and offer to create one if it does not.
+
+1. Check for an existing pull request:
+
+   ```sh
+   gh pr view --json url
+   ```
+
+   If this succeeds, a pull request already exists — do nothing further.
+
+2. If no pull request exists (the command above fails), ask the user whether a
+   pull request should be created. Only continue if the user confirms.
+
+3. Create the pull request as a **draft**, using the commit subject as the title
+   and the commit body as the body:
+
+   ```sh
+   gh pr create --draft --title "<commit subject>" --body "<commit body>"
+   ```
+
+   - `--title` is the `<type>(<scope>): <description>` subject line.
+   - `--body` is the commit body. If the commit has no body, pass an empty
+     string (`--body ""`).
