@@ -26,6 +26,7 @@ brew "go"
 # After node was installed we have to link it:
 #   brew link --force --overwrite node@24
 brew "node@24"
+brew "ruby"
 
 ################################################################################
 ### Language Servers and Linters
