@@ -906,7 +906,7 @@ if [[ "$1" == "__action" ]]; then
     notif-done)
       for id in "$@"; do
         [[ -z "$id" ]] && continue
-        if ! gh-notifications-done "$id" >/dev/null; then
+        if ! gh-notifications done "$id" >/dev/null; then
           read -n 1 -s -r -p "Press any key to continue..."
           break
         fi
@@ -916,7 +916,7 @@ if [[ "$1" == "__action" ]]; then
     notif-read)
       for id in "$@"; do
         [[ -z "$id" ]] && continue
-        if ! gh-notifications-read "$id" >/dev/null; then
+        if ! gh-notifications read "$id" >/dev/null; then
           read -n 1 -s -r -p "Press any key to continue..."
           break
         fi

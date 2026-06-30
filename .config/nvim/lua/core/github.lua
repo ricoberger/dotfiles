@@ -230,7 +230,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function()
 
         for _, selitem in ipairs(selitems) do
           local readoutput =
-            vim.fn.system(string.format("gh-notifications-read %s", selitem.id))
+            vim.fn.system(string.format("gh-notifications read %s", selitem.id))
           if vim.v.shell_error ~= 0 then
             vim.notify(
               "Failed to mark notification as read: " .. readoutput,
@@ -255,7 +255,7 @@ vim.api.nvim_create_user_command("GitHubNotifications", function()
 
         for _, selitem in ipairs(selitems) do
           local readoutput =
-            vim.fn.system(string.format("gh-notifications-done %s", selitem.id))
+            vim.fn.system(string.format("gh-notifications done %s", selitem.id))
           if vim.v.shell_error ~= 0 then
             vim.notify(
               "Failed to mark notification as done: " .. readoutput,

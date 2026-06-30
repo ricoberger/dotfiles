@@ -33,14 +33,6 @@ cp $(pwd)/.gitconfig ~/.gitconfig
 cp $(pwd)/.gitconfig-staffbase ~/.gitconfig-staffbase
 cp $(pwd)/.gitignore ~/.gitignore
 
-# GitHub
-echo "\n- Install Extensions for the GitHub CLI"
-if command -v gh &> /dev/null; then
-  gh extension install dlvhdr/gh-dash
-fi
-mkdir -p ~/.config/gh-dash
-cp $(pwd)/.config/gh-dash/config.yml ~/.config/gh-dash/config.yml
-
 # Vim
 echo "\n- Copy Vim Configuration"
 cp $(pwd)/.vimrc ~/.vimrc
@@ -64,10 +56,6 @@ cp -r $(pwd)/.config/btop ~/.config
 # Glamour
 echo "\n- Copy Glamour Configuration"
 cp $(pwd)/.config/glamour-catppuccin-macchiato.json ~/.config/glamour-catppuccin-macchiato.json
-
-# Yazi
-echo "\n- Copy Yazi Configuration"
-cp -r $(pwd)/.config/yazi ~/.config
 
 # AI
 echo "\n- Copy Claude Configuration"

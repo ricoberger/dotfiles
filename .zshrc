@@ -138,7 +138,6 @@ alias k='kubectl'
 alias chrome='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222'
 alias gg="git log --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold green)(%ar)%C(reset) %C(white)%s%C(reset) %C(dim white)- %an%C(reset)%C(auto)%d%C(reset)'"
 alias ghd='gh dash'
-alias y='yazi'
 
 
 
@@ -206,16 +205,6 @@ vaultcreate() {
   nvim -c 'set ft=json' ${TMPFILE} < /dev/tty > /dev/tty
   vault kv put $@ @${TMPFILE}
   rm ${TMPFILE}
-}
-
-# See https://yazi-rs.github.io/docs/quick-start#shell-wrapper
-yy() {
-	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-	yazi "$@" --cwd-file="$tmp"
-	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-		builtin cd -- "$cwd"
-	fi
-	rm -f -- "$tmp"
 }
 
 rg-fzf() {
