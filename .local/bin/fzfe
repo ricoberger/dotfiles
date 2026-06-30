@@ -2,151 +2,295 @@
 
 # fzfe - Fuzzy Finder File Explorer
 #
-# Inspyred by https://github.com/ashish0kumar/fzfm/tree/main and
+# Usage: fzfe [directory]
+#
+# Inspired by https://github.com/ashish0kumar/fzfm/tree/main and
 # https://thevaluable.dev/practical-guide-fzf-example/
 
-if [[ "$1" == "paste" ]]; then
-  # echo "fzfe paste $2" | pbcopy
-  target_dir="$2"
-  if [[ ! -d "$target_dir" ]]; then
-    target_dir=$(realpath)
-  fi
+SCRIPT="$(realpath "$0")"
 
-  command=$(cat /tmp/fzfe-command)
+# Command used to open media files (override via FZFE_MEDIA_OPENER).
+FZFE_MEDIA_OPENER="${FZFE_MEDIA_OPENER:-open}"
+# Editor for text/binary files (override via FZFE_TEXT_EDITOR).
+FZFE_TEXT_EDITOR="${FZFE_TEXT_EDITOR:-nvim}"
+# Command used to list directory entries (override via FZFE_LIST_COMMAND).
+FZFE_LIST_COMMAND="${FZFE_LIST_COMMAND:-ls -a --color}"
+# Command used to preview files (override via FZFE_PREVIEW_COMMAND).
+FZFE_PREVIEW_COMMAND="${FZFE_PREVIEW_COMMAND:-bat}"
+# Clipboard file holding the copy / move marks. A stable, shared path (override
+# via FZFE_CLIPBOARD) so a selection copied / moved in one fzfe instance can be
+# pasted in another, like the previous /tmp/fzfe-files behaviour. The first line
+# is the operation (cp / mv); the remaining lines are the absolute source paths.
+FZFE_CLIPBOARD="${FZFE_CLIPBOARD:-${TMPDIR:-/tmp}/fzfe-clipboard}"
 
-  while IFS="" read -r f || [ -n "$f" ]
-  do
-    if [[ "$command" == "cp" ]]; then
-      cp -r "$f" "$2"
-    elif [[ "$command" == "mv" ]]; then
-      mv "$f" "$2"
-    fi
-  done < /tmp/fzfe-files
+FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
 
-  rm /tmp/fzfe-command
-  rm /tmp/fzfe-files
+# ---------- List mode ----------
+#
+# Called for the initial feed and on every reload. Lists the entries of the
+# current working directory (the fzf child processes inherit the directory the
+# explorer navigated into).
 
+if [[ "$1" == "__list" ]]; then
+  eval "$FZFE_LIST_COMMAND"
   exit 0
 fi
 
-# Configuration variables with defaults
-MEDIA_OPENER="open"
-TEXT_EDITOR="nvim"
-LIST_COMMAND="ls"
-LIST_ARGS="-a --color"
-PREVIEW_COMMAND="bat"
+# ---------- Preview mode ----------
+#
+# Renders directory contents for folders and a syntax-highlighted view for
+# files. Called from the fzf --preview binding as: fzfe __preview <entry>
 
-# Check and open file based on mime type
-open_file() {
-  local file="$1"
-  local mime_type=$(file --mime-type -b "$file")
+if [[ "$1" == "__preview" ]]; then
+  file="$2"
+  [[ -z "$file" ]] && exit 0
 
-  case "$mime_type" in
-    text/*|application/json|application/xml|application/javascript|application/x-shellscript)
-      $TEXT_EDITOR "$file"
-      clear
-      ;;
-    image/*|video/*|audio/*|application/pdf)
-      if [[ -n "$MEDIA_OPENER" ]]; then
-          $MEDIA_OPENER "$file" &>/dev/null &
-      else
-          echo "No media opener available. Cannot open $file"
-          read -n 1 -s -r -p "Press any key to continue..."
+  if [[ -d "$file" ]]; then
+    echo "󰉋 Folder: $file"
+    echo ""
+    $FZFE_LIST_COMMAND "$file" 2>/dev/null
+  elif [[ -f "$file" ]]; then
+    echo "󰈙 File: $file"
+    echo ""
+    if [[ "$file" == *.md || "$file" == *.markdown ]]; then
+      glow --style=auto "$file" 2>/dev/null \
+        || $FZFE_PREVIEW_COMMAND --style=numbers --color=always "$file" 2>/dev/null \
+        || cat "$file"
+    else
+      $FZFE_PREVIEW_COMMAND --style=numbers --color=always "$file" 2>/dev/null \
+        || cat "$file"
+    fi
+  else
+    echo "Invalid selection: $file"
+  fi
+  exit 0
+fi
+
+# ---------- Action handlers ----------
+#
+# Called recursively from fzf bindings as:
+#   fzfe __action <action> [entries...]
+#
+# Marks recorded by copy / move are stored in the shared clipboard file
+# (FZFE_CLIPBOARD): the first line is the operation (cp / mv) and the remaining
+# lines are the absolute source paths.
+
+if [[ "$1" == "__action" ]]; then
+  shift
+  action="$1"
+  shift
+
+  case "$action" in
+    open)
+      file="$1"
+      [[ -z "$file" ]] && exit 0
+      mime_type=$(file --mime-type -b "$file")
+
+      case "$mime_type" in
+        text/*|application/json|application/xml|application/javascript|application/x-shellscript)
+          $FZFE_TEXT_EDITOR "$file"
           clear
-      fi
-      ;;
-    *)
-      if [ -B "$file" ]; then
-        $TEXT_EDITOR "$file"
-        clear
-      else
-        if [[ -n "$MEDIA_OPENER" ]]; then
-          $MEDIA_OPENER "$file" &>/dev/null || {
-            $TEXT_EDITOR "$file"
+          ;;
+        image/*|video/*|audio/*|application/pdf)
+          if [[ -n "$FZFE_MEDIA_OPENER" ]]; then
+            $FZFE_MEDIA_OPENER "$file" &>/dev/null &
+          else
+            echo "No media opener available. Cannot open $file"
+            read -n 1 -s -r -p "Press any key to continue..."
             clear
-          }
-        else
-          $TEXT_EDITOR "$file"
-          clear
+          fi
+          ;;
+        *)
+          if [ -B "$file" ]; then
+            $FZFE_TEXT_EDITOR "$file"
+            clear
+          elif [[ -n "$FZFE_MEDIA_OPENER" ]]; then
+            $FZFE_MEDIA_OPENER "$file" &>/dev/null || {
+              $FZFE_TEXT_EDITOR "$file"
+              clear
+            }
+          else
+            $FZFE_TEXT_EDITOR "$file"
+            clear
+          fi
+          ;;
+      esac
+      ;;
+
+    yank)
+      [[ $# -eq 0 ]] && exit 0
+      {
+        for f in "$@"; do
+          [[ -n "$f" ]] && realpath "$f"
+        done
+      } | pbcopy
+      ;;
+
+    copy|move)
+      [[ $# -eq 0 || -z "$FZFE_CLIPBOARD" ]] && exit 0
+      op="cp"
+      [[ "$action" == "move" ]] && op="mv"
+      {
+        printf '%s\n' "$op"
+        for f in "$@"; do
+          [[ -n "$f" ]] && realpath "$f"
+        done
+      } > "$FZFE_CLIPBOARD"
+      ;;
+
+    paste)
+      [[ -z "$FZFE_CLIPBOARD" || ! -s "$FZFE_CLIPBOARD" ]] && exit 0
+      op="$(sed -n '1p' "$FZFE_CLIPBOARD")"
+      target="$(pwd)"
+
+      ok=1
+      while IFS= read -r f || [[ -n "$f" ]]; do
+        [[ -z "$f" ]] && continue
+        if [[ "$op" == "cp" ]]; then
+          cp -r "$f" "$target" || ok=0
+        elif [[ "$op" == "mv" ]]; then
+          mv "$f" "$target" || ok=0
         fi
+      done < <(sed '1d' "$FZFE_CLIPBOARD")
+
+      # A move empties the clipboard (the sources no longer exist); a copy keeps
+      # it so the selection can be pasted into several directories.
+      [[ "$op" == "mv" ]] && : > "$FZFE_CLIPBOARD"
+
+      if [[ $ok -eq 0 ]]; then
+        read -n 1 -s -r -p "Press any key to continue..."
       fi
+      ;;
+
+    delete)
+      [[ $# -eq 0 ]] && exit 0
+      printf "Delete %d item(s)? [y/N]: " "$#"
+      read -r confirm
+      if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        for f in "$@"; do
+          [[ -n "$f" ]] && rm -r "$f"
+        done
+      fi
+      ;;
+
+    *)
+      echo "Unknown action: $action"
+      exit 1
       ;;
   esac
+  exit 0
+fi
+
+# ---------- Main mode ----------
+
+usage() {
+  cat <<'EOF'
+fzfe - Fuzzy Finder File Explorer
+
+Usage: fzfe [directory]
+
+Examples:
+  fzfe
+  fzfe ~/Documents
+  fzfe /tmp
+
+If a directory is given, browsing starts there; otherwise the current
+working directory is used. Select ".." to move to the parent directory and
+select a directory to enter it.
+
+Keybindings:
+  enter     : open the file / enter the directory
+  tab       : select item and move down
+  shift-tab : select item and move up
+  alt-a     : select all
+  alt-x     : deselect all
+  alt-y     : copy absolute paths of the selection to the clipboard
+  alt-c     : mark the selection to be copied (paste with alt-p)
+  alt-m     : mark the selection to be moved (paste with alt-p)
+  alt-p     : paste the copied/moved selection into the current directory
+  alt-d     : delete the selection (rm -r, with confirmation)
+  alt-r     : reload the list
+  ctrl-p    : toggle preview
+  ctrl-d    : half page down
+  ctrl-u    : half page up
+  ctrl-f    : preview half page down
+  ctrl-b    : preview half page up
+
+The preview shows directory contents for folders and a syntax-highlighted
+view for files.
+
+Environment:
+  FZFE_MEDIA_OPENER    Command to open media files (default: open)
+  FZFE_TEXT_EDITOR     Editor for text/binary files (default: nvim)
+  FZFE_LIST_COMMAND    Command used to list entries (default: ls -a --color)
+  FZFE_PREVIEW_COMMAND Command used to preview files (default: bat)
+EOF
 }
 
-# Main function
-fzfe() {
-  local list_command="$LIST_COMMAND $LIST_ARGS"
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
-  while true; do
-    selection=$(eval "$list_command" | fzf \
-      --ansi \
-      --multi \
-      --reverse \
-      --height 100% \
-      --info right \
-      --prompt "󰥨 Search: " \
-      --pointer ">" \
-      --marker "󰄲" \
-      --border "rounded" \
-      --border-label " 󱉭 $(pwd)/ " \
-      --border-label-pos center \
-      --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4' \
-      --bind "enter:accept" \
-      --bind "ctrl-d:half-page-down" \
-      --bind "ctrl-u:half-page-up" \
-      --bind "ctrl-f:preview-half-page-down" \
-      --bind "ctrl-b:preview-half-page-up" \
-      --bind "ctrl-p:toggle-preview" \
-      --bind "tab:toggle+down" \
-      --bind "shift-tab:toggle+up" \
-      --bind "alt-a:select-all" \
-      --bind "alt-x:deselect-all" \
-      --bind "alt-r:reload(eval $list_command)" \
-      --bind "alt-d:execute(rm -r {+})" \
-      --bind "alt-d:+reload(eval $list_command)" \
-      --bind "alt-y:execute(echo {+} | xargs realpath | pbcopy)" \
-      --bind "alt-c:execute(echo "cp" > /tmp/fzfe-command  && echo {+} | xargs realpath > /tmp/fzfe-files)" \
-      --bind "alt-c:+deselect-all" \
-      --bind "alt-m:execute(echo "mv" > /tmp/fzfe-command  && echo {+} | xargs realpath > /tmp/fzfe-files)" \
-      --bind "alt-m:+deselect-all" \
-      --bind "alt-p:execute(fzfe paste `realpath`)" \
-      --bind "alt-p:+reload(eval $list_command)" \
-      --preview-window "right:65%" \
-      --preview "
-          file={}
-          if [[ -d \"\$file\" ]]; then
-            echo \"󰉋 Folder: \$file\"
-            echo \"\"
-            $list_command \"\$file\" 2>/dev/null
-          elif [[ -f \"\$file\" ]]; then
-            echo \"󰈙 File: \$file\"
-            echo \"\"
-            $PREVIEW_COMMAND --style=numbers --color=always \"\$file\" 2>/dev/null || cat \"\$file\"
-          else
-            echo \"Invalid selection: \$file\"
-          fi
-      ")
+# An optional directory argument selects where browsing starts.
+if [[ -n "$1" ]]; then
+  if [[ -d "$1" ]]; then
+    cd "$1" || exit 1
+  else
+    echo "Not a directory: $1" >&2
+    exit 1
+  fi
+fi
 
-    [[ -z "$selection" ]] && break
+# Export the resolved configuration (including the shared clipboard path) so the
+# child __list / __preview / __action processes use the same values.
+export FZFE_CLIPBOARD FZFE_MEDIA_OPENER FZFE_TEXT_EDITOR FZFE_LIST_COMMAND FZFE_PREVIEW_COMMAND
 
-    if [[ "$selection" == ".." ]]; then
-      cd .. || break
-    elif [[ -d "$selection" ]]; then
-      cd "$selection" || break
-    elif [[ -f "$selection" ]]; then
-      open_file "$selection"
-    else
-      break
-    fi
-  done
-}
-
-# Allow configuration through environment variables
-[[ -n "$FZFM_MEDIA_OPENER" ]] && MEDIA_OPENER="$FZFM_MEDIA_OPENER"
-[[ -n "$FZFM_TEXT_EDITOR" ]] && TEXT_EDITOR="$FZFM_TEXT_EDITOR"
-[[ -n "$FZFM_LIST_COMMAND" ]] && LIST_COMMAND="$FZFM_LIST_COMMAND"
-[[ -n "$FZFM_PREVIEW_COMMAND" ]] && PREVIEW_COMMAND="$FZFM_PREVIEW_COMMAND"
+ACTION="$SCRIPT __action"
 
 clear
-fzfe
+while true; do
+  selection=$("$SCRIPT" __list | fzf \
+    --ansi \
+    --multi \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "󰥨 Search: " \
+    --pointer ">" \
+    --marker "󰄲" \
+    --border "rounded" \
+    --border-label " 󱉭 $(pwd)/ " \
+    --border-label-pos center \
+    --color "$FZF_COLORS" \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "tab:toggle+down" \
+    --bind "shift-tab:toggle+up" \
+    --bind "alt-a:select-all" \
+    --bind "alt-x:deselect-all" \
+    --bind "alt-r:reload($SCRIPT __list)" \
+    --bind "alt-y:execute($ACTION yank {+})" \
+    --bind "alt-c:execute($ACTION copy {+})+deselect-all" \
+    --bind "alt-m:execute($ACTION move {+})+deselect-all" \
+    --bind "alt-p:execute($ACTION paste)+reload($SCRIPT __list)" \
+    --bind "alt-d:execute($ACTION delete {+})+reload($SCRIPT __list)" \
+    --bind "enter:accept" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview {}")
+
+  [[ -z "$selection" ]] && break
+
+  if [[ "$selection" == ".." ]]; then
+    cd .. || break
+  elif [[ -d "$selection" ]]; then
+    cd "$selection" || break
+  elif [[ -e "$selection" ]]; then
+    "$SCRIPT" __action open "$selection"
+  else
+    break
+  fi
+done
