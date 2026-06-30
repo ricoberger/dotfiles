@@ -14,6 +14,7 @@ export ANDROID_NDK_HOME=/Users/ricoberger/Library/Android/sdk/ndk/27.0.12077973
 export NODE_OPTIONS="--dns-result-order=ipv4first"
 export MANPAGER="nvim +Man!"
 export OPENCODE_DISABLE_LSP_DOWNLOAD=true
+export GLAMOUR_STYLE=$HOME/.config/glamour-catppuccin-macchiato.json
 
 path=(
   /opt/homebrew/opt/kubectl/bin

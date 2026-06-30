@@ -61,6 +61,10 @@ cp -r $(pwd)/.config/nvim ~/.config
 echo "\n- Copy btop Configuration"
 cp -r $(pwd)/.config/btop ~/.config
 
+# Glamour
+echo "\n- Copy Glamour Configuration"
+cp $(pwd)/.config/glamour-catppuccin-macchiato.json ~/.config/glamour-catppuccin-macchiato.json
+
 # Yazi
 echo "\n- Copy Yazi Configuration"
 cp -r $(pwd)/.config/yazi ~/.config
