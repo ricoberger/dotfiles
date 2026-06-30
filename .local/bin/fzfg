@@ -1,0 +1,1754 @@
+#!/usr/bin/env bash
+
+# fzfg - Fuzzy Finder for GitHub (gh)
+#
+# Usage:
+#   fzfg          open your GitHub notifications (via the gh-notifications script)
+#   fzfg prs      pick a pull request filter, then browse the matching PRs
+#   fzfg issues   pick an issue filter, then browse the matching issues
+#   fzfg view [url]  open a PR / issue in nvim (gh://); no url = current PR
+#
+# The pull request and issue filters (involves / author / assignee / mentions /
+# review-requested) mirror the searches from the Neovim configuration and are
+# powered by "gh search prs" / "gh search issues".
+#
+# Requires: gh, jq, fzf, nvim and the GITHUB_NOTIFICATIONS_TOKEN environment
+# variable (used by gh-notifications).
+
+SCRIPT="$(realpath "$0")"
+
+# GitHub login used in the pull request search filters (override via FZFG_USER).
+FZFG_USER="${FZFG_USER:-ricoberger}"
+# Maximum number of pull requests to fetch (override via FZFG_LIMIT). The
+# notifications list is fixed at 100 by the gh-notifications script.
+FZFG_LIMIT="${FZFG_LIMIT:-100}"
+# Cache file for the raw notifications JSON. The preview and action handlers
+# look notifications up by id in this file, so it has to be a stable path that
+# the fzf child processes can read.
+FZFG_NOTIF_CACHE="${FZFG_NOTIF_CACHE:-${TMPDIR:-/tmp}/fzfg-notifications.json}"
+
+# Named filters shown in a sub-picker when the "prs" / "issues" commands are
+# run. Each entry is "Name|query". Override the whole list at runtime via the
+# FZFG_PR_FILTERS / FZFG_ISSUE_FILTERS env vars (newline-separated "Name|query"
+# entries); otherwise these baked defaults are used.
+FZFG_PR_DEFAULT_FILTERS=(
+  "Involves|archived:false is:open involves:$FZFG_USER"
+  "Created|archived:false is:open author:$FZFG_USER"
+  "Assigned|archived:false is:open assignee:$FZFG_USER"
+  "Mentions|archived:false is:open mentions:$FZFG_USER"
+  "Review Requested|archived:false is:open review-requested:$FZFG_USER"
+)
+FZFG_ISSUE_DEFAULT_FILTERS=(
+  "Involves|archived:false is:open involves:$FZFG_USER"
+  "Created|archived:false is:open author:$FZFG_USER"
+  "Assigned|archived:false is:open assignee:$FZFG_USER"
+  "Mentions|archived:false is:open mentions:$FZFG_USER"
+)
+
+FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
+
+# Nerd font glyphs used in bash-side prompts / labels. Defined via byte escapes
+# so they do not depend on a bash that supports the \u / \U printf escapes.
+ICON_GH=$'\xef\x90\x87'     # pull request
+ICON_PR=$'\xef\x90\x87'     # pull request
+ICON_ISSUE=$'\xef\x90\x9b'  # issue
+ICON_NOTIF=$'\xee\xa9\xb1'  # notification
+ICON_MARK=$'\xf3\xb0\x84\xb2'  # multi-select marker (matches fzfe)
+
+# ---------- List mode ----------
+#
+# Called for the initial feed and on every reload as:
+#   fzfg __list <prs|issues|notifications> [query]
+#
+# For pull requests and issues the query is read from the FZFG_QUERY environment
+# variable when not passed explicitly, so the fzf reload binding stays
+# quoting-safe.
+
+if [[ "$1" == "__list" ]]; then
+  kind="$2"
+
+  case "$kind" in
+    prs)
+      query="${3:-$FZFG_QUERY}"
+      err="$(mktemp)"
+      if [[ -n "$FZFG_ONE_REPO" ]]; then
+        # View command: a single pull request, fetched directly and wrapped in
+        # an array so the renderer below is unchanged.
+        out="$(gh pr view "$FZFG_ONE_NUMBER" --repo "$FZFG_ONE_REPO" \
+          --json number,title,author,state,isDraft,url 2>"$err" \
+          | jq -c --arg r "$FZFG_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+        status=$?
+      elif [[ "$query" == "__repo "* ]]; then
+        # Repository filter: list a single repo's open PRs straight from the API
+        # (gh pr list) instead of the search index, which lags for new PRs.
+        one_repo="${query#__repo }"
+        out="$(gh pr list --repo "$one_repo" --state open --limit "$FZFG_LIMIT" \
+          --json number,title,author,state,isDraft,url 2>"$err" \
+          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
+        status=$?
+      else
+        # Split the query into its individual qualifiers. "gh search prs" only
+        # treats tokens like "is:open" or "involves:user" as search qualifiers
+        # when they are passed as separate arguments; a single quoted string is
+        # matched as free-text keywords instead, which silently returns the wrong
+        # pull requests.
+        read -ra query_args <<< "$query"
+        out="$(gh search prs "${query_args[@]}" \
+          --limit "$FZFG_LIMIT" \
+          --json number,title,repository,author,state,isDraft,url 2>"$err")"
+        status=$?
+      fi
+      if [[ $status -ne 0 ]]; then
+        cat "$err" >&2
+        rm -f "$err"
+        exit 1
+      fi
+      rm -f "$err"
+
+      # Tab-delimited rows: <repo>\t<number>\t<isDraft>\t<display>. The first
+      # three fields stay hidden from the picker (--with-nth 4) but remain
+      # addressable in bindings via {1}/{2}/{3}.
+      printf '%s' "$out" | jq -r '
+        def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
+        .[]
+        | .repository.nameWithOwner as $repo
+        | (.number|tostring) as $num
+        | (.isDraft // false) as $draft
+        | (if $draft then "gray"
+           elif (.state|ascii_downcase) == "open" then "green"
+           elif (.state|ascii_downcase) == "closed" then "mauve"
+           else "green" end) as $c
+        | $repo + "\t" + $num + "\t" + ($draft|tostring) + "\t"
+          + "\u001b[" + color($c) + "m\uf407\u001b[0m"
+          + " [#" + $num + "] " + $repo + ": "
+          + ((.title // "-") | gsub("[\t\n\r]"; " "))
+          + "  (" + (.author.login // "-") + ")"
+      '
+      exit 0
+      ;;
+
+    issues)
+      query="${3:-$FZFG_QUERY}"
+      err="$(mktemp)"
+      if [[ -n "$FZFG_ONE_REPO" ]]; then
+        # View command: a single issue, fetched directly and wrapped in an array.
+        out="$(gh issue view "$FZFG_ONE_NUMBER" --repo "$FZFG_ONE_REPO" \
+          --json number,title,author,state,url 2>"$err" \
+          | jq -c --arg r "$FZFG_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+        status=$?
+      elif [[ "$query" == "__repo "* ]]; then
+        # Repository filter: list a single repo's open issues straight from the
+        # API (gh issue list) instead of the search index, which lags for new
+        # issues.
+        one_repo="${query#__repo }"
+        out="$(gh issue list --repo "$one_repo" --state open --limit "$FZFG_LIMIT" \
+          --json number,title,author,state,url 2>"$err" \
+          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
+        status=$?
+      else
+        # Split the query into its individual qualifiers (see the prs branch).
+        read -ra query_args <<< "$query"
+        out="$(gh search issues "${query_args[@]}" \
+          --limit "$FZFG_LIMIT" \
+          --json number,title,repository,author,state,url 2>"$err")"
+        status=$?
+      fi
+      if [[ $status -ne 0 ]]; then
+        cat "$err" >&2
+        rm -f "$err"
+        exit 1
+      fi
+      rm -f "$err"
+
+      # Tab-delimited rows: <repo>\t<number>\t<display>. The first two fields
+      # stay hidden from the picker (--with-nth 3) but remain addressable in
+      # bindings via {1}/{2}.
+      printf '%s' "$out" | jq -r '
+        def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
+        .[]
+        | .repository.nameWithOwner as $repo
+        | (.number|tostring) as $num
+        | (if (.state|ascii_downcase) == "open" then "green"
+           elif (.state|ascii_downcase) == "closed" then "mauve"
+           else "green" end) as $c
+        | $repo + "\t" + $num + "\t"
+          + "\u001b[" + color($c) + "m\uf41b\u001b[0m"
+          + " [#" + $num + "] " + $repo + ": "
+          + ((.title // "-") | gsub("[\t\n\r]"; " "))
+          + "  (" + (.author.login // "-") + ")"
+      '
+      exit 0
+      ;;
+
+    notifications)
+      err="$(mktemp)"
+      out="$(gh-notifications 2>"$err")"
+      status=$?
+      if [[ $status -ne 0 ]]; then
+        cat "$err" >&2
+        rm -f "$err"
+        exit 1
+      fi
+      rm -f "$err"
+
+      # Cache the raw JSON so the preview / action handlers can look a
+      # notification up by id without re-fetching.
+      printf '%s' "$out" > "$FZFG_NOTIF_CACHE"
+
+      # Tab-delimited rows: <id>\t<display>. The id stays hidden (--with-nth 2).
+      printf '%s' "$out" | jq -r '
+        def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
+        def reltime($ts):
+          if ($ts|type) != "string" then ""
+          else
+            (try ($ts|fromdate) catch null) as $t
+            | if $t == null then ""
+              else (now - $t) as $d
+                | if $d < 60 then "just now"
+                  elif $d < 3600 then "\(($d/60)|floor)m ago"
+                  elif $d < 86400 then "\(($d/3600)|floor)h ago"
+                  elif $d < 604800 then "\(($d/86400)|floor)d ago"
+                  elif $d < 2592000 then "\(($d/604800)|floor)w ago"
+                  else ($t|gmtime|strftime("%b %d")) end
+              end
+          end;
+        .[]
+        | .id as $id
+        | (.subject.__typename // "") as $type
+        | (try (.url | capture("github.com/(?<r>[^/]+/[^/]+)").r) catch "-") as $repo
+        | (if .isUnread then "\uea71" else "\uebb5" end) as $uicon
+        | (if .isUnread then "yellow" else "gray" end) as $ucolor
+        | (
+            if $type == "PullRequest" then
+              {ic:"\uf407", c:(
+                 if (.subject.isDraft // false) then "gray"
+                 elif .subject.pullRequestState == "OPEN" then "green"
+                 elif .subject.pullRequestState == "MERGED" then "mauve"
+                 elif .subject.pullRequestState == "CLOSED" then "red"
+                 else "gray" end)}
+            elif $type == "Issue" then
+              {ic:"\uf41b", c:(
+                 if .subject.issueState == "OPEN" then "green"
+                 elif .subject.issueState == "CLOSED" then "mauve"
+                 else "gray" end)}
+            elif $type == "Release" then {ic:"\uf412", c:"gray"}
+            elif $type == "CheckSuite" then
+              {ic:"\uf52e", c:(if .subject.conclusion == "SUCCESS" then "green" else "red" end)}
+            elif $type == "WorkflowRun" then {ic:"\uf52e", c:"red"}
+            elif $type == "Commit" then {ic:"\uf417", c:"gray"}
+            elif $type == "Gist" then {ic:"\uf480", c:"gray"}
+            elif ($type == "Discussion" or $type == "TeamDiscussion") then {ic:"\uf442", c:"gray"}
+            else {ic:"\uf128", c:"gray"} end
+          ) as $t
+        | $id + "\t"
+          + "\u001b[" + color($ucolor) + "m" + $uicon + "\u001b[0m "
+          + "\u001b[" + color($t.c) + "m" + $t.ic + "\u001b[0m"
+          + " [" + $type + "] " + ($repo // "-") + ": "
+          + ((.title // "-") | gsub("[\t\n\r]"; " "))
+          + " (" + ((.reason // "") | ascii_downcase | gsub("_"; " "))
+          + " - " + reltime(.lastUpdatedAt) + ")"
+      '
+      exit 0
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Preview mode ----------
+#
+# Called from the fzf --preview binding as:
+#   fzfg __preview pr    <repo> <number>
+#   fzfg __preview issue <repo> <number>
+#   fzfg __preview notif <id>
+
+# Render markdown read from stdin with md, falling back to the raw markdown when
+# md is not installed. Unlike glow, md emits colour for a non-TTY stdout, so it
+# works directly in the fzf preview without forcing a profile or a tty.
+md_render() {
+  if command -v md >/dev/null 2>&1; then
+    MD_WORD_WRAP="${FZF_PREVIEW_COLUMNS:-80}" md
+  else
+    cat
+  fi
+}
+
+# Fetch the review threads of a pull request via GraphQL (REST has no resolved
+# state) and emit a simplified array:
+#   [ { gid, isResolved, isOutdated, path, line, diffSide,
+#       comments:[ {databaseId, login, createdAt, body} ] } ]
+# gid is the thread node id (for resolve/unresolve mutations); each comment's
+# databaseId is the REST id (used to reply). Emits "[]" on error.
+fzfg_fetch_threads() {
+  local repo="$1"
+  local number="$2"
+  local owner="${repo%%/*}"
+  local name="${repo#*/}"
+  local out
+  out="$(gh api graphql \
+    -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine startLine diffSide comments(first:100){nodes{databaseId author{login} createdAt body}}}}}}}' \
+    -F owner="$owner" -F name="$name" -F number="$number" 2>/dev/null \
+    | jq -c '.data.repository.pullRequest.reviewThreads.nodes // []
+        | map({ gid:.id, isResolved, isOutdated, path, line:(.line // .originalLine), diffSide,
+                comments:(.comments.nodes | map({databaseId, login:(.author.login // "?"), createdAt, body})) })' 2>/dev/null)"
+  [[ -z "$out" ]] && out="[]"
+  printf '%s' "$out"
+}
+
+# jq snippet (used by the cache build and the refresh) that maps a simplified
+# threads array (passed as --argjson threads) onto an array of hunks: RIGHT-side
+# threads match the hunk's new-line range, LEFT-side threads its old-line range.
+FZFG_DIFF_MAP_JQ='
+  map( .os as $os | .oc as $oc | .ns as $ns | .nc as $nc | .path as $hpath | .nodiff as $nd
+       | ($threads | map(select(
+            (.path == $hpath) and ($nd|not)
+            and ( if .diffSide == "LEFT"
+                  then ((.line // -1) >= $os) and ((.line // -1) <= ($os + (if $oc>0 then $oc-1 else 0 end)))
+                  else ((.line // -1) >= $ns) and ((.line // -1) <= ($ns + (if $nc>0 then $nc-1 else 0 end))) end)
+         ))) as $ts
+       | . + { threads:$ts, nthreads:($ts|length), nunresolved:([$ts[]|select(.isResolved|not)]|length) } )
+'
+
+
+# Render the full preview for a pull request as markdown (details, description,
+# reviews, comments and a checks table), piped through md. "gh ... view" is
+# queried as JSON so the markdown can be assembled with jq.
+render_pr_preview() {
+  local repo="$1"
+  local number="$2"
+  {
+    gh pr view "$number" --repo "$repo" \
+      --json number,title,state,isDraft,author,assignees,labels,additions,deletions,baseRefName,headRefName,reviewDecision,reviewRequests,body,reviews,comments \
+      2>/dev/null | jq -r '
+      [
+        "# " + (.title // "-"),
+        "",
+        "- **Number:** `" + (.number|tostring) + "`",
+        "- **State:** " + (.state // "?") + (if .isDraft then " \u00b7 draft" else "" end),
+        "- **Author:** @" + (.author.login // "?"),
+        (if (.assignees|length) > 0 then "- **Assignees:** " + (.assignees|map("@"+.login)|join(" ")) else empty end),
+        "- **Branch:** `" + (.baseRefName // "?") + " \u2190 " + (.headRefName // "?") + "`",
+        "- **Changes:** +" + (.additions|tostring) + " / \u2212" + (.deletions|tostring),
+        (if (.reviewDecision // "") != "" then "- **Review:** " + (.reviewDecision|ascii_downcase|gsub("_";" ")) else empty end),
+        (if (.reviewRequests|length) > 0
+           then "- **Review requested:** "
+                + (.reviewRequests
+                   | map(if .__typename == "Team" then "`" + (.slug // .name // "?") + "`"
+                         else "@" + (.login // "?") end)
+                   | join(" "))
+           else empty end),
+        (if (.labels|length) > 0 then "- **Labels:** " + (.labels|map("`"+.name+"`")|join(" ")) else empty end)
+      ]
+      + ["", "---", ""]
+      + (((.body // "") | gsub("\r";"")) as $b | if ($b|test("\\S")) then [$b] else ["_No description provided._"] end)
+      + (if (.reviews|length) > 0
+           then ["", "# Reviews", ""] + [ .reviews[] | select((.state//"") != "PENDING")
+                  | "**@" + (.author.login//"?") + "** \u2014 " + (.state//"") + "\n\n" + ((.body//"")|gsub("\r";"")) + "\n" ]
+           else [] end)
+      + (if (.comments|length) > 0
+           then ["", "# Comments", ""] + [ .comments[]
+                  | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";"")) + "\n" ]
+           else [] end)
+      | join("\n")
+    '
+
+    # Inline review comments (comments on files / lines) are not part of
+    # "gh pr view"; they come from the pull request review comments API.
+    local rc
+    rc="$(gh api --paginate "repos/$repo/pulls/$number/comments" 2>/dev/null)"
+    if [[ -n "$rc" && "$rc" != "[]" ]]; then
+      printf '%s' "$rc" | jq -r '
+        ["", "# Review comments", ""]
+        + [ .[]
+            | "**@" + (.user.login // "?") + "** \u00b7 `" + (.path // "?")
+              + (if .line then ":" + (.line|tostring)
+                 elif .original_line then ":" + (.original_line|tostring)
+                 else "" end) + "`\n\n"
+              + (if (.diff_hunk // "") != ""
+                 then "```diff\n" + (.diff_hunk | gsub("\r"; "")) + "\n```\n\n"
+                 else "" end)
+              + ((.body // "") | gsub("\r"; "")) + "\n" ]
+        | join("\n")
+      '
+    fi
+
+    local checks
+    checks="$(gh pr checks "$number" --repo "$repo" --json bucket,name,workflow,state 2>/dev/null)"
+    if [[ -n "$checks" && "$checks" != "[]" ]]; then
+      printf '%s' "$checks" | jq -r '
+        ["", "# Checks", "", "| Status | Check |", "|---|---|"]
+        + [ .[]
+            | (.bucket // "" | ascii_downcase) as $b
+            | (if $b=="pass" then "\u2713" elif $b=="fail" then "\u2717" elif $b=="pending" then "\u25cf"
+               elif $b=="skipping" then "\u25cb" elif $b=="cancel" then "\u2298" else "\u2022" end) as $icon
+            | (if (.workflow // "") == "" then (.name // "-") else ((.workflow) + " / " + (.name // "-")) end) as $check
+            | "| " + $icon + " " + (.state // .bucket // "-") + " | " + $check + " |"
+          ]
+        | join("\n")
+      '
+    fi
+  } | md_render
+}
+
+# Render the full preview for an issue as markdown (details, description and
+# comments), piped through md.
+render_issue_preview() {
+  local repo="$1"
+  local number="$2"
+  gh issue view "$number" --repo "$repo" \
+    --json number,title,state,author,assignees,labels,createdAt,body,comments \
+    2>/dev/null | jq -r '
+    [
+      "# " + (.title // "-"),
+      "",
+      "- **Number:** `" + (.number|tostring) + "`",
+      "- **State:** " + (.state // "?"),
+      "- **Author:** @" + (.author.login // "?"),
+      (if (.assignees|length) > 0 then "- **Assignees:** " + (.assignees|map("@"+.login)|join(" ")) else empty end),
+      "- **Created:** " + (.createdAt // ""),
+      (if (.labels|length) > 0 then "- **Labels:** " + (.labels|map("`"+.name+"`")|join(" ")) else empty end)
+    ]
+    + ["", "---", ""]
+    + (((.body // "") | gsub("\r";"")) as $b | if ($b|test("\\S")) then [$b] else ["_No description provided._"] end)
+    + (if (.comments|length) > 0
+         then ["", "# Comments", ""] + [ .comments[]
+                | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";"")) + "\n" ]
+         else [] end)
+    | join("\n")
+  ' | md_render
+}
+
+if [[ "$1" == "__preview" ]]; then
+  what="$2"
+
+  case "$what" in
+    pr)
+      repo="$3"
+      number="$4"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      render_pr_preview "$repo" "$number"
+      exit 0
+      ;;
+
+    issue)
+      repo="$3"
+      number="$4"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      render_issue_preview "$repo" "$number"
+      exit 0
+      ;;
+
+    notif)
+      id="$3"
+      [[ -z "$id" ]] && exit 0
+      node="$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      [[ -z "$node" ]] && exit 0
+
+      type="$(printf '%s' "$node" | jq -r '.subject.__typename // ""')"
+      repo="$(printf '%s' "$node" | jq -r 'try (.url | capture("github.com/(?<r>[^/]+/[^/]+)").r) catch ""')"
+      number="$(printf '%s' "$node" | jq -r '.subject.number // ""')"
+
+      case "$type" in
+        PullRequest)
+          if [[ -n "$repo" && -n "$number" ]]; then
+            render_pr_preview "$repo" "$number"
+          else
+            printf '%s' "$node" | jq -r '.summaryItemBody // .title // ""' | md_render
+          fi
+          ;;
+        Issue)
+          if [[ -n "$repo" && -n "$number" ]]; then
+            render_issue_preview "$repo" "$number"
+          else
+            printf '%s' "$node" | jq -r '.summaryItemBody // .title // ""' | md_render
+          fi
+          ;;
+        *)
+          printf '%s' "$node" | jq -r '.summaryItemBody // .title // ""' | md_render
+          ;;
+      esac
+      exit 0
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Action handlers ----------
+#
+# Called recursively from fzf bindings as:
+#   fzfg __action <action> <args...>
+
+if [[ "$1" == "__action" ]]; then
+  shift
+  action="$1"
+  shift
+
+  case "$action" in
+    pr-browse)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      open "https://github.com/$repo/pull/$number"
+      ;;
+
+    pr-yank)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      printf '%s' "https://github.com/$repo/pull/$number" | pbcopy
+      ;;
+
+    pr-merge)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+
+      # Pick the merge method (and whether to use admin privileges) or close the
+      # pull request. Selecting an entry doubles as the confirmation; escape
+      # aborts.
+      choice="$(printf '%s\n' \
+        "Create a merge commit" \
+        "Create a merge commit (admin)" \
+        "Squash and merge" \
+        "Squash and merge (admin)" \
+        "Rebase and merge" \
+        "Rebase and merge (admin)" \
+        "Close pull request" | fzf \
+        --prompt "$ICON_PR Merge $repo#$number: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      [[ -z "$choice" ]] && exit 0
+
+      if [[ "$choice" == "Close pull request" ]]; then
+        if ! gh pr close "$number" --repo "$repo"; then
+          read -n 1 -s -r -p "Press any key to continue..."
+        fi
+        exit 0
+      fi
+
+      merge_args=(--repo "$repo" --delete-branch)
+      case "$choice" in
+        "Create a merge commit"*) merge_args+=(--merge) ;;
+        "Squash and merge"*) merge_args+=(--squash) ;;
+        "Rebase and merge"*) merge_args+=(--rebase) ;;
+      esac
+      case "$choice" in
+        *"(admin)") merge_args+=(--admin) ;;
+      esac
+
+      # Merge commits and squash merges take a commit subject / body. They are
+      # pre-filled with the pull request title and body (as gh-pr-merge did) and
+      # edited in nvim (COMMIT_EDITMSG -> gitcommit filetype: line 1 is the
+      # subject, the rest is the body). Rebase merges create no commit message.
+      if [[ "$choice" != "Rebase and merge"* ]]; then
+        pr="$(gh pr view "$number" --repo "$repo" --json title,body 2>/dev/null)"
+        title="$(printf '%s' "$pr" | jq -r '.title // ""')"
+        body="$(printf '%s' "$pr" | jq -r '(.body // "") | gsub("\r"; "")')"
+
+        dir="$(mktemp -d)"
+        tmp="$dir/COMMIT_EDITMSG"
+        { printf '%s\n\n' "$title"; printf '%s\n' "$body"; } > "$tmp"
+        nvim "$tmp"
+
+        subject="$(sed -n '1p' "$tmp")"
+        commit_body="$(sed '1d' "$tmp")"
+        commit_body="${commit_body#$'\n'}"
+        rm -rf "$dir"
+
+        if [[ -z "$subject" ]]; then
+          exit 0
+        fi
+        merge_args+=(--subject "$subject" --body "$commit_body")
+      fi
+
+      if ! gh pr merge "$number" "${merge_args[@]}"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    pr-labels)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      choice="$(printf '%s\n' "Add label" "Remove label" | fzf \
+        --prompt "$ICON_PR Labels $repo#$number: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      case "$choice" in
+        "Add label")
+          label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
+            --prompt "$ICON_PR Add label: " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")"
+          [[ -z "$label" ]] && exit 0
+          if ! gh pr edit "$number" --repo "$repo" --add-label "$label"; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+        "Remove label")
+          label="$(gh pr view "$number" --repo "$repo" --json labels --jq '.labels[].name' 2>/dev/null | fzf \
+            --prompt "$ICON_PR Remove label: " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")"
+          [[ -z "$label" ]] && exit 0
+          if ! gh pr edit "$number" --repo "$repo" --remove-label "$label"; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+      esac
+      ;;
+
+    pr-toggle-draft)
+      repo="$1"
+      number="$2"
+      isdraft="$3"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      if [[ "$isdraft" == "true" ]]; then
+        if ! gh pr ready "$number" --repo "$repo"; then
+          read -n 1 -s -r -p "Press any key to continue..."
+        fi
+      else
+        if ! gh pr ready "$number" --repo "$repo" --undo; then
+          read -n 1 -s -r -p "Press any key to continue..."
+        fi
+      fi
+      ;;
+
+    pr-checks)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      "$SCRIPT" __checks "$repo" "$number"
+      ;;
+
+    pr-assign)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      if ! gh pr edit "$number" --repo "$repo" --add-assignee "@me"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    pr-comment)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      dir="$(mktemp -d)"
+      tmp="$dir/comment.md"
+      nvim "$tmp"
+      if [[ ! -s "$tmp" ]]; then
+        rm -rf "$dir"
+        exit 0
+      fi
+      if ! gh pr comment "$number" --repo "$repo" --body-file "$tmp"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      rm -rf "$dir"
+      ;;
+
+    pr-edit)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      # Edit the title / body in nvim (COMMIT_EDITMSG -> gitcommit filetype:
+      # line 1 is the title, the rest is the body), pre-filled with the current
+      # values.
+      pr="$(gh pr view "$number" --repo "$repo" --json title,body 2>/dev/null)"
+      title="$(printf '%s' "$pr" | jq -r '.title // ""')"
+      body="$(printf '%s' "$pr" | jq -r '(.body // "") | gsub("\r"; "")')"
+      dir="$(mktemp -d)"
+      tmp="$dir/COMMIT_EDITMSG"
+      { printf '%s\n\n' "$title"; printf '%s\n' "$body"; } > "$tmp"
+      nvim "$tmp"
+      new_title="$(sed -n '1p' "$tmp")"
+      if [[ -z "$new_title" ]]; then
+        rm -rf "$dir"
+        exit 0
+      fi
+      sed '1d' "$tmp" | sed '1{/^$/d;}' > "$dir/body"
+      if ! gh pr edit "$number" --repo "$repo" --title "$new_title" --body-file "$dir/body"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      rm -rf "$dir"
+      ;;
+
+    pr-diff)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      "$SCRIPT" __diff "$repo" "$number"
+      ;;
+
+    pr-review)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      choice="$(printf '%s\n' "Approve" "Comment" "Request changes" | fzf \
+        --prompt "$ICON_PR Review $repo#$number: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      [[ -z "$choice" ]] && exit 0
+
+      # Optional body for "Approve", required for "Comment" / "Request changes".
+      dir="$(mktemp -d)"
+      tmp="$dir/review.md"
+      nvim "$tmp"
+      if [[ "$choice" != "Approve" && ! -s "$tmp" ]]; then
+        rm -rf "$dir"
+        echo "A comment is required to $choice $repo#$number"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      review_args=(--repo "$repo")
+      case "$choice" in
+        "Approve") review_args+=(--approve) ;;
+        "Comment") review_args+=(--comment) ;;
+        "Request changes") review_args+=(--request-changes) ;;
+      esac
+      [[ -s "$tmp" ]] && review_args+=(--body-file "$tmp")
+
+      if ! gh pr review "$number" "${review_args[@]}"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      rm -rf "$dir"
+      ;;
+
+    pr-checkout)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+
+      # Only check out a PR that belongs to the current repository and only when
+      # the worktree is clean, so no local changes are unexpectedly overwritten.
+      current_repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
+      if [[ -z "$current_repo" ]]; then
+        echo "Not inside a GitHub repository"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      if [[ "$current_repo" != "$repo" ]]; then
+        echo "PR $repo#$number does not belong to the current repository ($current_repo)"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+        echo "The worktree is not clean; commit or stash your changes first"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      if ! gh pr checkout "$number"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      nvim -c "GitDiff"
+      ;;
+
+    issue-browse)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      open "https://github.com/$repo/issues/$number"
+      ;;
+
+    issue-yank)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      printf '%s' "https://github.com/$repo/issues/$number" | pbcopy
+      ;;
+
+    issue-assign)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      if ! gh issue edit "$number" --repo "$repo" --add-assignee "@me"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    issue-labels)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      choice="$(printf '%s\n' "Add label" "Remove label" | fzf \
+        --prompt "$ICON_ISSUE Labels $repo#$number: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      case "$choice" in
+        "Add label")
+          label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
+            --prompt "$ICON_ISSUE Add label: " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")"
+          [[ -z "$label" ]] && exit 0
+          if ! gh issue edit "$number" --repo "$repo" --add-label "$label"; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+        "Remove label")
+          label="$(gh issue view "$number" --repo "$repo" --json labels --jq '.labels[].name' 2>/dev/null | fzf \
+            --prompt "$ICON_ISSUE Remove label: " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --color "$FZF_COLORS")"
+          [[ -z "$label" ]] && exit 0
+          if ! gh issue edit "$number" --repo "$repo" --remove-label "$label"; then
+            read -n 1 -s -r -p "Press any key to continue..."
+          fi
+          ;;
+      esac
+      ;;
+
+    issue-close)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      # Pick the close reason. Selecting an entry doubles as the confirmation;
+      # escape aborts.
+      choice="$(printf '%s\n' "Close as completed" "Close as not planned" "Close as duplicate" | fzf \
+        --prompt "$ICON_ISSUE Close $repo#$number: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      [[ -z "$choice" ]] && exit 0
+      case "$choice" in
+        "Close as completed") reason="completed" ;;
+        "Close as not planned") reason="not planned" ;;
+        "Close as duplicate") reason="duplicate" ;;
+      esac
+      if ! gh issue close "$number" --repo "$repo" --reason "$reason"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    issue-comment)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      dir="$(mktemp -d)"
+      tmp="$dir/comment.md"
+      nvim "$tmp"
+      if [[ ! -s "$tmp" ]]; then
+        rm -rf "$dir"
+        exit 0
+      fi
+      if ! gh issue comment "$number" --repo "$repo" --body-file "$tmp"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      rm -rf "$dir"
+      ;;
+
+    issue-edit)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      # Edit the title / body in nvim (COMMIT_EDITMSG -> gitcommit filetype:
+      # line 1 is the title, the rest is the body), pre-filled with the current
+      # values.
+      issue="$(gh issue view "$number" --repo "$repo" --json title,body 2>/dev/null)"
+      title="$(printf '%s' "$issue" | jq -r '.title // ""')"
+      body="$(printf '%s' "$issue" | jq -r '(.body // "") | gsub("\r"; "")')"
+      dir="$(mktemp -d)"
+      tmp="$dir/COMMIT_EDITMSG"
+      { printf '%s\n\n' "$title"; printf '%s\n' "$body"; } > "$tmp"
+      nvim "$tmp"
+      new_title="$(sed -n '1p' "$tmp")"
+      if [[ -z "$new_title" ]]; then
+        rm -rf "$dir"
+        exit 0
+      fi
+      sed '1d' "$tmp" | sed '1{/^$/d;}' > "$dir/body"
+      if ! gh issue edit "$number" --repo "$repo" --title "$new_title" --body-file "$dir/body"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      rm -rf "$dir"
+      ;;
+
+    notif-open)
+      id="$1"
+      [[ -z "$id" ]] && exit 0
+      node="$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      [[ -z "$node" ]] && exit 0
+      type="$(printf '%s' "$node" | jq -r '.subject.__typename // ""')"
+      repo="$(printf '%s' "$node" | jq -r 'try (.url | capture("github.com/(?<r>[^/]+/[^/]+)").r) catch ""')"
+      number="$(printf '%s' "$node" | jq -r '.subject.number // ""')"
+      url="$(printf '%s' "$node" | jq -r '.url // ""')"
+      case "$type" in
+        PullRequest | Issue)
+          if [[ -n "$url" ]]; then
+            "$SCRIPT" view "$url"
+          fi
+          ;;
+        *)
+          [[ -n "$url" ]] && open "$url"
+          ;;
+      esac
+      ;;
+
+    notif-done)
+      for id in "$@"; do
+        [[ -z "$id" ]] && continue
+        if ! gh-notifications-done "$id" >/dev/null; then
+          read -n 1 -s -r -p "Press any key to continue..."
+          break
+        fi
+      done
+      ;;
+
+    notif-read)
+      for id in "$@"; do
+        [[ -z "$id" ]] && continue
+        if ! gh-notifications-read "$id" >/dev/null; then
+          read -n 1 -s -r -p "Press any key to continue..."
+          break
+        fi
+      done
+      ;;
+
+    notif-browse)
+      id="$1"
+      [[ -z "$id" ]] && exit 0
+      url="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .url // ""' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      [[ -n "$url" ]] && open "$url"
+      ;;
+
+    notif-yank)
+      id="$1"
+      [[ -z "$id" ]] && exit 0
+      url="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .url // ""' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      [[ -n "$url" ]] && printf '%s' "$url" | pbcopy
+      ;;
+
+    *)
+      echo "Unknown action: $action"
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Checks sub-picker ----------
+#
+# Nested picker over the checks of a pull request. Called as:
+#   fzfg __checks <repo> <number>
+# and its own bindings call back into:
+#   fzfg __checks-action <view|rerun|browse> <repo> <link>
+
+if [[ "$1" == "__checks-action" ]]; then
+  shift
+  a="$1"
+  repo="$2"
+  link="$3"
+
+  case "$a" in
+    view)
+      job_id="$(printf '%s' "$link" | sed -nE 's@.*/job/([0-9]+).*@\1@p')"
+      if [[ -z "$job_id" ]]; then
+        [[ -n "$link" ]] && open "$link"
+        exit 0
+      fi
+      # Open the job summary and logs read-only in nvim. The file is uniquely
+      # named and kept (not deleted) so several can be open at once; stale view
+      # files are pruned.
+      find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfg-view-*' -type f -mmin +60 -delete 2>/dev/null
+      out="${TMPDIR:-/tmp}/fzfg-view-${repo//\//-}-job${job_id}-$$-${RANDOM}.log"
+      {
+        gh run view --repo "$repo" --job "$job_id"
+        echo
+        echo
+        gh run view --repo "$repo" --job "$job_id" --log
+      } > "$out" 2>/dev/null
+      nvim -R "$out"
+      ;;
+
+    rerun)
+      run_id="$(printf '%s' "$link" | sed -nE 's@.*/actions/runs/([0-9]+).*@\1@p')"
+      [[ -z "$run_id" ]] && exit 0
+      if ! gh run rerun "$run_id" --repo "$repo" --failed; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    browse)
+      [[ -n "$link" ]] && open "$link"
+      ;;
+  esac
+  exit 0
+fi
+
+if [[ "$1" == "__checks" ]]; then
+  repo="$2"
+  number="$3"
+  [[ -z "$repo" || -z "$number" ]] && exit 0
+
+  rows="$(gh pr checks "$number" --repo "$repo" \
+    --json bucket,link,name,state,workflow 2>/dev/null | jq -r '
+    def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
+    .[]
+    | (.link // "") as $link
+    | (.state // "") as $state
+    | (if ($state|ascii_upcase) == "SUCCESS" then {ic:"\uf00c", c:"green"}
+       elif ($state|ascii_upcase | test("FAIL|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE")) then {ic:"\u2716", c:"red"}
+       elif ($state|ascii_upcase | test("SKIP|NEUTRAL")) then {ic:"\uebb5", c:"gray"}
+       else {ic:"\uea71", c:"yellow"} end) as $s
+    | (if (.workflow // "") == "" then (.name // "-") else (.workflow + " / " + (.name // "-")) end) as $label
+    | $link + "\t"
+      + "\u001b[" + color($s.c) + "m" + $s.ic + "\u001b[0m " + $label
+  ')"
+
+  if [[ -z "$rows" ]]; then
+    echo "No checks found for $repo#$number"
+    read -n 1 -s -r -p "Press any key to continue..."
+    exit 0
+  fi
+
+  CHECKS_ACTION="$SCRIPT __checks-action"
+
+  printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 2 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_PR Checks $repo#$number: " \
+    --pointer ">" \
+    --border rounded \
+    --border-label " $ICON_GH Checks $repo#$number " \
+    --border-label-pos center \
+    --color "$FZF_COLORS" \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "enter:execute($CHECKS_ACTION view $repo {1})" \
+    --bind "alt-r:execute($CHECKS_ACTION rerun $repo {1})" \
+    --bind "alt-o:execute($CHECKS_ACTION browse $repo {1})"
+  exit 0
+fi
+
+# ---------- Diff (hunk) browser ----------
+#
+# A nested picker over the hunks of a pull request. Called as:
+#   fzfg __diff <repo> <number>
+# The parsed hunks (with their mapped review comments) are cached to a temp file
+# keyed by hunk id; the preview looks a hunk up by id:
+#   fzfg __diff-preview <cache> <id>
+
+if [[ "$1" == "__diff-preview" ]]; then
+  cache="$2"
+  id="$3"
+  [[ -z "$cache" || -z "$id" || ! -f "$cache" ]] && exit 0
+  jq -r --arg id "$id" '
+    (.[] | select(.id == ($id|tonumber))) as $h
+    | ([ if $h.nodiff then
+           ( "_Binary or no textual diff available._",
+             "",
+             "- **Status:** " + ($h.status // "?"),
+             "- **Changes:** +" + ($h.additions|tostring) + " / \u2212" + ($h.deletions|tostring) )
+         else
+           ( "```diff", $h.body, "```" )
+         end ]) as $diff
+    | ($h.threads // []) as $ts
+    | ( $diff
+        + (if ($ts|length) > 0 then
+             ["", "# Threads", ""]
+             + [ ( $ts
+                   | map( ( "**" + (if .isResolved then "Resolved" else "Unresolved" end)
+                            + (if .isOutdated then " \u00b7 outdated" else "" end) + "**"
+                            + "\n\n"
+                            + ( .comments
+                                | map("**@" + (.login // "?") + "** \u00b7 " + (.createdAt // "")
+                                      + "\n\n" + ((.body // "") | gsub("\r"; "")) )
+                                | join("\n\n") ) ) )
+                   | join("\n\n---\n\n") ) ]
+           else [] end) )
+    | join("\n")
+  ' "$cache" | md_render
+  exit 0
+fi
+
+# Render the fzf rows from a diff cache. Used for the initial list and on reload
+# (after a reply changes a hunk's comment count).
+if [[ "$1" == "__diff-rows" ]]; then
+  cache="$2"
+  [[ -z "$cache" || ! -f "$cache" ]] && exit 0
+  jq -r '
+    def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90",cyan:"36"}[c]//"37";
+    def st(s): {added:"A",modified:"M",removed:"D",renamed:"R"}[s]//"?";
+    def sc(s): {added:"green",modified:"yellow",removed:"red",renamed:"mauve"}[s]//"gray";
+    .[] | (.id|tostring) + "\t" + .path + "\t"
+      + "\u001b[" + color(sc(.status)) + "m" + st(.status) + "\u001b[0m " + .path + "  "
+      + (if .nodiff then "(no diff)" else .header end)
+      + ( (.nthreads // 0) as $n | (.nunresolved // 0) as $u
+          | if $u > 0 then "  \u001b[33m\uf442 " + ($u|tostring) + "\u001b[0m"
+            elif $n > 0 then "  \u001b[32m\uf00c " + ($n|tostring) + "\u001b[0m"
+            else "" end )
+  ' "$cache"
+  exit 0
+fi
+
+# Diff browser actions. Called from the __diff fzf bindings as:
+#   fzfg __diff-action <reply|create|resolve> <cache> <repo> <number> <hunk_id>
+# On success they post to GitHub and then refresh the cache (re-fetch the review
+# threads, re-map onto the hunks) so the reload / preview show the change.
+if [[ "$1" == "__diff-action" ]]; then
+  shift
+  a="$1"
+  cache="$2"
+  repo="$3"
+  number="$4"
+  hunk_id="$5"
+  [[ -z "$cache" || ! -f "$cache" || -z "$repo" || -z "$number" || -z "$hunk_id" ]] && exit 0
+
+  case "$a" in
+    reply)
+      # Threads on this hunk as "<root_comment_databaseId>\t<display>".
+      threads="$(jq -r --arg id "$hunk_id" '
+        (.[] | select(.id == ($id|tonumber)) | .threads // [])
+        | map( ((.comments[0].databaseId)|tostring) + "\t"
+               + (if .isResolved then "[resolved] " else "" end)
+               + "@" + (.comments[0].login // "?") + ": "
+               + ((.comments[0].body // "") | gsub("[\r\n]"; " ") | .[0:70])
+               + "  (" + (.comments|length|tostring) + ")" )
+        | .[]
+      ' "$cache")"
+
+      if [[ -z "$threads" ]]; then
+        echo "No review thread on this hunk to reply to"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      if [[ "$(printf '%s\n' "$threads" | grep -c .)" == "1" ]]; then
+        root_id="$(printf '%s' "$threads" | cut -f1)"
+      else
+        sel="$(printf '%s\n' "$threads" | fzf \
+          --ansi \
+          --delimiter $'\t' \
+          --with-nth 2 \
+          --prompt "$ICON_PR Reply to thread: " \
+          --height 100% \
+          --reverse \
+          --border rounded \
+          --color "$FZF_COLORS")"
+        [[ -z "$sel" ]] && exit 0
+        root_id="$(printf '%s' "$sel" | cut -f1)"
+      fi
+      [[ -z "$root_id" ]] && exit 0
+
+      dir="$(mktemp -d)"
+      tmp="$dir/reply.md"
+      nvim "$tmp"
+      if [[ ! -s "$tmp" ]]; then
+        rm -rf "$dir"
+        exit 0
+      fi
+      if ! gh api --method POST "repos/$repo/pulls/$number/comments/$root_id/replies" \
+        -f body="$(cat "$tmp")" >/dev/null 2>&1; then
+        rm -rf "$dir"
+        echo "Failed to post the reply"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      rm -rf "$dir"
+      ;;
+
+    create)
+      node="$(jq -c --arg id "$hunk_id" '.[] | select(.id == ($id|tonumber))' "$cache")"
+      [[ -z "$node" ]] && exit 0
+      if [[ "$(printf '%s' "$node" | jq -r '.nodiff')" == "true" ]]; then
+        echo "Cannot comment on a file with no textual diff"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      path="$(printf '%s' "$node" | jq -r '.path')"
+
+      # Commentable lines as "<line>\t<side>\t<display>". Walking the hunk body
+      # from the @@ header's start lines: '+' / context advance the new side
+      # (RIGHT), '-' / context advance the old side (LEFT).
+      linerows="$(printf '%s' "$node" | jq -r '
+        def color(c): {green:"32",red:"31",gray:"90"}[c]//"37";
+        (.body | split("\n")) as $lines
+        | reduce $lines[] as $l ({rows:[], o:.os, n:.ns};
+            if ($l|startswith("@@")) then .
+            elif ($l|startswith("+")) then .rows += [{line:.n, side:"RIGHT", c:"green", text:$l}] | .n += 1
+            elif ($l|startswith("-")) then .rows += [{line:.o, side:"LEFT", c:"red", text:$l}] | .o += 1
+            elif ($l|startswith("\\")) then .
+            else .rows += [{line:.n, side:"RIGHT", c:"gray", text:$l}] | .n += 1 | .o += 1 end)
+        | .rows[]
+        | (.line|tostring) + "\t" + .side + "\t"
+          + "\u001b[" + color(.c) + "m" + (.text | gsub("\t"; " ")) + "\u001b[0m"
+      ')"
+      [[ -z "$linerows" ]] && exit 0
+
+      sel="$(printf '%s\n' "$linerows" | fzf \
+        --ansi \
+        --delimiter $'\t' \
+        --with-nth 3 \
+        --prompt "$ICON_PR Comment on line: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      [[ -z "$sel" ]] && exit 0
+      line="$(printf '%s' "$sel" | cut -f1)"
+      side="$(printf '%s' "$sel" | cut -f2)"
+      [[ -z "$line" || -z "$side" ]] && exit 0
+
+      dir="$(mktemp -d)"
+      tmp="$dir/comment.md"
+      nvim "$tmp"
+      if [[ ! -s "$tmp" ]]; then
+        rm -rf "$dir"
+        exit 0
+      fi
+      commit="$(gh pr view "$number" --repo "$repo" --json headRefOid -q .headRefOid 2>/dev/null)"
+      if [[ -z "$commit" ]]; then
+        rm -rf "$dir"
+        echo "Could not determine the PR head commit"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      if ! gh api --method POST "repos/$repo/pulls/$number/comments" \
+        -f body="$(cat "$tmp")" \
+        -f commit_id="$commit" \
+        -f path="$path" \
+        -F line="$line" \
+        -f side="$side" >/dev/null 2>&1; then
+        rm -rf "$dir"
+        echo "Failed to create the comment"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      rm -rf "$dir"
+      ;;
+
+    resolve)
+      # Threads on this hunk as "<thread_gid>\t<isResolved>\t<display>".
+      threads="$(jq -r --arg id "$hunk_id" '
+        (.[] | select(.id == ($id|tonumber)) | .threads // [])
+        | map( .gid + "\t" + (.isResolved|tostring) + "\t"
+               + (if .isResolved then "[resolved] " else "[open] " end)
+               + "@" + (.comments[0].login // "?") + ": "
+               + ((.comments[0].body // "") | gsub("[\r\n]"; " ") | .[0:60])
+               + "  (" + (.comments|length|tostring) + ")" )
+        | .[]
+      ' "$cache")"
+
+      if [[ -z "$threads" ]]; then
+        echo "No review thread on this hunk to resolve"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      if [[ "$(printf '%s\n' "$threads" | grep -c .)" == "1" ]]; then
+        sel="$threads"
+      else
+        sel="$(printf '%s\n' "$threads" | fzf \
+          --ansi \
+          --delimiter $'\t' \
+          --with-nth 3 \
+          --prompt "$ICON_PR Resolve / unresolve thread: " \
+          --height 100% \
+          --reverse \
+          --border rounded \
+          --color "$FZF_COLORS")"
+        [[ -z "$sel" ]] && exit 0
+      fi
+      gid="$(printf '%s' "$sel" | cut -f1)"
+      resolved="$(printf '%s' "$sel" | cut -f2)"
+      [[ -z "$gid" ]] && exit 0
+
+      if [[ "$resolved" == "true" ]]; then
+        mutation='mutation($t:ID!){unresolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
+      else
+        mutation='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
+      fi
+      if ! gh api graphql -f query="$mutation" -F t="$gid" >/dev/null 2>&1; then
+        echo "Failed to update the thread"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      ;;
+
+    *)
+      exit 0
+      ;;
+  esac
+
+  # Refresh the cache so the reload / preview show the change.
+  fresh="$(fzfg_fetch_threads "$repo" "$number")"
+  tmpc="$(mktemp)"
+  if jq -c --argjson threads "$fresh" "$FZFG_DIFF_MAP_JQ" "$cache" > "$tmpc" 2>/dev/null; then
+    mv "$tmpc" "$cache"
+  else
+    rm -f "$tmpc"
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "__diff" ]]; then
+  repo="$2"
+  number="$3"
+  [[ -z "$repo" || -z "$number" ]] && exit 0
+
+  files="$(gh api --paginate "repos/$repo/pulls/$number/files" 2>/dev/null)"
+  if [[ -z "$files" || "$files" == "[]" ]]; then
+    echo "No file changes for $repo#$number"
+    read -n 1 -s -r -p "Press any key to continue..."
+    exit 0
+  fi
+  threads="$(fzfg_fetch_threads "$repo" "$number")"
+
+  # Build the hunk cache: split each file's patch into hunks, parse the old/new
+  # line ranges from the @@ header, then map the review threads onto the hunks
+  # (FZFG_DIFF_MAP_JQ) by side-aware line range.
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfg-diff-*' -type f -mmin +60 -delete 2>/dev/null
+  cache="${TMPDIR:-/tmp}/fzfg-diff-${repo//\//-}-pr${number}-$$-${RANDOM}.json"
+  printf '%s' "$files" | jq -c --argjson threads "$threads" '
+    def hunkrange($h):
+      (try ($h | capture("@@ -(?<os>[0-9]+)(,(?<oc>[0-9]+))? \\+(?<ns>[0-9]+)(,(?<nc>[0-9]+))? @@")) catch {})
+      | { os: ((.os // "0")|tonumber), oc: ((.oc // "1")|tonumber), ns: ((.ns // "0")|tonumber), nc: ((.nc // "1")|tonumber) };
+    [ .[]
+      | .filename as $path | .status as $status | .additions as $add | .deletions as $del | (.patch // "") as $patch
+      | if $patch == "" then
+          [ { path:$path, status:$status, additions:$add, deletions:$del, nodiff:true, header:"", body:"", os:0, oc:0, ns:0, nc:0 } ]
+        else
+          ($patch | split("\n")) as $lines
+          | ( reduce $lines[] as $l ({hunks:[], cur:null};
+                if ($l|startswith("@@")) then
+                  { hunks: (.hunks + (if .cur then [.cur] else [] end)), cur: {header:$l, lines:[$l]} }
+                else
+                  if .cur != null then { hunks:.hunks, cur:{header:.cur.header, lines:(.cur.lines + [$l])} } else . end
+                end)
+              | .hunks + (if .cur then [.cur] else [] end) )
+          | map( hunkrange(.header) as $r
+                 | { path:$path, status:$status, additions:$add, deletions:$del, nodiff:false,
+                     header:.header, body:(.lines|join("\n")), os:$r.os, oc:$r.oc, ns:$r.ns, nc:$r.nc } )
+        end
+    ] | (add // []) | to_entries | map(.value + {id: .key})
+    | '"$FZFG_DIFF_MAP_JQ"'
+  ' > "$cache"
+
+  rows="$("$SCRIPT" __diff-rows "$cache")"
+
+  if [[ -z "$rows" ]]; then
+    rm -f "$cache"
+    echo "No hunks for $repo#$number"
+    read -n 1 -s -r -p "Press any key to continue..."
+    exit 0
+  fi
+
+  printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 3 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_PR Diff $repo#$number: " \
+    --pointer ">" \
+    --border rounded \
+    --border-label " $ICON_GH Diff $repo#$number " \
+    --border-label-pos center \
+    --color "$FZF_COLORS" \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "enter:ignore" \
+    --bind "alt-c:execute($SCRIPT __diff-action reply $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
+    --bind "alt-n:execute($SCRIPT __diff-action create $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
+    --bind "alt-x:execute($SCRIPT __diff-action resolve $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
+    --bind "alt-o:execute(open https://github.com/$repo/pull/$number/files)" \
+    --bind "alt-y:execute(printf '%s' {2} | pbcopy)" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __diff-preview $cache {1}"
+
+  rm -f "$cache"
+  exit 0
+fi
+
+# ---------- Main mode ----------
+
+usage() {
+  cat <<'EOF'
+fzfg - Fuzzy Finder for GitHub (gh)
+
+Usage:
+  fzfg          open your GitHub notifications
+  fzfg prs      pick a pull request filter, then browse the matching PRs
+  fzfg issues   pick an issue filter, then browse the matching issues
+  fzfg view [url]  open a PR / issue in nvim (gh://); no url opens the current PR
+
+Pull request / issue filters (sub-picker):
+  Involves           involving you      (involves:USER)
+  Created            created by you      (author:USER)
+  Assigned           assigned to you     (assignee:USER)
+  Mentions           mentioning you      (mentions:USER)
+  Review Requested   awaiting your review (review-requested:USER, PRs only)
+
+When "fzfg prs" / "fzfg issues" is run inside a repository, a
+"Repository (owner/name)" filter for that repo's open pull requests / issues
+is added to the top of the picker.
+
+Pull request keybindings:
+  enter   : (no-op)
+  alt-o   : open the PR in the web browser
+  alt-y   : copy the PR url to the clipboard
+  alt-m   : merge the PR (pick method: merge / squash / rebase, with/without
+            admin; edit the commit subject & body in nvim) or close the PR
+  alt-l   : add / remove a label
+  alt-e   : edit the PR title / body (opens nvim)
+  alt-d   : browse the PR diff hunk-by-hunk in fzf (preview shows the hunk and
+            its review threads with resolved state; alt-c reply, alt-n new
+            thread on a line, alt-x resolve/unresolve, alt-o web, alt-y yank path)
+  alt-g   : check out the PR and open nvim with :GitDiff (current repo only,
+            requires a clean worktree)
+  alt-v   : review the PR (approve / comment / request changes, body in nvim)
+  alt-c   : add a comment (opens nvim)
+  alt-a   : assign the PR to me
+  alt-k   : open the checks sub-picker (GitHub Actions)
+  alt-w   : toggle draft / ready for review
+  alt-r   : reload the list
+  ctrl-p  : toggle preview
+  ctrl-d  : half page down
+  ctrl-u  : half page up
+  ctrl-f  : preview half page down
+  ctrl-b  : preview half page up
+
+The PR preview shows the details and description, the checks, and the comments.
+
+In the checks sub-picker (alt-k):
+  enter   : view the job summary and logs in nvim
+  alt-r   : rerun failed jobs for the check's run
+  alt-o   : open the check in the web browser
+
+Issue keybindings:
+  enter   : (no-op)
+  alt-o   : open the issue in the web browser
+  alt-y   : copy the issue url to the clipboard
+  alt-l   : add / remove a label
+  alt-a   : assign the issue to me
+  alt-e   : edit the issue title / body (opens nvim)
+  alt-c   : add a comment (opens nvim)
+  alt-x   : close the issue (pick reason: completed / not planned / duplicate)
+  alt-r   : reload the list
+
+The issue preview shows the details and description and the comments.
+
+Notification keybindings:
+  enter   : open the notification (PR / issue in nvim, else in the browser)
+  tab     : select / deselect (multi-select for batch read / done)
+  alt-d   : mark selected notifications as done
+  alt-e   : mark selected notifications as read
+  alt-o   : open the notification in the web browser
+  alt-y   : copy the notification url to the clipboard
+  alt-r   : reload the list
+  ctrl-p  : toggle preview
+
+The notification preview shows the PR / issue (with comments and checks) or
+the notification summary for other subject types.
+
+Environment:
+  FZFG_USER          GitHub login used in the filters (default: ricoberger)
+  FZFG_LIMIT         Max pull requests / issues to fetch (default: 100)
+  FZFG_PR_FILTERS    Override the PR filter sub-picker entries. Newline-
+                     separated "Name|query" entries, e.g.
+                     $'Mine|is:open author:me\nTeam|is:open team:org/x'
+  FZFG_ISSUE_FILTERS Override the issue filter sub-picker entries (same format)
+EOF
+}
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+# ---------- Pull request picker ----------
+
+run_prs() {
+  local query="$1"
+  export FZFG_QUERY="$query"
+  export FZFG_LIMIT FZFG_USER FZFG_ONE_REPO FZFG_ONE_NUMBER
+
+  local ROWS
+  ROWS="$("$SCRIPT" __list prs "$query")" || exit 1
+  if [[ -z "$ROWS" ]]; then
+    echo "No pull requests found for: $query" >&2
+    exit 1
+  fi
+
+  local ACTION="$SCRIPT __action"
+
+  clear
+  printf '%s\n' "$ROWS" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 4 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_PR Pull Requests: " \
+    --pointer ">" \
+    --border rounded \
+    --border-label " $ICON_GH ${query#__repo } " \
+    --border-label-pos center \
+    --color "$FZF_COLORS" \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "alt-r:reload($SCRIPT __list prs)" \
+    --bind "enter:ignore" \
+    --bind "alt-o:execute($ACTION pr-browse {1} {2})" \
+    --bind "alt-y:execute($ACTION pr-yank {1} {2})" \
+    --bind "alt-m:execute($ACTION pr-merge {1} {2})+reload($SCRIPT __list prs)" \
+    --bind "alt-l:execute($ACTION pr-labels {1} {2})+refresh-preview" \
+    --bind "alt-e:execute($ACTION pr-edit {1} {2})+reload($SCRIPT __list prs)+refresh-preview" \
+    --bind "alt-d:execute($ACTION pr-diff {1} {2})" \
+    --bind "alt-g:execute($ACTION pr-checkout {1} {2})" \
+    --bind "alt-v:execute($ACTION pr-review {1} {2})+refresh-preview" \
+    --bind "alt-c:execute($ACTION pr-comment {1} {2})+refresh-preview" \
+    --bind "alt-a:execute($ACTION pr-assign {1} {2})+refresh-preview" \
+    --bind "alt-k:execute($ACTION pr-checks {1} {2})" \
+    --bind "alt-w:execute($ACTION pr-toggle-draft {1} {2} {3})+reload($SCRIPT __list prs)" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview pr {1} {2}"
+}
+
+# ---------- Notification picker ----------
+
+run_notifications() {
+  # Use a unique cache file per session (shared with the child preview / action
+  # processes via the exported env var) so concurrent fzfg instances do not
+  # clobber each other's notifications. Removed when this process exits.
+  FZFG_NOTIF_CACHE="$(mktemp -t fzfg-notifications)"
+  export FZFG_NOTIF_CACHE
+  trap 'rm -f "$FZFG_NOTIF_CACHE"' EXIT
+
+  local ROWS
+  ROWS="$("$SCRIPT" __list notifications)" || exit 1
+  if [[ -z "$ROWS" ]]; then
+    echo "No notifications found" >&2
+    exit 1
+  fi
+
+  local ACTION="$SCRIPT __action"
+
+  clear
+  printf '%s\n' "$ROWS" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 2 \
+    --multi \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_NOTIF Notifications: " \
+    --pointer ">" \
+    --marker "$ICON_MARK" \
+    --border rounded \
+    --border-label " $ICON_GH Notifications " \
+    --border-label-pos center \
+    --color "$FZF_COLORS" \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "alt-r:reload($SCRIPT __list notifications)" \
+    --bind "enter:execute($ACTION notif-open {1})" \
+    --bind "alt-o:execute($ACTION notif-browse {1})" \
+    --bind "alt-y:execute($ACTION notif-yank {1})" \
+    --bind "alt-d:execute($ACTION notif-done {+1})+reload($SCRIPT __list notifications)" \
+    --bind "alt-e:execute($ACTION notif-read {+1})+reload($SCRIPT __list notifications)" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview notif {1}"
+}
+
+# ---------- Issue picker ----------
+
+run_issues() {
+  local query="$1"
+  export FZFG_QUERY="$query"
+  export FZFG_LIMIT FZFG_USER FZFG_ONE_REPO FZFG_ONE_NUMBER
+
+  local ROWS
+  ROWS="$("$SCRIPT" __list issues "$query")" || exit 1
+  if [[ -z "$ROWS" ]]; then
+    echo "No issues found for: $query" >&2
+    exit 1
+  fi
+
+  local ACTION="$SCRIPT __action"
+
+  clear
+  printf '%s\n' "$ROWS" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 3 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_ISSUE Issues: " \
+    --pointer ">" \
+    --border rounded \
+    --border-label " $ICON_ISSUE ${query#__repo } " \
+    --border-label-pos center \
+    --color "$FZF_COLORS" \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "alt-r:reload($SCRIPT __list issues)" \
+    --bind "enter:ignore" \
+    --bind "alt-o:execute($ACTION issue-browse {1} {2})" \
+    --bind "alt-y:execute($ACTION issue-yank {1} {2})" \
+    --bind "alt-l:execute($ACTION issue-labels {1} {2})+refresh-preview" \
+    --bind "alt-a:execute($ACTION issue-assign {1} {2})+refresh-preview" \
+    --bind "alt-e:execute($ACTION issue-edit {1} {2})+reload($SCRIPT __list issues)+refresh-preview" \
+    --bind "alt-c:execute($ACTION issue-comment {1} {2})+refresh-preview" \
+    --bind "alt-x:execute($ACTION issue-close {1} {2})+reload($SCRIPT __list issues)" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview issue {1} {2}"
+}
+
+# Show a sub-picker of named filters and print the query of the selected one to
+# stdout. Returns non-zero when nothing is selected. Arguments after the label
+# are the "Name|query" filter entries.
+choose_query() {
+  local label="$1"
+  shift
+  local entries=("$@")
+
+  local selected
+  selected=$(printf '%s\n' "${entries[@]%%|*}" | fzf \
+    --prompt "$ICON_GH Filter: " \
+    --height 100% \
+    --reverse \
+    --border rounded \
+    --border-label " $label " \
+    --border-label-pos center \
+    --color "$FZF_COLORS")
+  [[ -z "$selected" ]] && return 1
+
+  local f
+  for f in "${entries[@]}"; do
+    if [[ "${f%%|*}" == "$selected" ]]; then
+      printf '%s' "${f#*|}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Build a filter entry array from an override env var (newline-separated
+# "Name|query" entries) when set, otherwise from a default array. The result is
+# stored in the global FZFG_FILTERS_RESULT array.
+load_filters() {
+  local override="$1"
+  shift
+  FZFG_FILTERS_RESULT=()
+  if [[ -n "$override" ]]; then
+    local line
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && FZFG_FILTERS_RESULT+=("$line")
+    done <<< "$override"
+  else
+    FZFG_FILTERS_RESULT=("$@")
+  fi
+}
+
+case "${1:-}" in
+  "" | notifications)
+    run_notifications
+    ;;
+
+  prs)
+    load_filters "$FZFG_PR_FILTERS" "${FZFG_PR_DEFAULT_FILTERS[@]}"
+    # When run inside a repository, offer a filter for its open pull requests.
+    current_repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
+    if [[ -n "$current_repo" ]]; then
+      FZFG_FILTERS_RESULT=(
+        "Repository ($current_repo)|__repo $current_repo"
+        "${FZFG_FILTERS_RESULT[@]}"
+      )
+    fi
+    query="$(choose_query "$ICON_PR Pull Request Filters" "${FZFG_FILTERS_RESULT[@]}")" || exit 0
+    run_prs "$query"
+    ;;
+
+  issues)
+    load_filters "$FZFG_ISSUE_FILTERS" "${FZFG_ISSUE_DEFAULT_FILTERS[@]}"
+    # When run inside a repository, offer a filter for its open issues.
+    current_repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
+    if [[ -n "$current_repo" ]]; then
+      FZFG_FILTERS_RESULT=(
+        "Repository ($current_repo)|__repo $current_repo"
+        "${FZFG_FILTERS_RESULT[@]}"
+      )
+    fi
+    query="$(choose_query "$ICON_ISSUE Issue Filters" "${FZFG_FILTERS_RESULT[@]}")" || exit 0
+    run_issues "$query"
+    ;;
+
+  view)
+    # Show a single PR / issue inside the fzf list (with preview + actions). A
+    # url argument selects the PR / issue; with no argument the currently
+    # checked out PR is used.
+    if [[ -n "$2" ]]; then
+      stripped="${2#https://}"
+      stripped="${stripped#github.com/}"
+      case "$2" in
+        *"/issues/"*)
+          FZFG_ONE_REPO="${stripped%%/issues/*}"
+          rest="${stripped##*/issues/}"
+          FZFG_ONE_NUMBER="${rest%%[!0-9]*}"
+          run_issues ""
+          ;;
+        *)
+          FZFG_ONE_REPO="${stripped%%/pull/*}"
+          rest="${stripped##*/pull/}"
+          FZFG_ONE_NUMBER="${rest%%[!0-9]*}"
+          run_prs ""
+          ;;
+      esac
+    else
+      pr="$(gh pr view --json headRepositoryOwner,headRepository,number 2>/dev/null)"
+      if [[ -z "$pr" ]]; then
+        echo "No pull request found for the current branch" >&2
+        exit 1
+      fi
+      FZFG_ONE_REPO="$(printf '%s' "$pr" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')"
+      FZFG_ONE_NUMBER="$(printf '%s' "$pr" | jq -r '.number')"
+      run_prs ""
+    fi
+    ;;
+
+  *)
+    echo "Unknown command: $1" >&2
+    echo "Usage: fzfg [prs|issues|view [url]]  (no argument opens notifications)" >&2
+    exit 1
+    ;;
+esac
