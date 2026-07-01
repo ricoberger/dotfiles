@@ -3,7 +3,7 @@
 # fzfg - Fuzzy Finder for GitHub (gh)
 #
 # Usage:
-#   fzfg          open your GitHub notifications (via the gh-notifications script)
+#   fzfg          open your GitHub notifications (gh-notifications, else gh api)
 #   fzfg prs      pick a pull request filter, then browse the matching PRs
 #   fzfg issues   pick an issue filter, then browse the matching issues
 #   fzfg view [url]  open a PR / issue in nvim (gh://); no url = current PR
@@ -12,8 +12,10 @@
 # review-requested) mirror the searches from the Neovim configuration and are
 # powered by "gh search prs" / "gh search issues".
 #
-# Requires: gh, jq, fzf, nvim and the GITHUB_NOTIFICATIONS_TOKEN environment
-# variable (used by gh-notifications).
+# Requires: gh, jq, fzf, nvim. The notifications feature uses the
+# "gh-notifications" script (mobile inbox, needs GITHUB_NOTIFICATIONS_TOKEN)
+# when it is on PATH, and otherwise falls back to the GitHub REST notifications
+# API via "gh api".
 
 SCRIPT="$(realpath "$0")"
 
@@ -54,6 +56,63 @@ ICON_PR=$'\xef\x90\x87'     # pull request
 ICON_ISSUE=$'\xef\x90\x9b'  # issue
 ICON_NOTIF=$'\xee\xa9\xb1'  # notification
 ICON_MARK=$'\xf3\xb0\x84\xb2'  # multi-select marker (matches fzfe)
+
+# ---------- Notifications source ----------
+#
+# Wrapper around the external "gh-notifications" helper (which talks to the
+# GitHub mobile GraphQL inbox). When that script is not on PATH, fall back to
+# the public GitHub REST notifications API via "gh api" so the notifications
+# feature still works - with the thinner data the REST endpoint exposes. The
+# REST payload is normalised into the same field names the list renderer,
+# preview and action handlers already read; fields the REST API does not
+# provide (PR / issue state, draft, check conclusion, summary body) are left
+# unset and simply degrade to default icon colours / the title in previews.
+gh_notifications() {
+  if command -v gh-notifications >/dev/null 2>&1; then
+    gh-notifications "$@"
+    return
+  fi
+
+  local sub="${1:-list}"
+  shift 2>/dev/null || true
+
+  case "$sub" in
+    list)
+      local raw
+      raw="$(gh api --header "Accept: application/vnd.github+json" \
+        "notifications?all=true&per_page=100")" || return 1
+      printf '%s' "$raw" | jq -c '
+        [ .[]
+          | (.subject.type // "") as $type
+          | (.subject.url // "") as $su
+          | (.repository.html_url // "") as $rhtml
+          | (try ($su | capture("/(?<n>[0-9]+)$").n) catch "") as $num
+          | (if $type == "PullRequest" and $su != "" then
+               ($su | sub("^https://api.github.com/repos/"; "https://github.com/") | sub("/pulls/"; "/pull/"))
+             elif $type == "Issue" and $su != "" then
+               ($su | sub("^https://api.github.com/repos/"; "https://github.com/"))
+             elif $rhtml != "" then $rhtml
+             else ($su | sub("^https://api.github.com/repos/"; "https://github.com/")) end) as $html
+          | { id: (.id // ""), isUnread: (.unread // false), reason: (.reason // ""),
+              lastUpdatedAt: (.updated_at // ""), title: (.subject.title // ""),
+              url: $html, summaryItemBody: null,
+              subject: { __typename: $type, number: (if $num == "" then null else ($num|tonumber) end) } }
+        ]'
+      ;;
+    read)
+      [[ -z "${1:-}" ]] && return 1
+      gh api --silent --method PATCH "notifications/threads/$1"
+      ;;
+    done)
+      [[ -z "${1:-}" ]] && return 1
+      gh api --silent --method DELETE "notifications/threads/$1"
+      ;;
+    *)
+      echo "gh_notifications: unknown command '$sub'" >&2
+      return 1
+      ;;
+  esac
+}
 
 # ---------- List mode ----------
 #
@@ -182,7 +241,7 @@ if [[ "$1" == "__list" ]]; then
 
     notifications)
       err="$(mktemp)"
-      out="$(gh-notifications 2>"$err")"
+      out="$(gh_notifications 2>"$err")"
       status=$?
       if [[ $status -ne 0 ]]; then
         cat "$err" >&2
@@ -983,7 +1042,7 @@ if [[ "$1" == "__action" ]]; then
     notif-done)
       for id in "$@"; do
         [[ -z "$id" ]] && continue
-        if ! gh-notifications done "$id" >/dev/null; then
+        if ! gh_notifications done "$id" >/dev/null; then
           read -n 1 -s -r -p "Press any key to continue..."
           break
         fi
@@ -993,7 +1052,7 @@ if [[ "$1" == "__action" ]]; then
     notif-read)
       for id in "$@"; do
         [[ -z "$id" ]] && continue
-        if ! gh-notifications read "$id" >/dev/null; then
+        if ! gh_notifications read "$id" >/dev/null; then
           read -n 1 -s -r -p "Press any key to continue..."
           break
         fi
