@@ -724,6 +724,83 @@ if [[ "$1" == "__action" ]]; then
       rm -rf "$dir"
       ;;
 
+    pr-request-review)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      owner="${repo%%/*}"
+      name="${repo#*/}"
+
+      # Fetch the reviewer candidates in a single GraphQL query: the suggested
+      # reviewers (the "recommended reviewers" GitHub shows in the web UI, via
+      # git blame / involvement), the full list of assignable users, the PR
+      # author (excluded below) and the currently requested reviewers (tagged).
+      cand="$(gh api graphql \
+        -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){author{login} suggestedReviewers{isAuthor isCommenter reviewer{login name}} reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login}}}} } assignableUsers(first:100){nodes{login name}}}}' \
+        -F owner="$owner" -F name="$name" -F number="$number" 2>/dev/null)"
+      if [[ -z "$cand" ]]; then
+        echo "Could not fetch reviewer candidates for $repo#$number"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      # Rows: "<login>\t<display>". Suggested reviewers first (highlighted),
+      # then the remaining assignable users. The PR author is excluded; users
+      # with a pending request are tagged "(requested)". The display shows the
+      # login and, when set, the user's name (also searchable via --with-nth 2).
+      rows="$(printf '%s' "$cand" | jq -r '
+        def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
+        .data.repository as $r
+        | ($r.pullRequest.author.login // "") as $author
+        | ([ $r.pullRequest.reviewRequests.nodes[]?
+             | .requestedReviewer | select(.__typename == "User") | .login ]) as $requested
+        | ([ $r.pullRequest.suggestedReviewers[]? | .reviewer.login ]) as $suggested
+        | ( [ $r.pullRequest.suggestedReviewers[]? | .reviewer ] + $r.assignableUsers.nodes )
+          | map(select(.login != $author))
+          | reduce .[] as $u ([]; if ((map(.login)) | index($u.login)) then . else . + [$u] end)
+          | .[]
+        | .login as $login
+        | ((.name // "") | gsub("[\t\n\r]"; " ")) as $name
+        | ($suggested | index($login)) as $issug
+        | ($requested | index($login)) as $isreq
+        | $login + "\t"
+          + (if $issug then "\u001b[" + color("mauve") + "m\uf4ff\u001b[0m " else "  " end)
+          + "@" + $login
+          + (if $name != "" then " \u001b[" + color("gray") + "m" + $name + "\u001b[0m" else "" end)
+          + (if $issug then " \u001b[" + color("mauve") + "m(suggested)\u001b[0m" else "" end)
+          + (if $isreq then " \u001b[" + color("gray") + "m(requested)\u001b[0m" else "" end)
+      ')"
+
+      if [[ -z "$rows" ]]; then
+        echo "No reviewer candidates for $repo#$number"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      # Multi-select the reviewers; the hidden first field is the login.
+      logins="$(printf '%s\n' "$rows" | fzf \
+        --ansi \
+        --delimiter $'\t' \
+        --with-nth 2 \
+        --multi \
+        --height 100% \
+        --reverse \
+        --prompt "$ICON_PR Request review $repo#$number: " \
+        --marker "$ICON_MARK" \
+        --border rounded \
+        --color "$FZF_COLORS" \
+        | cut -f1)"
+      [[ -z "$logins" ]] && exit 0
+
+      # Join the selected logins into a comma-separated list.
+      reviewers="$(printf '%s' "$logins" | paste -sd, -)"
+      [[ -z "$reviewers" ]] && exit 0
+
+      if ! gh pr edit "$number" --repo "$repo" --add-reviewer "$reviewers"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
     pr-checkout)
       repo="$1"
       number="$2"
@@ -1424,6 +1501,8 @@ Pull request keybindings:
   alt-g   : check out the PR and open nvim with :GitDiff (current repo only,
             requires a clean worktree)
   alt-v   : review the PR (approve / comment / request changes, body in nvim)
+  alt-q   : request a review (pick from suggested + assignable reviewers,
+            multi-select)
   alt-c   : add a comment (opens nvim)
   alt-a   : assign the PR to me
   alt-k   : open the checks sub-picker (GitHub Actions)
@@ -1528,6 +1607,7 @@ run_prs() {
     --bind "alt-d:execute($ACTION pr-diff {1} {2})" \
     --bind "alt-g:execute($ACTION pr-checkout {1} {2})" \
     --bind "alt-v:execute($ACTION pr-review {1} {2})+refresh-preview" \
+    --bind "alt-q:execute($ACTION pr-request-review {1} {2})+refresh-preview" \
     --bind "alt-c:execute($ACTION pr-comment {1} {2})+refresh-preview" \
     --bind "alt-a:execute($ACTION pr-assign {1} {2})+refresh-preview" \
     --bind "alt-k:execute($ACTION pr-checks {1} {2})" \
