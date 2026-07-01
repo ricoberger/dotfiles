@@ -23,7 +23,7 @@ FZFJ_PROJECT="${FZFJ_PROJECT:-CORE}"
 # the FZFJ_FILTERS env var (newline-separated "Name|JQL" entries); otherwise
 # these baked defaults are used.
 FZFJ_DEFAULT_FILTERS=(
-  "Board|project = CORE AND statusCategory != Done AND status != \"Backlog\" AND issuetype != \"Epic\" ORDER BY updated DESC"
+  "Board|project = CORE AND statusCategory != Done AND status != \"Backlog\" AND issuetype != \"Sub-Task\" AND issuetype != \"Epic\" ORDER BY updated DESC"
   "Assigned|project = CORE AND assignee = currentUser() AND statusCategory != Done AND status != Backlog ORDER BY priority DESC, updated DESC"
   "Backlog|project = CORE AND status = \"Backlog\" AND issuetype != \"Sub-Task\" AND issuetype != \"Epic\" ORDER BY created DESC"
 )
@@ -102,6 +102,35 @@ if [[ "$1" == "__preview" ]]; then
 
   acli jira workitem view "$key" --fields "*all"
 
+  subtasks="$(acli jira workitem view "$key" --fields subtasks --json 2>/dev/null)"
+  if [[ -n "$subtasks" ]]; then
+    printf '%s' "$subtasks" | jq -r '
+      def pad(s; n): (s + (" " * 60))[0:n];
+      def color(c):
+        {
+          green: "32",
+          yellow: "33",
+          "blue-gray": "34",
+          brown: "33",
+          "medium-gray": "37",
+          "warm-red": "31"
+        }[c] // "37";
+      (.fields.subtasks // []) as $subs
+      | if ($subs | length) == 0 then empty
+        else
+          "",
+          "─── Sub-tasks (\($subs | length)) ───",
+          "",
+          ($subs[]
+            | (.fields.status.statusCategory.colorName // "medium-gray") as $c
+            | "  " + pad((.key // "-"); 12) + " "
+              + "\u001b[" + color($c) + "m" + pad((.fields.status.name // "-"); 14) + "\u001b[0m" + " "
+              + ((.fields.summary // "-") | gsub("[\t\n\r]"; " "))
+          )
+        end
+    '
+  fi
+
   links="$(acli jira workitem view "$key" --fields issuelinks --json 2>/dev/null)"
   if [[ -n "$links" ]]; then
     echo
@@ -170,6 +199,21 @@ if [[ "$1" == "__action" ]]; then
 
     web)
       acli jira workitem view "$key" --web >/dev/null 2>&1
+      ;;
+
+    subtasks)
+      # Drill into an issue's sub-tasks in a nested picker so that every normal
+      # action (transition, assign, comment, edit, link, …) is available for
+      # them. Relaunches the script with a `parent = <key>` JQL, which reuses
+      # the whole main mode (list + bindings). No-op when there are none.
+      count="$(acli jira workitem view "$key" --fields subtasks --json 2>/dev/null \
+        | jq -r '(.fields.subtasks // []) | length')"
+      if [[ -z "$count" || "$count" == "0" ]]; then
+        echo "No sub-tasks for $key"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      "$SCRIPT" "parent = $key ORDER BY created ASC"
       ;;
 
     assign)
@@ -502,6 +546,7 @@ Keybindings:
   alt-e   : edit the work item (type / summary / description)
   alt-n   : create a new work item
   alt-l   : manage links (list / delete / create)
+  alt-s   : show the work item's sub-tasks in a nested picker
   alt-o   : open the work item in the web browser
   alt-r   : reload the list
   ctrl-p  : toggle preview
@@ -511,6 +556,9 @@ Keybindings:
   ctrl-b  : preview half page up
 
 The preview shows the work item details, its links, and its comment thread.
+
+When a work item has sub-tasks, alt-s opens them in a nested picker (a new
+fzfj list scoped to `parent = <key>`) where every action above is available.
 
 In the links picker (alt-l):
   enter   : open the linked work item
@@ -618,6 +666,7 @@ fzf \
   --bind "alt-e:execute($ACTION edit {1})+reload($SCRIPT __list)+refresh-preview" \
   --bind "alt-n:execute($ACTION create)+reload($SCRIPT __list)" \
   --bind "alt-l:execute($ACTION link {1})+refresh-preview" \
+  --bind "alt-s:execute($ACTION subtasks {1})+reload($SCRIPT __list)+refresh-preview" \
   --bind "alt-o:execute($ACTION web {1})" \
   --preview-window "right:65%" \
   --preview "$SCRIPT __preview {1}" \
