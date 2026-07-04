@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
-# fzfg - Fuzzy Finder for GitHub (gh)
+# fzfgh - Fuzzy Finder for GitHub (gh)
 #
 # Usage:
-#   fzfg          open your GitHub notifications (gh-notifications, else gh api)
-#   fzfg prs      pick a pull request filter, then browse the matching PRs
-#   fzfg issues   pick an issue filter, then browse the matching issues
-#   fzfg view [url]  open a PR / issue in nvim (gh://); no url = current PR
+#   fzfgh          open your GitHub notifications (gh-notifications, else gh api)
+#   fzfgh prs      pick a pull request filter, then browse the matching PRs
+#   fzfgh issues   pick an issue filter, then browse the matching issues
+#   fzfgh view [url]  open a PR / issue in nvim (gh://); no url = current PR
 #
 # The pull request and issue filters (involves / author / assignee / mentions /
 # review-requested) mirror the searches from the Neovim configuration and are
@@ -19,32 +19,32 @@
 
 SCRIPT="$(realpath "$0")"
 
-# GitHub login used in the pull request search filters (override via FZFG_USER).
-FZFG_USER="${FZFG_USER:-ricoberger}"
-# Maximum number of pull requests to fetch (override via FZFG_LIMIT). The
+# GitHub login used in the pull request search filters (override via FZFGH_USER).
+FZFGH_USER="${FZFGH_USER:-ricoberger}"
+# Maximum number of pull requests to fetch (override via FZFGH_LIMIT). The
 # notifications list is fixed at 100 by the gh-notifications script.
-FZFG_LIMIT="${FZFG_LIMIT:-100}"
+FZFGH_LIMIT="${FZFGH_LIMIT:-100}"
 # Cache file for the raw notifications JSON. The preview and action handlers
 # look notifications up by id in this file, so it has to be a stable path that
 # the fzf child processes can read.
-FZFG_NOTIF_CACHE="${FZFG_NOTIF_CACHE:-${TMPDIR:-/tmp}/fzfg-notifications.json}"
+FZFGH_NOTIF_CACHE="${FZFGH_NOTIF_CACHE:-${TMPDIR:-/tmp}/fzfgh-notifications.json}"
 
 # Named filters shown in a sub-picker when the "prs" / "issues" commands are
 # run. Each entry is "Name|query". Override the whole list at runtime via the
-# FZFG_PR_FILTERS / FZFG_ISSUE_FILTERS env vars (newline-separated "Name|query"
+# FZFGH_PR_FILTERS / FZFGH_ISSUE_FILTERS env vars (newline-separated "Name|query"
 # entries); otherwise these baked defaults are used.
-FZFG_PR_DEFAULT_FILTERS=(
-  "Involves|archived:false is:open involves:$FZFG_USER"
-  "Created|archived:false is:open author:$FZFG_USER"
-  "Assigned|archived:false is:open assignee:$FZFG_USER"
-  "Mentions|archived:false is:open mentions:$FZFG_USER"
-  "Review Requested|archived:false is:open review-requested:$FZFG_USER"
+FZFGH_PR_DEFAULT_FILTERS=(
+  "Involves|archived:false is:open involves:$FZFGH_USER"
+  "Created|archived:false is:open author:$FZFGH_USER"
+  "Assigned|archived:false is:open assignee:$FZFGH_USER"
+  "Mentions|archived:false is:open mentions:$FZFGH_USER"
+  "Review Requested|archived:false is:open review-requested:$FZFGH_USER"
 )
-FZFG_ISSUE_DEFAULT_FILTERS=(
-  "Involves|archived:false is:open involves:$FZFG_USER"
-  "Created|archived:false is:open author:$FZFG_USER"
-  "Assigned|archived:false is:open assignee:$FZFG_USER"
-  "Mentions|archived:false is:open mentions:$FZFG_USER"
+FZFGH_ISSUE_DEFAULT_FILTERS=(
+  "Involves|archived:false is:open involves:$FZFGH_USER"
+  "Created|archived:false is:open author:$FZFGH_USER"
+  "Assigned|archived:false is:open assignee:$FZFGH_USER"
+  "Mentions|archived:false is:open mentions:$FZFGH_USER"
 )
 
 # Nerd font glyphs used in bash-side prompts / labels. Defined via byte escapes
@@ -115,9 +115,9 @@ gh_notifications() {
 # ---------- List mode ----------
 #
 # Called for the initial feed and on every reload as:
-#   fzfg __list <prs|issues|notifications> [query]
+#   fzfgh __list <prs|issues|notifications> [query]
 #
-# For pull requests and issues the query is read from the FZFG_QUERY environment
+# For pull requests and issues the query is read from the FZFGH_QUERY environment
 # variable when not passed explicitly, so the fzf reload binding stays
 # quoting-safe.
 
@@ -126,20 +126,20 @@ if [[ "$1" == "__list" ]]; then
 
   case "$kind" in
     prs)
-      query="${3:-$FZFG_QUERY}"
+      query="${3:-$FZFGH_QUERY}"
       err="$(mktemp)"
-      if [[ -n "$FZFG_ONE_REPO" ]]; then
+      if [[ -n "$FZFGH_ONE_REPO" ]]; then
         # View command: a single pull request, fetched directly and wrapped in
         # an array so the renderer below is unchanged.
-        out="$(gh pr view "$FZFG_ONE_NUMBER" --repo "$FZFG_ONE_REPO" \
+        out="$(gh pr view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
           --json number,title,author,state,isDraft,url 2>"$err" \
-          | jq -c --arg r "$FZFG_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
         status=$?
       elif [[ "$query" == "__repo "* ]]; then
         # Repository filter: list a single repo's open PRs straight from the API
         # (gh pr list) instead of the search index, which lags for new PRs.
         one_repo="${query#__repo }"
-        out="$(gh pr list --repo "$one_repo" --state open --limit "$FZFG_LIMIT" \
+        out="$(gh pr list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
           --json number,title,author,state,isDraft,url 2>"$err" \
           | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
         status=$?
@@ -151,7 +151,7 @@ if [[ "$1" == "__list" ]]; then
         # pull requests.
         read -ra query_args <<< "$query"
         out="$(gh search prs "${query_args[@]}" \
-          --limit "$FZFG_LIMIT" \
+          --limit "$FZFGH_LIMIT" \
           --json number,title,repository,author,state,isDraft,url 2>"$err")"
         status=$?
       fi
@@ -185,20 +185,20 @@ if [[ "$1" == "__list" ]]; then
       ;;
 
     issues)
-      query="${3:-$FZFG_QUERY}"
+      query="${3:-$FZFGH_QUERY}"
       err="$(mktemp)"
-      if [[ -n "$FZFG_ONE_REPO" ]]; then
+      if [[ -n "$FZFGH_ONE_REPO" ]]; then
         # View command: a single issue, fetched directly and wrapped in an array.
-        out="$(gh issue view "$FZFG_ONE_NUMBER" --repo "$FZFG_ONE_REPO" \
+        out="$(gh issue view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
           --json number,title,author,state,url 2>"$err" \
-          | jq -c --arg r "$FZFG_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
         status=$?
       elif [[ "$query" == "__repo "* ]]; then
         # Repository filter: list a single repo's open issues straight from the
         # API (gh issue list) instead of the search index, which lags for new
         # issues.
         one_repo="${query#__repo }"
-        out="$(gh issue list --repo "$one_repo" --state open --limit "$FZFG_LIMIT" \
+        out="$(gh issue list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
           --json number,title,author,state,url 2>"$err" \
           | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
         status=$?
@@ -206,7 +206,7 @@ if [[ "$1" == "__list" ]]; then
         # Split the query into its individual qualifiers (see the prs branch).
         read -ra query_args <<< "$query"
         out="$(gh search issues "${query_args[@]}" \
-          --limit "$FZFG_LIMIT" \
+          --limit "$FZFGH_LIMIT" \
           --json number,title,repository,author,state,url 2>"$err")"
         status=$?
       fi
@@ -250,7 +250,7 @@ if [[ "$1" == "__list" ]]; then
 
       # Cache the raw JSON so the preview / action handlers can look a
       # notification up by id without re-fetching.
-      printf '%s' "$out" > "$FZFG_NOTIF_CACHE"
+      printf '%s' "$out" > "$FZFGH_NOTIF_CACHE"
 
       # Tab-delimited rows: <id>\t<display>. The id stays hidden (--with-nth 2).
       printf '%s' "$out" | jq -r '
@@ -314,9 +314,9 @@ fi
 # ---------- Preview mode ----------
 #
 # Called from the fzf --preview binding as:
-#   fzfg __preview pr    <repo> <number>
-#   fzfg __preview issue <repo> <number>
-#   fzfg __preview notif <id>
+#   fzfgh __preview pr    <repo> <number>
+#   fzfgh __preview issue <repo> <number>
+#   fzfgh __preview notif <id>
 
 # Render markdown read from stdin with md, falling back to the raw markdown when
 # md is not installed. Unlike glow, md emits colour for a non-TTY stdout, so it
@@ -335,7 +335,7 @@ md_render() {
 #       comments:[ {databaseId, login, createdAt, body} ] } ]
 # gid is the thread node id (for resolve/unresolve mutations); each comment's
 # databaseId is the REST id (used to reply). Emits "[]" on error.
-fzfg_fetch_threads() {
+fzfgh_fetch_threads() {
   local repo="$1"
   local number="$2"
   local owner="${repo%%/*}"
@@ -354,7 +354,7 @@ fzfg_fetch_threads() {
 # jq snippet (used by the cache build and the refresh) that maps a simplified
 # threads array (passed as --argjson threads) onto an array of hunks: RIGHT-side
 # threads match the hunk's new-line range, LEFT-side threads its old-line range.
-FZFG_DIFF_MAP_JQ='
+FZFGH_DIFF_MAP_JQ='
   map( .os as $os | .oc as $oc | .ns as $ns | .nc as $nc | .path as $hpath | .nodiff as $nd
        | ($threads | map(select(
             (.path == $hpath) and ($nd|not)
@@ -497,7 +497,7 @@ if [[ "$1" == "__preview" ]]; then
     notif)
       id="$3"
       [[ -z "$id" ]] && exit 0
-      node="$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      node="$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$FZFGH_NOTIF_CACHE" 2>/dev/null)"
       [[ -z "$node" ]] && exit 0
 
       type="$(printf '%s' "$node" | jq -r '.subject.__typename // ""')"
@@ -532,7 +532,7 @@ fi
 # ---------- Action handlers ----------
 #
 # Called recursively from fzf bindings as:
-#   fzfg __action <action> <args...>
+#   fzfgh __action <action> <args...>
 
 if [[ "$1" == "__action" ]]; then
   shift
@@ -1009,7 +1009,7 @@ if [[ "$1" == "__action" ]]; then
     notif-open)
       id="$1"
       [[ -z "$id" ]] && exit 0
-      node="$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      node="$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$FZFGH_NOTIF_CACHE" 2>/dev/null)"
       [[ -z "$node" ]] && exit 0
       type="$(printf '%s' "$node" | jq -r '.subject.__typename // ""')"
       repo="$(printf '%s' "$node" | jq -r 'try (.url | capture("github.com/(?<r>[^/]+/[^/]+)").r) catch ""')"
@@ -1050,14 +1050,14 @@ if [[ "$1" == "__action" ]]; then
     notif-browse)
       id="$1"
       [[ -z "$id" ]] && exit 0
-      url="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .url // ""' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      url="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .url // ""' "$FZFGH_NOTIF_CACHE" 2>/dev/null)"
       [[ -n "$url" ]] && open "$url"
       ;;
 
     notif-yank)
       id="$1"
       [[ -z "$id" ]] && exit 0
-      url="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .url // ""' "$FZFG_NOTIF_CACHE" 2>/dev/null)"
+      url="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .url // ""' "$FZFGH_NOTIF_CACHE" 2>/dev/null)"
       [[ -n "$url" ]] && printf '%s' "$url" | pbcopy
       ;;
 
@@ -1072,9 +1072,9 @@ fi
 # ---------- Checks sub-picker ----------
 #
 # Nested picker over the checks of a pull request. Called as:
-#   fzfg __checks <repo> <number>
+#   fzfgh __checks <repo> <number>
 # and its own bindings call back into:
-#   fzfg __checks-action <view|rerun|browse> <repo> <link>
+#   fzfgh __checks-action <view|rerun|browse> <repo> <link>
 
 if [[ "$1" == "__checks-action" ]]; then
   shift
@@ -1092,8 +1092,8 @@ if [[ "$1" == "__checks-action" ]]; then
       # Open the job summary and logs read-only in nvim. The file is uniquely
       # named and kept (not deleted) so several can be open at once; stale view
       # files are pruned.
-      find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfg-view-*' -type f -mmin +60 -delete 2>/dev/null
-      out="${TMPDIR:-/tmp}/fzfg-view-${repo//\//-}-job${job_id}-$$-${RANDOM}.log"
+      find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfgh-view-*' -type f -mmin +60 -delete 2>/dev/null
+      out="${TMPDIR:-/tmp}/fzfgh-view-${repo//\//-}-job${job_id}-$$-${RANDOM}.log"
       {
         gh run view --repo "$repo" --job "$job_id"
         echo
@@ -1169,10 +1169,10 @@ fi
 # ---------- Diff (hunk) browser ----------
 #
 # A nested picker over the hunks of a pull request. Called as:
-#   fzfg __diff <repo> <number>
+#   fzfgh __diff <repo> <number>
 # The parsed hunks (with their mapped review comments) are cached to a temp file
 # keyed by hunk id; the preview looks a hunk up by id:
-#   fzfg __diff-preview <cache> <id>
+#   fzfgh __diff-preview <cache> <id>
 
 if [[ "$1" == "__diff-preview" ]]; then
   cache="$2"
@@ -1228,7 +1228,7 @@ if [[ "$1" == "__diff-rows" ]]; then
 fi
 
 # Diff browser actions. Called from the __diff fzf bindings as:
-#   fzfg __diff-action <reply|create|resolve> <cache> <repo> <number> <hunk_id>
+#   fzfgh __diff-action <reply|create|resolve> <cache> <repo> <number> <hunk_id>
 # On success they post to GitHub and then refresh the cache (re-fetch the review
 # threads, re-map onto the hunks) so the reload / preview show the change.
 if [[ "$1" == "__diff-action" ]]; then
@@ -1414,9 +1414,9 @@ if [[ "$1" == "__diff-action" ]]; then
   esac
 
   # Refresh the cache so the reload / preview show the change.
-  fresh="$(fzfg_fetch_threads "$repo" "$number")"
+  fresh="$(fzfgh_fetch_threads "$repo" "$number")"
   tmpc="$(mktemp)"
-  if jq -c --argjson threads "$fresh" "$FZFG_DIFF_MAP_JQ" "$cache" > "$tmpc" 2>/dev/null; then
+  if jq -c --argjson threads "$fresh" "$FZFGH_DIFF_MAP_JQ" "$cache" > "$tmpc" 2>/dev/null; then
     mv "$tmpc" "$cache"
   else
     rm -f "$tmpc"
@@ -1435,13 +1435,13 @@ if [[ "$1" == "__diff" ]]; then
     read -n 1 -s -r -p "Press any key to continue..."
     exit 0
   fi
-  threads="$(fzfg_fetch_threads "$repo" "$number")"
+  threads="$(fzfgh_fetch_threads "$repo" "$number")"
 
   # Build the hunk cache: split each file's patch into hunks, parse the old/new
   # line ranges from the @@ header, then map the review threads onto the hunks
-  # (FZFG_DIFF_MAP_JQ) by side-aware line range.
-  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfg-diff-*' -type f -mmin +60 -delete 2>/dev/null
-  cache="${TMPDIR:-/tmp}/fzfg-diff-${repo//\//-}-pr${number}-$$-${RANDOM}.json"
+  # (FZFGH_DIFF_MAP_JQ) by side-aware line range.
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfgh-diff-*' -type f -mmin +60 -delete 2>/dev/null
+  cache="${TMPDIR:-/tmp}/fzfgh-diff-${repo//\//-}-pr${number}-$$-${RANDOM}.json"
   printf '%s' "$files" | jq -c --argjson threads "$threads" '
     def hunkrange($h):
       (try ($h | capture("@@ -(?<os>[0-9]+)(,(?<oc>[0-9]+))? \\+(?<ns>[0-9]+)(,(?<nc>[0-9]+))? @@")) catch {})
@@ -1464,7 +1464,7 @@ if [[ "$1" == "__diff" ]]; then
                      header:.header, body:(.lines|join("\n")), os:$r.os, oc:$r.oc, ns:$r.ns, nc:$r.nc } )
         end
     ] | (add // []) | to_entries | map(.value + {id: .key})
-    | '"$FZFG_DIFF_MAP_JQ"'
+    | '"$FZFGH_DIFF_MAP_JQ"'
   ' > "$cache"
 
   rows="$("$SCRIPT" __diff-rows "$cache")"
@@ -1510,13 +1510,13 @@ fi
 
 usage() {
   cat <<'EOF'
-fzfg - Fuzzy Finder for GitHub (gh)
+fzfgh - Fuzzy Finder for GitHub (gh)
 
 Usage:
-  fzfg          open your GitHub notifications
-  fzfg prs      pick a pull request filter, then browse the matching PRs
-  fzfg issues   pick an issue filter, then browse the matching issues
-  fzfg view [url]  open a PR / issue in nvim (gh://); no url opens the current PR
+  fzfgh          open your GitHub notifications
+  fzfgh prs      pick a pull request filter, then browse the matching PRs
+  fzfgh issues   pick an issue filter, then browse the matching issues
+  fzfgh view [url]  open a PR / issue in nvim (gh://); no url opens the current PR
 
 Pull request / issue filters (sub-picker):
   Involves           involving you      (involves:USER)
@@ -1525,7 +1525,7 @@ Pull request / issue filters (sub-picker):
   Mentions           mentioning you      (mentions:USER)
   Review Requested   awaiting your review (review-requested:USER, PRs only)
 
-When "fzfg prs" / "fzfg issues" is run inside a repository, a
+When "fzfgh prs" / "fzfgh issues" is run inside a repository, a
 "Repository (owner/name)" filter for that repo's open pull requests / issues
 is added to the top of the picker.
 
@@ -1590,12 +1590,12 @@ The notification preview shows the PR / issue (with comments and checks) or
 the notification summary for other subject types.
 
 Environment:
-  FZFG_USER          GitHub login used in the filters (default: ricoberger)
-  FZFG_LIMIT         Max pull requests / issues to fetch (default: 100)
-  FZFG_PR_FILTERS    Override the PR filter sub-picker entries. Newline-
+  FZFGH_USER          GitHub login used in the filters (default: ricoberger)
+  FZFGH_LIMIT         Max pull requests / issues to fetch (default: 100)
+  FZFGH_PR_FILTERS    Override the PR filter sub-picker entries. Newline-
                      separated "Name|query" entries, e.g.
                      $'Mine|is:open author:me\nTeam|is:open team:org/x'
-  FZFG_ISSUE_FILTERS Override the issue filter sub-picker entries (same format)
+  FZFGH_ISSUE_FILTERS Override the issue filter sub-picker entries (same format)
 EOF
 }
 
@@ -1608,8 +1608,8 @@ fi
 
 run_prs() {
   local query="$1"
-  export FZFG_QUERY="$query"
-  export FZFG_LIMIT FZFG_USER FZFG_ONE_REPO FZFG_ONE_NUMBER
+  export FZFGH_QUERY="$query"
+  export FZFGH_LIMIT FZFGH_USER FZFGH_ONE_REPO FZFGH_ONE_NUMBER
 
   local ROWS
   ROWS="$("$SCRIPT" __list prs "$query")" || exit 1
@@ -1661,11 +1661,11 @@ run_prs() {
 
 run_notifications() {
   # Use a unique cache file per session (shared with the child preview / action
-  # processes via the exported env var) so concurrent fzfg instances do not
+  # processes via the exported env var) so concurrent fzfgh instances do not
   # clobber each other's notifications. Removed when this process exits.
-  FZFG_NOTIF_CACHE="$(mktemp -t fzfg-notifications)"
-  export FZFG_NOTIF_CACHE
-  trap 'rm -f "$FZFG_NOTIF_CACHE"' EXIT
+  FZFGH_NOTIF_CACHE="$(mktemp -t fzfgh-notifications)"
+  export FZFGH_NOTIF_CACHE
+  trap 'rm -f "$FZFGH_NOTIF_CACHE"' EXIT
 
   local ROWS
   ROWS="$("$SCRIPT" __list notifications)" || exit 1
@@ -1710,8 +1710,8 @@ run_notifications() {
 
 run_issues() {
   local query="$1"
-  export FZFG_QUERY="$query"
-  export FZFG_LIMIT FZFG_USER FZFG_ONE_REPO FZFG_ONE_NUMBER
+  export FZFGH_QUERY="$query"
+  export FZFGH_LIMIT FZFGH_USER FZFGH_ONE_REPO FZFGH_ONE_NUMBER
 
   local ROWS
   ROWS="$("$SCRIPT" __list issues "$query")" || exit 1
@@ -1783,18 +1783,18 @@ choose_query() {
 
 # Build a filter entry array from an override env var (newline-separated
 # "Name|query" entries) when set, otherwise from a default array. The result is
-# stored in the global FZFG_FILTERS_RESULT array.
+# stored in the global FZFGH_FILTERS_RESULT array.
 load_filters() {
   local override="$1"
   shift
-  FZFG_FILTERS_RESULT=()
+  FZFGH_FILTERS_RESULT=()
   if [[ -n "$override" ]]; then
     local line
     while IFS= read -r line; do
-      [[ -n "$line" ]] && FZFG_FILTERS_RESULT+=("$line")
+      [[ -n "$line" ]] && FZFGH_FILTERS_RESULT+=("$line")
     done <<< "$override"
   else
-    FZFG_FILTERS_RESULT=("$@")
+    FZFGH_FILTERS_RESULT=("$@")
   fi
 }
 
@@ -1804,30 +1804,30 @@ case "${1:-}" in
     ;;
 
   prs)
-    load_filters "$FZFG_PR_FILTERS" "${FZFG_PR_DEFAULT_FILTERS[@]}"
+    load_filters "$FZFGH_PR_FILTERS" "${FZFGH_PR_DEFAULT_FILTERS[@]}"
     # When run inside a repository, offer a filter for its open pull requests.
     current_repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
     if [[ -n "$current_repo" ]]; then
-      FZFG_FILTERS_RESULT=(
+      FZFGH_FILTERS_RESULT=(
         "Repository ($current_repo)|__repo $current_repo"
-        "${FZFG_FILTERS_RESULT[@]}"
+        "${FZFGH_FILTERS_RESULT[@]}"
       )
     fi
-    query="$(choose_query "$ICON_PR Pull Request Filters" "${FZFG_FILTERS_RESULT[@]}")" || exit 0
+    query="$(choose_query "$ICON_PR Pull Request Filters" "${FZFGH_FILTERS_RESULT[@]}")" || exit 0
     run_prs "$query"
     ;;
 
   issues)
-    load_filters "$FZFG_ISSUE_FILTERS" "${FZFG_ISSUE_DEFAULT_FILTERS[@]}"
+    load_filters "$FZFGH_ISSUE_FILTERS" "${FZFGH_ISSUE_DEFAULT_FILTERS[@]}"
     # When run inside a repository, offer a filter for its open issues.
     current_repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
     if [[ -n "$current_repo" ]]; then
-      FZFG_FILTERS_RESULT=(
+      FZFGH_FILTERS_RESULT=(
         "Repository ($current_repo)|__repo $current_repo"
-        "${FZFG_FILTERS_RESULT[@]}"
+        "${FZFGH_FILTERS_RESULT[@]}"
       )
     fi
-    query="$(choose_query "$ICON_ISSUE Issue Filters" "${FZFG_FILTERS_RESULT[@]}")" || exit 0
+    query="$(choose_query "$ICON_ISSUE Issue Filters" "${FZFGH_FILTERS_RESULT[@]}")" || exit 0
     run_issues "$query"
     ;;
 
@@ -1840,15 +1840,15 @@ case "${1:-}" in
       stripped="${stripped#github.com/}"
       case "$2" in
         *"/issues/"*)
-          FZFG_ONE_REPO="${stripped%%/issues/*}"
+          FZFGH_ONE_REPO="${stripped%%/issues/*}"
           rest="${stripped##*/issues/}"
-          FZFG_ONE_NUMBER="${rest%%[!0-9]*}"
+          FZFGH_ONE_NUMBER="${rest%%[!0-9]*}"
           run_issues ""
           ;;
         *)
-          FZFG_ONE_REPO="${stripped%%/pull/*}"
+          FZFGH_ONE_REPO="${stripped%%/pull/*}"
           rest="${stripped##*/pull/}"
-          FZFG_ONE_NUMBER="${rest%%[!0-9]*}"
+          FZFGH_ONE_NUMBER="${rest%%[!0-9]*}"
           run_prs ""
           ;;
       esac
@@ -1858,15 +1858,15 @@ case "${1:-}" in
         echo "No pull request found for the current branch" >&2
         exit 1
       fi
-      FZFG_ONE_REPO="$(printf '%s' "$pr" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')"
-      FZFG_ONE_NUMBER="$(printf '%s' "$pr" | jq -r '.number')"
+      FZFGH_ONE_REPO="$(printf '%s' "$pr" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')"
+      FZFGH_ONE_NUMBER="$(printf '%s' "$pr" | jq -r '.number')"
       run_prs ""
     fi
     ;;
 
   *)
     echo "Unknown command: $1" >&2
-    echo "Usage: fzfg [prs|issues|view [url]]  (no argument opens notifications)" >&2
+    echo "Usage: fzfgh [prs|issues|view [url]]  (no argument opens notifications)" >&2
     exit 1
     ;;
 esac
