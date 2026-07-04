@@ -6,8 +6,6 @@
 
 SCRIPT="$(realpath "$0")"
 
-FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
-
 # ---------- Action handlers ----------
 #
 # Called recursively from fzf bindings as:
@@ -44,8 +42,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰩺 Delete $resource/$name$ns_label: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       [[ "$confirm" != "Yes" ]] && exit 0
       kubectl delete "${ns_arg[@]}" "$resource" "$name"
       read -n 1 -s -r -p "Press any key to continue..."
@@ -63,8 +60,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰆧 Container: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")
+        --border rounded)
       [[ -z "$container" ]] && exit 0
       kubectl logs "${ns_arg[@]}" "$resource/$name" -c "$container" --tail=500 -f
       ;;
@@ -81,8 +77,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰆧 Container: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")
+        --border rounded)
       [[ -z "$container" ]] && exit 0
       kubectl exec "${ns_arg[@]}" -it "$resource/$name" -c "$container" -- \
         sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
@@ -100,8 +95,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰮏 Port: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")
+        --border rounded)
       [[ -z "$port" ]] && exit 0
       printf "Local port [%s]: " "$port"
       read -r local_port
@@ -221,7 +215,6 @@ fzf \
   --border "rounded" \
   --border-label " 󱃾 $LIST_CMD " \
   --border-label-pos center \
-  --color "$FZF_COLORS" \
   --bind "ctrl-d:half-page-down" \
   --bind "ctrl-u:half-page-up" \
   --bind "ctrl-f:preview-half-page-down" \

@@ -50,8 +50,6 @@ FZFJ_DEFAULT_LINK_TYPES=(
   "is tested by|Tests|in"
 )
 
-FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
-
 # ---------- acli OAuth helpers ----------
 #
 # acli cannot edit some fields (e.g. a work item's parent/Epic — no --parent on
@@ -336,8 +334,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰋐 Assign $key: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")
+        --border rounded)
       [[ -z "$choice" ]] && exit 0
 
       assign_args=(--key "$key" --yes)
@@ -363,8 +360,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰒍 Transition $key: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")
+        --border rounded)
       [[ -z "$status" ]] && exit 0
 
       if ! acli jira workitem transition --key "$key" --status "$status" --yes; then
@@ -383,8 +379,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰏫 Edit $key: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")
+        --border rounded)
       [[ -z "$field" ]] && exit 0
 
       case "$field" in
@@ -396,8 +391,7 @@ if [[ "$1" == "__action" ]]; then
                 --prompt "󰜢 Type ($key): " \
                 --height 100% \
                 --reverse \
-                --border rounded \
-                --color "$FZF_COLORS")
+                --border rounded)
           [[ -z "$new_type" ]] && exit 0
           if ! acli jira workitem edit --key "$key" --type "$new_type" --yes; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -469,8 +463,7 @@ if [[ "$1" == "__action" ]]; then
         --header "KEY          STATUS         SUMMARY" \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       [[ -z "$esel" ]] && exit 0
       epic="$(printf '%s' "$esel" | awk '{print $1}')"
       [[ -z "$epic" ]] && exit 0
@@ -485,8 +478,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰈻 Flag $key: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")
+        --border rounded)
       [[ -z "$choice" ]] && exit 0
 
       case "$choice" in
@@ -509,8 +501,7 @@ if [[ "$1" == "__action" ]]; then
             --prompt "󰜢 Type ($project): " \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")
+            --border rounded)
       [[ -z "$type" ]] && exit 0
 
       printf "Summary: "
@@ -523,8 +514,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰏫 Add description: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       desc_file=""
       if [[ "$adddesc" == "Yes" ]]; then
         desc_file="$(mktemp)"
@@ -581,7 +571,6 @@ if [[ "$1" == "__action" ]]; then
         --height 100% \
         --reverse \
         --border rounded \
-        --color "$FZF_COLORS" \
         --expect=alt-n,alt-d)"
       [[ $? -ne 0 ]] && exit 0
 
@@ -597,8 +586,7 @@ if [[ "$1" == "__action" ]]; then
             --prompt "󰩺 Delete link to ${linkedkey:-?}: " \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")"
+            --border rounded)"
           [[ "$confirm" != "Yes" ]] && exit 0
           if ! acli jira workitem link delete --id "$linkid" --yes; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -618,8 +606,7 @@ if [[ "$1" == "__action" ]]; then
             --header "KEY          STATUS         SUMMARY" \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")"
+            --border rounded)"
           case $? in
             0) target="$(printf '%s\n' "$tsel" | sed -n '2p' | awk '{print $1}')" ;;
             1) target="$(printf '%s\n' "$tsel" | sed -n '1p' | tr -d '[:space:]')" ;;
@@ -641,8 +628,7 @@ if [[ "$1" == "__action" ]]; then
             --prompt "󰌹 $key … $target: " \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")"
+            --border rounded)"
           [[ -z "$ltlabel" ]] && exit 0
 
           ltname=""
@@ -788,8 +774,7 @@ else
     --reverse \
     --border rounded \
     --border-label " 󰌪 Jira Filters " \
-    --border-label-pos center \
-    --color "$FZF_COLORS")
+    --border-label-pos center)
   [[ -z "$selected" ]] && exit 0
 
   FZFJ_JQL=""
@@ -831,7 +816,6 @@ fzf \
   --border "rounded" \
   --border-label " 󰌪 $FZFJ_JQL " \
   --border-label-pos center \
-  --color "$FZF_COLORS" \
   --bind "ctrl-d:half-page-down" \
   --bind "ctrl-u:half-page-up" \
   --bind "ctrl-f:preview-half-page-down" \

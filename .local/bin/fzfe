@@ -23,8 +23,6 @@ FZFE_PREVIEW_COMMAND="${FZFE_PREVIEW_COMMAND:-bat}"
 # is the operation (cp / mv); the remaining lines are the absolute source paths.
 FZFE_CLIPBOARD="${FZFE_CLIPBOARD:-${TMPDIR:-/tmp}/fzfe-clipboard}"
 
-FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
-
 # ---------- List mode ----------
 #
 # Called for the initial feed and on every reload. Lists the entries of the
@@ -168,8 +166,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "󰩺 Delete $# item(s): " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       if [[ "$confirm" == "Yes" ]]; then
         for f in "$@"; do
           [[ -n "$f" ]] && rm -r "$f"
@@ -266,7 +263,6 @@ while true; do
     --border "rounded" \
     --border-label " 󱉭 $(pwd)/ " \
     --border-label-pos center \
-    --color "$FZF_COLORS" \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \

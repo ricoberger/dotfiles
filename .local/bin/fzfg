@@ -47,8 +47,6 @@ FZFG_ISSUE_DEFAULT_FILTERS=(
   "Mentions|archived:false is:open mentions:$FZFG_USER"
 )
 
-FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
-
 # Nerd font glyphs used in bash-side prompts / labels. Defined via byte escapes
 # so they do not depend on a bash that supports the \u / \U printf escapes.
 ICON_GH=$'\xef\x90\x87'     # pull request
@@ -575,8 +573,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "$ICON_PR Merge $repo#$number: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       [[ -z "$choice" ]] && exit 0
 
       if [[ "$choice" == "Close pull request" ]]; then
@@ -634,16 +631,14 @@ if [[ "$1" == "__action" ]]; then
         --prompt "$ICON_PR Labels $repo#$number: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       case "$choice" in
         "Add label")
           label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
             --prompt "$ICON_PR Add label: " \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")"
+            --border rounded)"
           [[ -z "$label" ]] && exit 0
           if ! gh pr edit "$number" --repo "$repo" --add-label "$label"; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -654,8 +649,7 @@ if [[ "$1" == "__action" ]]; then
             --prompt "$ICON_PR Remove label: " \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")"
+            --border rounded)"
           [[ -z "$label" ]] && exit 0
           if ! gh pr edit "$number" --repo "$repo" --remove-label "$label"; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -754,8 +748,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "$ICON_PR Review $repo#$number: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       [[ -z "$choice" ]] && exit 0
 
       # Optional body for "Approve", required for "Comment" / "Request changes".
@@ -847,7 +840,6 @@ if [[ "$1" == "__action" ]]; then
         --prompt "$ICON_PR Request review $repo#$number: " \
         --marker "$ICON_MARK" \
         --border rounded \
-        --color "$FZF_COLORS" \
         | cut -f1)"
       [[ -z "$logins" ]] && exit 0
 
@@ -922,16 +914,14 @@ if [[ "$1" == "__action" ]]; then
         --prompt "$ICON_ISSUE Labels $repo#$number: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       case "$choice" in
         "Add label")
           label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
             --prompt "$ICON_ISSUE Add label: " \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")"
+            --border rounded)"
           [[ -z "$label" ]] && exit 0
           if ! gh issue edit "$number" --repo "$repo" --add-label "$label"; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -942,8 +932,7 @@ if [[ "$1" == "__action" ]]; then
             --prompt "$ICON_ISSUE Remove label: " \
             --height 100% \
             --reverse \
-            --border rounded \
-            --color "$FZF_COLORS")"
+            --border rounded)"
           [[ -z "$label" ]] && exit 0
           if ! gh issue edit "$number" --repo "$repo" --remove-label "$label"; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -962,8 +951,7 @@ if [[ "$1" == "__action" ]]; then
         --prompt "$ICON_ISSUE Close $repo#$number: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       [[ -z "$choice" ]] && exit 0
       case "$choice" in
         "Close as completed") reason="completed" ;;
@@ -1170,7 +1158,6 @@ if [[ "$1" == "__checks" ]]; then
     --border rounded \
     --border-label " $ICON_GH Checks $repo#$number " \
     --border-label-pos center \
-    --color "$FZF_COLORS" \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
     --bind "enter:execute($CHECKS_ACTION view $repo {1})" \
@@ -1282,8 +1269,7 @@ if [[ "$1" == "__diff-action" ]]; then
           --prompt "$ICON_PR Reply to thread: " \
           --height 100% \
           --reverse \
-          --border rounded \
-          --color "$FZF_COLORS")"
+          --border rounded)"
         [[ -z "$sel" ]] && exit 0
         root_id="$(printf '%s' "$sel" | cut -f1)"
       fi
@@ -1341,8 +1327,7 @@ if [[ "$1" == "__diff-action" ]]; then
         --prompt "$ICON_PR Comment on line: " \
         --height 100% \
         --reverse \
-        --border rounded \
-        --color "$FZF_COLORS")"
+        --border rounded)"
       [[ -z "$sel" ]] && exit 0
       line="$(printf '%s' "$sel" | cut -f1)"
       side="$(printf '%s' "$sel" | cut -f2)"
@@ -1404,8 +1389,7 @@ if [[ "$1" == "__diff-action" ]]; then
           --prompt "$ICON_PR Resolve / unresolve thread: " \
           --height 100% \
           --reverse \
-          --border rounded \
-          --color "$FZF_COLORS")"
+          --border rounded)"
         [[ -z "$sel" ]] && exit 0
       fi
       gid="$(printf '%s' "$sel" | cut -f1)"
@@ -1504,7 +1488,6 @@ if [[ "$1" == "__diff" ]]; then
     --border rounded \
     --border-label " $ICON_GH Diff $repo#$number " \
     --border-label-pos center \
-    --color "$FZF_COLORS" \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
@@ -1650,7 +1633,6 @@ run_prs() {
     --border rounded \
     --border-label " $ICON_GH ${query#__repo } " \
     --border-label-pos center \
-    --color "$FZF_COLORS" \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
@@ -1709,7 +1691,6 @@ run_notifications() {
     --border rounded \
     --border-label " $ICON_GH Notifications " \
     --border-label-pos center \
-    --color "$FZF_COLORS" \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
@@ -1754,7 +1735,6 @@ run_issues() {
     --border rounded \
     --border-label " $ICON_ISSUE ${query#__repo } " \
     --border-label-pos center \
-    --color "$FZF_COLORS" \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
@@ -1788,8 +1768,7 @@ choose_query() {
     --reverse \
     --border rounded \
     --border-label " $label " \
-    --border-label-pos center \
-    --color "$FZF_COLORS")
+    --border-label-pos center)
   [[ -z "$selected" ]] && return 1
 
   local f
