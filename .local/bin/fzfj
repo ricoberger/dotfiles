@@ -17,6 +17,10 @@ fi
 FZFJ_LIMIT="${FZFJ_LIMIT:-250}"
 # Project used when creating new work items (override via FZFJ_PROJECT).
 FZFJ_PROJECT="${FZFJ_PROJECT:-CORE}"
+# Custom field id backing the "Flagged" field, used by the flag action and the
+# preview indicator (override via FZFJ_FLAG_FIELD). customfield_10002 is the
+# standard Jira Software "Flagged" field on most sites.
+FZFJ_FLAG_FIELD="${FZFJ_FLAG_FIELD:-customfield_10002}"
 
 # Named JQL filters shown in a picker when fzfj is launched without a JQL
 # argument. Each entry is "Name|JQL". Override the whole list at runtime via
@@ -47,6 +51,79 @@ FZFJ_DEFAULT_LINK_TYPES=(
 )
 
 FZF_COLORS='fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4'
+
+# ---------- acli OAuth helpers ----------
+#
+# acli cannot edit some fields (e.g. a work item's parent/Epic — no --parent on
+# edit and --from-json rejects it — or the Flagged field), so the `epic` and
+# `flag` actions talk to the Jira REST API directly, reusing the OAuth token
+# acli stored in the macOS keychain.
+
+# Print acli's current Jira profile ("<cloud_id>:<account_id>"), read from
+# acli's config. The cloud_id (part before the first colon) is used to build
+# REST URLs; the whole string is the keychain account suffix.
+fzfj_jira_profile() {
+  sed -n 's/^current_profile:[[:space:]]*//p' \
+    "${HOME}/.config/acli/jira_config.yaml" 2>/dev/null \
+    | tr -d '"' | head -n1
+}
+
+# Print acli's current OAuth access token, extracted from the macOS keychain.
+# The value is stored by go-keyring as "go-keyring-base64:<base64(gzip(json))>".
+fzfj_jira_token() {
+  local profile="$1"
+  security find-generic-password -s acli -a "jira:${profile}" -w 2>/dev/null \
+    | sed 's/^go-keyring-base64://' \
+    | base64 -d 2>/dev/null \
+    | gunzip 2>/dev/null \
+    | jq -r '.access_token // empty'
+}
+
+# PUT a partial field update to a work item via the Jira REST API, using acli's
+# keychain OAuth token. Args: <key> <json-body>. Returns 0 and prints nothing
+# on success (HTTP 204); on any error prints a message, waits for a keypress,
+# and returns 1.
+fzfj_jira_put() {
+  local key="$1" data="$2"
+  local profile cloud_id token resp code body
+
+  profile="$(fzfj_jira_profile)"
+  cloud_id="${profile%%:*}"
+  if [[ -z "$profile" || -z "$cloud_id" ]]; then
+    echo "Could not determine the acli Jira profile."
+    echo "Have you run 'acli jira auth login --web'?"
+    read -n 1 -s -r -p "Press any key to continue..."
+    return 1
+  fi
+
+  # acli keeps the keychain token fresh through normal use; a stale one
+  # surfaces as HTTP 401 below.
+  token="$(fzfj_jira_token "$profile")"
+  if [[ -z "$token" ]]; then
+    echo "Could not read the acli OAuth token from the keychain."
+    read -n 1 -s -r -p "Press any key to continue..."
+    return 1
+  fi
+
+  resp="$(curl -s --max-time 30 -w '\n%{http_code}' -X PUT \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    "https://api.atlassian.com/ex/jira/$cloud_id/rest/api/3/issue/$key" \
+    --data "$data")"
+  code="$(printf '%s' "$resp" | tail -n1)"
+  body="$(printf '%s' "$resp" | sed '$d')"
+
+  if [[ "$code" == "204" ]]; then
+    return 0
+  elif [[ "$code" == "401" ]]; then
+    echo "Unauthorized (HTTP 401). Re-authenticate with 'acli jira auth login --web'."
+  else
+    echo "Request failed (HTTP $code)."
+    [[ -n "$body" ]] && printf '%s\n' "$body"
+  fi
+  read -n 1 -s -r -p "Press any key to continue..."
+  return 1
+}
 
 # ---------- List mode ----------
 #
@@ -101,6 +178,44 @@ if [[ "$1" == "__preview" ]]; then
   [[ -z "$key" ]] && exit 0
 
   acli jira workitem view "$key" --fields "*all"
+
+  flagged="$(acli jira workitem view "$key" --fields "$FZFJ_FLAG_FIELD" --json 2>/dev/null)"
+  if [[ -n "$flagged" ]]; then
+    printf '%s' "$flagged" | jq -r --arg ff "$FZFJ_FLAG_FIELD" '
+      (.fields[$ff] // []) as $f
+      | if ($f | length) == 0 then empty
+        else "", "\u001b[31m󰈻 Flagged (\($f | map(.value) | join(", ")))\u001b[0m"
+        end
+    '
+  fi
+
+  parent="$(acli jira workitem view "$key" --fields parent --json 2>/dev/null)"
+  if [[ -n "$parent" ]]; then
+    printf '%s' "$parent" | jq -r '
+      def pad(s; n): (s + (" " * 60))[0:n];
+      def color(c):
+        {
+          green: "32",
+          yellow: "33",
+          "blue-gray": "34",
+          brown: "33",
+          "medium-gray": "37",
+          "warm-red": "31"
+        }[c] // "37";
+      (.fields.parent // empty) as $p
+      | if ($p | not) then empty
+        else
+          ($p.fields.issuetype.name // "Parent") as $t
+          | ($p.fields.status.statusCategory.colorName // "medium-gray") as $c
+          | "",
+            "─── \($t) ───",
+            "",
+            "  " + pad(($p.key // "-"); 12) + " "
+              + "\u001b[" + color($c) + "m" + pad(($p.fields.status.name // "-"); 14) + "\u001b[0m" + " "
+              + (($p.fields.summary // "-") | gsub("[\t\n\r]"; " "))
+        end
+    '
+  fi
 
   subtasks="$(acli jira workitem view "$key" --fields subtasks --json 2>/dev/null)"
   if [[ -n "$subtasks" ]]; then
@@ -336,6 +451,54 @@ if [[ "$1" == "__action" ]]; then
       esac
       ;;
 
+    epic)
+      # Set / change the work item's parent Epic. acli can't do this, so this
+      # calls the Jira REST API directly with acli's keychain OAuth token.
+
+      # Pick a target Epic from the project (reusing the list renderer).
+      epic_rows="$("$SCRIPT" __list "project = $FZFJ_PROJECT AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC" 2>/dev/null)"
+      if [[ -z "$epic_rows" ]]; then
+        echo "No open Epics found in project $FZFJ_PROJECT."
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      esel="$(printf '%s\n' "$epic_rows" | fzf \
+        --ansi \
+        --prompt "󰜢 Epic $key: " \
+        --header "KEY          STATUS         SUMMARY" \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      [[ -z "$esel" ]] && exit 0
+      epic="$(printf '%s' "$esel" | awk '{print $1}')"
+      [[ -z "$epic" ]] && exit 0
+
+      fzfj_jira_put "$key" "{\"fields\":{\"parent\":{\"key\":\"$epic\"}}}"
+      ;;
+
+    flag)
+      # Add / remove the "Flagged" (Impediment) marker. acli can't edit this
+      # field, so this calls the Jira REST API directly.
+      choice=$(printf '%s\n' "Flag (Impediment)" "Unflag" | fzf \
+        --prompt "󰈻 Flag $key: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")
+      [[ -z "$choice" ]] && exit 0
+
+      case "$choice" in
+        "Flag (Impediment)")
+          fzfj_jira_put "$key" "{\"fields\":{\"$FZFJ_FLAG_FIELD\":[{\"value\":\"Impediment\"}]}}"
+          ;;
+        "Unflag")
+          fzfj_jira_put "$key" "{\"fields\":{\"$FZFJ_FLAG_FIELD\":[]}}"
+          ;;
+      esac
+      ;;
+
     create)
       project="$FZFJ_PROJECT"
 
@@ -356,10 +519,14 @@ if [[ "$1" == "__action" ]]; then
 
       create_args=(--project "$project" --type "$type" --summary "$summary")
 
-      printf "Add description? [y/N]: "
-      read -r adddesc
+      adddesc="$(printf '%s\n' "No" "Yes" | fzf \
+        --prompt "󰏫 Add description: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
       desc_file=""
-      if [[ "$adddesc" =~ ^[Yy]$ ]]; then
+      if [[ "$adddesc" == "Yes" ]]; then
         desc_file="$(mktemp)"
         nvim "$desc_file"
         [[ -s "$desc_file" ]] && create_args+=(--description-file "$desc_file")
@@ -544,6 +711,8 @@ Keybindings:
   alt-t   : transition the work item (pick a status)
   alt-c   : add a comment to the work item (opens in nvim)
   alt-e   : edit the work item (type / summary / description)
+  alt-p   : set / change the work item's parent Epic (pick a project Epic)
+  alt-f   : flag / unflag the work item (Impediment)
   alt-n   : create a new work item
   alt-l   : manage links (list / delete / create)
   alt-s   : show the work item's sub-tasks in a nested picker
@@ -555,10 +724,16 @@ Keybindings:
   ctrl-f  : preview half page down
   ctrl-b  : preview half page up
 
-The preview shows the work item details, its links, and its comment thread.
+The preview shows the work item details, a flag indicator (if flagged), its
+parent (e.g. the Epic), its sub-tasks, its links, and its comment thread.
 
 When a work item has sub-tasks, alt-s opens them in a nested picker (a new
 fzfj list scoped to `parent = <key>`) where every action above is available.
+
+Setting the Epic (alt-p) and flagging (alt-f) are not supported by acli, so
+they call the Jira REST API directly, reusing the OAuth token acli stored in
+the macOS keychain (requires `security`, `curl`, and a prior
+`acli jira auth login --web`).
 
 In the links picker (alt-l):
   enter   : open the linked work item
@@ -569,6 +744,9 @@ In the links picker (alt-l):
 Environment:
   FZFJ_LIMIT      Max work items to fetch (default: 250)
   FZFJ_PROJECT    Project for newly created work items (default: CORE)
+  FZFJ_FLAG_FIELD Custom field id backing the "Flagged" field, used by the
+                  flag action (alt-f) and the preview indicator
+                  (default: customfield_10002)
   FZFJ_FILTERS    Override the filter picker entries. Newline-separated
                   "Name|JQL" entries, e.g.
                   $'Mine|assignee = currentUser()\nBugs|type = Bug'
@@ -628,6 +806,7 @@ export FZFJ_JQL
 export FZFJ_LIMIT
 export FZFJ_STATUSES
 export FZFJ_PROJECT
+export FZFJ_FLAG_FIELD
 export FZFJ_LINK_TYPES
 
 # Pre-flight: validate the query / auth and bail out cleanly on errors or no
@@ -664,6 +843,8 @@ fzf \
   --bind "alt-t:execute($ACTION transition {1})+reload($SCRIPT __list)" \
   --bind "alt-c:execute($ACTION comment {1})+refresh-preview" \
   --bind "alt-e:execute($ACTION edit {1})+reload($SCRIPT __list)+refresh-preview" \
+  --bind "alt-p:execute($ACTION epic {1})+refresh-preview" \
+  --bind "alt-f:execute($ACTION flag {1})+refresh-preview" \
   --bind "alt-n:execute($ACTION create)+reload($SCRIPT __list)" \
   --bind "alt-l:execute($ACTION link {1})+refresh-preview" \
   --bind "alt-s:execute($ACTION subtasks {1})+reload($SCRIPT __list)+refresh-preview" \
