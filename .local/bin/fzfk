@@ -10,14 +10,74 @@ SCRIPT="$(realpath "$0")"
 #
 # Called recursively from fzf bindings as:
 #   fzfk __action <action> <resource> <namespace_or_-> <name>
+#   fzfk __action delete <resource> <all_ns> <fixed_ns_or_-> <row>...
 #
 # The sentinel "-" is used for the namespace when no namespace was given
-# (i.e. the current kubectl context's namespace should be used).
+# (i.e. the current kubectl context's namespace should be used). The delete
+# action supports multiple rows and therefore uses its own argument layout;
+# see the "delete" branch below.
 
 if [[ "$1" == "__action" ]]; then
   shift
   action="$1"
   resource="$2"
+
+  # The delete action can operate on several resources at once, so it uses a
+  # dedicated argument layout:
+  #   fzfk __action delete <resource> <all_ns> <fixed_ns_or_-> <row>...
+  # Each <row> is a full "kubectl get" output line as passed by fzf's {+}
+  # placeholder (the marked rows, or the row under the cursor when nothing is
+  # marked). In -A mode the namespace is the row's first column and the name
+  # its second; otherwise the name is the first column and the namespace is
+  # <fixed_ns> ("-" for the context default).
+  if [[ "$action" == "delete" ]]; then
+    all_ns="$3"
+    fixed_ns="$4"
+    shift 4
+
+    targets=()   # entries of the form "<namespace_or_->\t<name>"
+    labels=()    # human-readable rows shown in the confirmation header
+    for row in "$@"; do
+      [[ -z "${row//[[:space:]]/}" ]] && continue
+      if [[ "$all_ns" == "true" ]]; then
+        row_ns="$(awk '{print $1}' <<<"$row")"
+        row_name="$(awk '{print $2}' <<<"$row")"
+      else
+        row_ns="$fixed_ns"
+        row_name="$(awk '{print $1}' <<<"$row")"
+      fi
+      [[ -z "$row_name" ]] && continue
+      targets+=("$row_ns"$'\t'"$row_name")
+      if [[ -n "$row_ns" && "$row_ns" != "-" ]]; then
+        labels+=("$resource/$row_name (ns: $row_ns)")
+      else
+        labels+=("$resource/$row_name")
+      fi
+    done
+    [[ ${#targets[@]} -eq 0 ]] && exit 0
+
+    confirm="$(printf '%s\n' "No" "Yes" "Yes (force)" | fzf \
+      --prompt "󰩺 Confirm delete (${#targets[@]}): " \
+      --header "$(printf '%s\n' "${labels[@]}")" \
+      --height 100% \
+      --reverse \
+      --border rounded)"
+    [[ "$confirm" != "Yes" && "$confirm" != "Yes (force)" ]] && exit 0
+
+    force_args=()
+    [[ "$confirm" == "Yes (force)" ]] && force_args=(--grace-period=0 --force)
+
+    for target in "${targets[@]}"; do
+      del_ns="${target%%$'\t'*}"
+      del_name="${target#*$'\t'}"
+      del_ns_arg=()
+      [[ -n "$del_ns" && "$del_ns" != "-" ]] && del_ns_arg=(-n "$del_ns")
+      kubectl delete "${del_ns_arg[@]}" "${force_args[@]}" "$resource" "$del_name"
+    done
+    read -n 1 -s -r -p "Press any key to continue..."
+    exit 0
+  fi
+
   namespace="$3"
   name="$4"
 
@@ -33,19 +93,6 @@ if [[ "$1" == "__action" ]]; then
 
     yaml)
       kubectl get "${ns_arg[@]}" "$resource" "$name" -o yaml | nvim
-      ;;
-
-    delete)
-      ns_label=""
-      [[ -n "$namespace" && "$namespace" != "-" ]] && ns_label=" (ns: $namespace)"
-      confirm="$(printf '%s\n' "No" "Yes" | fzf \
-        --prompt "󰩺 Delete $resource/$name$ns_label: " \
-        --height 100% \
-        --reverse \
-        --border rounded)"
-      [[ "$confirm" != "Yes" ]] && exit 0
-      kubectl delete "${ns_arg[@]}" "$resource" "$name"
-      read -n 1 -s -r -p "Press any key to continue..."
       ;;
 
     logs)
@@ -128,18 +175,25 @@ Examples:
   fzfk deployments -l app=foo
 
 Keybindings:
-  enter   : describe the selected resource
-  alt-p   : port-forward (pick port via fzf)
-  alt-e   : exec into container (pick container via fzf)
-  alt-l   : show container logs (pick container via fzf)
-  alt-y   : open YAML manifest in nvim
-  alt-d   : delete the resource (with confirmation)
-  alt-r   : reload the list
-  ctrl-p  : toggle preview
-  ctrl-d  : half page down
-  ctrl-u  : half page up
-  ctrl-f  : preview half page down
-  ctrl-b  : preview half page up
+  tab      : mark / unmark a resource (multi-select)
+  shift-tab: unmark a resource and move up
+  enter    : describe the resource under the cursor
+  alt-p    : port-forward (pick port via fzf)
+  alt-e    : exec into container (pick container via fzf)
+  alt-l    : show container logs (pick container via fzf)
+  alt-y    : open YAML manifest in nvim
+  alt-d    : delete the marked resources (or the one under the cursor);
+             the confirmation offers a force option (--grace-period=0 --force)
+  alt-r    : reload the list
+  ctrl-p   : toggle preview
+  ctrl-d   : half page down
+  ctrl-u   : half page up
+  ctrl-f   : preview half page down
+  ctrl-b   : preview half page up
+
+Mark several resources with tab / shift-tab and press alt-d to delete them all
+at once. The list is automatically refreshed every 5 seconds; marks and the
+cursor position are preserved across refreshes.
 EOF
 }
 
@@ -190,7 +244,29 @@ else
   NAME_FIELD="{1}"
 fi
 
+# Identity fields for --track / --id-nth so marked rows and the cursor survive
+# reloads even as volatile columns (STATUS, AGE, ...) change, plus the fixed
+# namespace token handed to the delete handler.
+#   - With -A the identity is the NAMESPACE + NAME columns (fields 1 and 2) and
+#     the per-row namespace comes from the row itself, so the token is "-".
+#   - Otherwise the identity is the NAME column (field 1) and the namespace is
+#     fixed (or "-" for the context default).
+if $ALL_NS; then
+  ID_NTH="1,2"
+  NS_TOKEN="-"
+elif [[ -n "$NAMESPACE" ]]; then
+  ID_NTH="1"
+  NS_TOKEN="$NAMESPACE"
+else
+  ID_NTH="1"
+  NS_TOKEN="-"
+fi
+
 LIST_CMD="kubectl get $RESOURCE ${KUBECTL_ARGS[*]}"
+
+# Interval (seconds) for automatically refreshing the listed resources
+# (override via FZFK_REFRESH_INTERVAL).
+FZFK_REFRESH_INTERVAL="${FZFK_REFRESH_INTERVAL:-5}"
 
 # Build the per-row preview command (kubectl describe under the cursor).
 if $ALL_NS; then
@@ -212,6 +288,10 @@ fzf \
   --info right \
   --prompt "󱃾 $RESOURCE: " \
   --pointer ">" \
+  --marker "󰄲" \
+  --multi \
+  --track \
+  --id-nth "$ID_NTH" \
   --border "rounded" \
   --border-label " 󱃾 $LIST_CMD " \
   --border-label-pos center \
@@ -220,13 +300,14 @@ fzf \
   --bind "ctrl-f:preview-half-page-down" \
   --bind "ctrl-b:preview-half-page-up" \
   --bind "ctrl-p:toggle-preview" \
-  --bind "alt-r:reload($LIST_CMD)" \
+  --bind "alt-r:reload-sync($LIST_CMD)" \
+  --bind "every($FZFK_REFRESH_INTERVAL):reload-sync($LIST_CMD)" \
   --bind "enter:execute($ACTION describe $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-p:execute($ACTION portforward $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-e:execute($ACTION exec $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-l:execute($ACTION logs $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-y:execute($ACTION yaml $RESOURCE $NS_FIELD $NAME_FIELD)" \
-  --bind "alt-d:execute($ACTION delete $RESOURCE $NS_FIELD $NAME_FIELD)+reload($LIST_CMD)" \
+  --bind "alt-d:execute($ACTION delete $RESOURCE $ALL_NS $NS_TOKEN {+})+reload-sync($LIST_CMD)" \
   --preview-window "right:65%" \
   --preview "$PREVIEW_CMD" \
   < <(eval "$LIST_CMD")
