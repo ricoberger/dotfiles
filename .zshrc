@@ -104,7 +104,7 @@ setopt interactive_comments
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
-zstyle ':fzf-tab:*' fzf-flags --color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:#ed8796 --color=fg:#cad3f5,header:#ed8796,info:#c6a0f6,pointer:#f4dbd6 --color=marker:#f4dbd6,fg+:#cad3f5,prompt:#c6a0f6,hl+:#ed8796
+zstyle ':fzf-tab:*' fzf-flags --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6
 
 
 
@@ -114,7 +114,7 @@ zstyle ':fzf-tab:*' fzf-flags --color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:
 
 eval "$(fzf --zsh)"
 export FZF_DEFAULT_COMMAND='fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store'
-export FZF_DEFAULT_OPTS='--color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:#ed8796 --color=fg:#cad3f5,header:#ed8796,info:#c6a0f6,pointer:#f4dbd6 --color=marker:#f4dbd6,fg+:#cad3f5,prompt:#c6a0f6,hl+:#ed8796'
+export FZF_DEFAULT_OPTS='--color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6'
 
 
 
@@ -137,7 +137,6 @@ alias watch='watch '
 alias k='kubectl'
 alias chrome='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222'
 alias gg="git log --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold green)(%ar)%C(reset) %C(white)%s%C(reset) %C(dim white)- %an%C(reset)%C(auto)%d%C(reset)'"
-alias ghd='gh dash'
 
 
 
@@ -155,7 +154,6 @@ tdm() { tmux display-message $1; }
 targz() { tar -zcvf $1.tar.gz ${@:2}; rm -r ${@:2}; }
 untargz() { tar -zxvf $1; rm -r $1; }
 webshare() { if [[ $(python --version 2>&1) == *2\.* ]]; then python -m SimpleHTTPServer $@; else python -m http.server $@; fi; }
-websearch() { open -a "Safari" "https://www.google.com/search?q=$(omz_urlencode -P $@)&udm=14"; }
 
 cdp() {
   REPOS=`find $HOME/Documents/GitHub -type d -maxdepth 2 -mindepth 2`
@@ -165,6 +163,12 @@ cdp() {
 kctx() {
   KUBECONFIGS=`fd --full-path --hidden --color never --type f -e yaml "" "${HOME}/Documents/kubeconfig/"`
   print -z `echo "export KUBECONFIG=$(echo "$KUBECONFIGS" | fzf)"`
+}
+
+opencode-session() {
+  local sid
+  sid=$(opencode session list | tail -n +3 | fzf --with-nth 2.. --nth 1 | awk '{print $1}') || return
+  [ -n "$sid" ] && opencode -s "$sid"
 }
 
 # Completion for fzfk - suggest available Kubernetes resources for the first
@@ -191,64 +195,6 @@ _fzfk() {
   esac
 }
 compdef _fzfk fzfk
-
-vaultedit() {
-  TMPFILE=`mktemp /tmp/vaultsecret.XXXXXXXXX`
-  vault kv get -format=json $@ | jq .data.data > ${TMPFILE};
-  nvim -c 'set ft=json' ${TMPFILE} < /dev/tty > /dev/tty
-  vault kv put $@ @${TMPFILE}
-  rm ${TMPFILE}
-}
-
-vaultcreate() {
-  TMPFILE=`mktemp /tmp/vaultsecret.XXXXXXXXX`
-  nvim -c 'set ft=json' ${TMPFILE} < /dev/tty > /dev/tty
-  vault kv put $@ @${TMPFILE}
-  rm ${TMPFILE}
-}
-
-rg-fzf() {
-  RG_PREFIX="rg --files-with-matches --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
-
-  local search_paths
-  if [[ $# -eq 0 ]]; then
-    search_paths="."
-  else
-    search_paths=$(printf "'%s' " "$@")
-  fi
-
-  local out
-  out=$(
-    FZF_DEFAULT_COMMAND="$RG_PREFIX '' $search_paths" \
-      fzf \
-      --sort \
-      --phony \
-      --ansi \
-      --reverse \
-      --height 100% \
-      --info right \
-      --prompt "󰥨 Search: " \
-      --pointer ">" \
-      --marker "󰄲" \
-      --border "rounded" \
-      --border-label=" 󱉭 $search_paths " \
-      --border-label-pos center \
-      --color 'fg:#cdd6f4,fg+:#cdd6f4,bg+:#313244,border:#a5aac3,pointer:#cba6f7,label:#cdd6f4' \
-      --bind "change:reload:$RG_PREFIX {q} $search_paths" \
-      --preview-window="right:65%" \
-      --preview="[[ ! -z {} ]] && rg --pretty --context 5 {q} {}" \
-      --print-query
-  )
-
-  local query=$(echo "$out" | head -n 1)
-  [ -z "$query" ] && return
-
-  local files=$(echo "$out" | tail -n +2)
-
-  if [[ -n "$files" ]]; then
-    nvim "$files"
-  fi
-}
 
 
 
