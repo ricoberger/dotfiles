@@ -164,9 +164,13 @@ if [[ "$1" == "__action" ]]; then
 
     delete)
       [[ $# -eq 0 ]] && exit 0
-      printf "Delete %d item(s)? [y/N]: " "$#"
-      read -r confirm
-      if [[ "$confirm" =~ ^[Yy]$ ]]; then
+      confirm="$(printf '%s\n' "No" "Yes" | fzf \
+        --prompt "󰩺 Delete $# item(s): " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --color "$FZF_COLORS")"
+      if [[ "$confirm" == "Yes" ]]; then
         for f in "$@"; do
           [[ -n "$f" ]] && rm -r "$f"
         done
