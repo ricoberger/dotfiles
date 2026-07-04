@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
 
-# fzfj - Fuzzy Finder for Jira (acli)
+# fzfjira - Fuzzy Finder for Jira (acli)
 #
-# Usage: fzfj [JQL]
+# Usage: fzfjira [JQL]
 #
 # Requires: acli jira auth login --web
 # Reference: https://developer.atlassian.com/cloud/acli/reference/commands/jira/
 
 SCRIPT="$(realpath "$0")"
 
-# Status names offered by the transition picker (override via FZFJ_STATUSES).
-if [[ -z "$FZFJ_STATUSES" ]]; then
-  FZFJ_STATUSES="Open,Backlog,Ready for Implementation,In Progress,In Review,Delivery,Discovery,On Hold,Done,Won't do"
+# Status names offered by the transition picker (override via FZFJIRA_STATUSES).
+if [[ -z "$FZFJIRA_STATUSES" ]]; then
+  FZFJIRA_STATUSES="Open,Backlog,Ready for Implementation,In Progress,In Review,Delivery,Discovery,On Hold,Done,Won't do"
 fi
-# Maximum number of work items to fetch (override via FZFJ_LIMIT).
-FZFJ_LIMIT="${FZFJ_LIMIT:-250}"
-# Project used when creating new work items (override via FZFJ_PROJECT).
-FZFJ_PROJECT="${FZFJ_PROJECT:-CORE}"
+# Maximum number of work items to fetch (override via FZFJIRA_LIMIT).
+FZFJIRA_LIMIT="${FZFJIRA_LIMIT:-250}"
+# Project used when creating new work items (override via FZFJIRA_PROJECT).
+FZFJIRA_PROJECT="${FZFJIRA_PROJECT:-CORE}"
 # Custom field id backing the "Flagged" field, used by the flag action and the
-# preview indicator (override via FZFJ_FLAG_FIELD). customfield_10002 is the
+# preview indicator (override via FZFJIRA_FLAG_FIELD). customfield_10002 is the
 # standard Jira Software "Flagged" field on most sites.
-FZFJ_FLAG_FIELD="${FZFJ_FLAG_FIELD:-customfield_10002}"
+FZFJIRA_FLAG_FIELD="${FZFJIRA_FLAG_FIELD:-customfield_10002}"
 
-# Named JQL filters shown in a picker when fzfj is launched without a JQL
+# Named JQL filters shown in a picker when fzfjira is launched without a JQL
 # argument. Each entry is "Name|JQL". Override the whole list at runtime via
-# the FZFJ_FILTERS env var (newline-separated "Name|JQL" entries); otherwise
+# the FZFJIRA_FILTERS env var (newline-separated "Name|JQL" entries); otherwise
 # these baked defaults are used.
-FZFJ_DEFAULT_FILTERS=(
+FZFJIRA_DEFAULT_FILTERS=(
   "Board|project = CORE AND statusCategory != Done AND status != \"Backlog\" AND issuetype != \"Sub-Task\" AND issuetype != \"Epic\" ORDER BY updated DESC"
   "Assigned|project = CORE AND assignee = currentUser() AND statusCategory != Done AND status != Backlog ORDER BY priority DESC, updated DESC"
   "Backlog|project = CORE AND status = \"Backlog\" AND issuetype != \"Sub-Task\" AND issuetype != \"Epic\" ORDER BY created DESC"
@@ -37,8 +37,8 @@ FZFJ_DEFAULT_FILTERS=(
 # is the outward/source side) or "in" (the selected work item is the inward
 # side). The stable TypeName is passed to acli; the direction decides which
 # work item becomes --out and which becomes --in. Override the whole list at
-# runtime via the FZFJ_LINK_TYPES env var (newline-separated entries).
-FZFJ_DEFAULT_LINK_TYPES=(
+# runtime via the FZFJIRA_LINK_TYPES env var (newline-separated entries).
+FZFJIRA_DEFAULT_LINK_TYPES=(
   "blocks|Blocks|out"
   "is blocked by|Blocks|in"
   "relates to|Relates|out"
@@ -60,7 +60,7 @@ FZFJ_DEFAULT_LINK_TYPES=(
 # Print acli's current Jira profile ("<cloud_id>:<account_id>"), read from
 # acli's config. The cloud_id (part before the first colon) is used to build
 # REST URLs; the whole string is the keychain account suffix.
-fzfj_jira_profile() {
+fzfjira_jira_profile() {
   sed -n 's/^current_profile:[[:space:]]*//p' \
     "${HOME}/.config/acli/jira_config.yaml" 2>/dev/null \
     | tr -d '"' | head -n1
@@ -68,7 +68,7 @@ fzfj_jira_profile() {
 
 # Print acli's current OAuth access token, extracted from the macOS keychain.
 # The value is stored by go-keyring as "go-keyring-base64:<base64(gzip(json))>".
-fzfj_jira_token() {
+fzfjira_jira_token() {
   local profile="$1"
   security find-generic-password -s acli -a "jira:${profile}" -w 2>/dev/null \
     | sed 's/^go-keyring-base64://' \
@@ -81,11 +81,11 @@ fzfj_jira_token() {
 # keychain OAuth token. Args: <key> <json-body>. Returns 0 and prints nothing
 # on success (HTTP 204); on any error prints a message, waits for a keypress,
 # and returns 1.
-fzfj_jira_put() {
+fzfjira_jira_put() {
   local key="$1" data="$2"
   local profile cloud_id token resp code body
 
-  profile="$(fzfj_jira_profile)"
+  profile="$(fzfjira_jira_profile)"
   cloud_id="${profile%%:*}"
   if [[ -z "$profile" || -z "$cloud_id" ]]; then
     echo "Could not determine the acli Jira profile."
@@ -96,7 +96,7 @@ fzfj_jira_put() {
 
   # acli keeps the keychain token fresh through normal use; a stale one
   # surfaces as HTTP 401 below.
-  token="$(fzfj_jira_token "$profile")"
+  token="$(fzfjira_jira_token "$profile")"
   if [[ -z "$token" ]]; then
     echo "Could not read the acli OAuth token from the keychain."
     read -n 1 -s -r -p "Press any key to continue..."
@@ -126,16 +126,16 @@ fzfj_jira_put() {
 # ---------- List mode ----------
 #
 # Called for the initial feed and on every reload. Reads the JQL from the
-# environment (FZFJ_JQL) so the fzf reload binding stays quoting-safe.
+# environment (FZFJIRA_JQL) so the fzf reload binding stays quoting-safe.
 
 if [[ "$1" == "__list" ]]; then
-  # An optional second argument overrides FZFJ_JQL (used by the link-create
+  # An optional second argument overrides FZFJIRA_JQL (used by the link-create
   # target picker to feed a project-wide query through the same renderer).
-  list_jql="${2:-$FZFJ_JQL}"
+  list_jql="${2:-$FZFJIRA_JQL}"
   err="$(mktemp)"
   out="$(acli jira workitem search \
     --jql "$list_jql" \
-    --limit "$FZFJ_LIMIT" \
+    --limit "$FZFJIRA_LIMIT" \
     --json 2>"$err")"
   status=$?
 
@@ -169,7 +169,7 @@ fi
 # ---------- Preview mode ----------
 #
 # Renders the work item details followed by its comment thread. Called from
-# the fzf --preview binding as: fzfj __preview <key>
+# the fzf --preview binding as: fzfjira __preview <key>
 
 if [[ "$1" == "__preview" ]]; then
   key="$2"
@@ -177,9 +177,9 @@ if [[ "$1" == "__preview" ]]; then
 
   acli jira workitem view "$key" --fields "*all"
 
-  flagged="$(acli jira workitem view "$key" --fields "$FZFJ_FLAG_FIELD" --json 2>/dev/null)"
+  flagged="$(acli jira workitem view "$key" --fields "$FZFJIRA_FLAG_FIELD" --json 2>/dev/null)"
   if [[ -n "$flagged" ]]; then
-    printf '%s' "$flagged" | jq -r --arg ff "$FZFJ_FLAG_FIELD" '
+    printf '%s' "$flagged" | jq -r --arg ff "$FZFJIRA_FLAG_FIELD" '
       (.fields[$ff] // []) as $f
       | if ($f | length) == 0 then empty
         else "", "\u001b[31m󰈻 Flagged (\($f | map(.value) | join(", ")))\u001b[0m"
@@ -294,7 +294,7 @@ fi
 # ---------- Action handlers ----------
 #
 # Called recursively from fzf bindings as:
-#   fzfj __action <action> <key>
+#   fzfjira __action <action> <key>
 
 if [[ "$1" == "__action" ]]; then
   shift
@@ -356,7 +356,7 @@ if [[ "$1" == "__action" ]]; then
       ;;
 
     transition)
-      status=$(printf '%s' "$FZFJ_STATUSES" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | fzf \
+      status=$(printf '%s' "$FZFJIRA_STATUSES" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | fzf \
         --prompt "󰒍 Transition $key: " \
         --height 100% \
         --reverse \
@@ -384,7 +384,7 @@ if [[ "$1" == "__action" ]]; then
 
       case "$field" in
         Type)
-          new_type=$(acli jira project view --key "$FZFJ_PROJECT" --json 2>/dev/null \
+          new_type=$(acli jira project view --key "$FZFJIRA_PROJECT" --json 2>/dev/null \
             | jq -r '(if type == "array" then .[0] else . end)
                      | .issueTypes[] | select(.subtask | not) | .name' \
             | fzf \
@@ -450,9 +450,9 @@ if [[ "$1" == "__action" ]]; then
       # calls the Jira REST API directly with acli's keychain OAuth token.
 
       # Pick a target Epic from the project (reusing the list renderer).
-      epic_rows="$("$SCRIPT" __list "project = $FZFJ_PROJECT AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC" 2>/dev/null)"
+      epic_rows="$("$SCRIPT" __list "project = $FZFJIRA_PROJECT AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC" 2>/dev/null)"
       if [[ -z "$epic_rows" ]]; then
-        echo "No open Epics found in project $FZFJ_PROJECT."
+        echo "No open Epics found in project $FZFJIRA_PROJECT."
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
       fi
@@ -468,7 +468,7 @@ if [[ "$1" == "__action" ]]; then
       epic="$(printf '%s' "$esel" | awk '{print $1}')"
       [[ -z "$epic" ]] && exit 0
 
-      fzfj_jira_put "$key" "{\"fields\":{\"parent\":{\"key\":\"$epic\"}}}"
+      fzfjira_jira_put "$key" "{\"fields\":{\"parent\":{\"key\":\"$epic\"}}}"
       ;;
 
     flag)
@@ -483,16 +483,16 @@ if [[ "$1" == "__action" ]]; then
 
       case "$choice" in
         "Flag (Impediment)")
-          fzfj_jira_put "$key" "{\"fields\":{\"$FZFJ_FLAG_FIELD\":[{\"value\":\"Impediment\"}]}}"
+          fzfjira_jira_put "$key" "{\"fields\":{\"$FZFJIRA_FLAG_FIELD\":[{\"value\":\"Impediment\"}]}}"
           ;;
         "Unflag")
-          fzfj_jira_put "$key" "{\"fields\":{\"$FZFJ_FLAG_FIELD\":[]}}"
+          fzfjira_jira_put "$key" "{\"fields\":{\"$FZFJIRA_FLAG_FIELD\":[]}}"
           ;;
       esac
       ;;
 
     create)
-      project="$FZFJ_PROJECT"
+      project="$FZFJIRA_PROJECT"
 
       type=$(acli jira project view --key "$project" --json 2>/dev/null \
         | jq -r '(if type == "array" then .[0] else . end)
@@ -597,7 +597,7 @@ if [[ "$1" == "__action" ]]; then
           # 1. Pick a target work item from the project (project-wide recent
           #    query through the same renderer), excluding the current key.
           #    --print-query lets a typed key that isn't in the window be used.
-          target_rows="$("$SCRIPT" __list "project = $FZFJ_PROJECT AND statusCategory != Done ORDER BY updated DESC" 2>/dev/null \
+          target_rows="$("$SCRIPT" __list "project = $FZFJIRA_PROJECT AND statusCategory != Done ORDER BY updated DESC" 2>/dev/null \
             | awk -v k="$key" 'NF && $1 != k')"
           tsel="$(printf '%s\n' "$target_rows" | fzf \
             --ansi \
@@ -616,12 +616,12 @@ if [[ "$1" == "__action" ]]; then
 
           # 2. Pick a directional link type from the curated list.
           ltypes=()
-          if [[ -n "$FZFJ_LINK_TYPES" ]]; then
+          if [[ -n "$FZFJIRA_LINK_TYPES" ]]; then
             while IFS= read -r ltline; do
               [[ -n "$ltline" ]] && ltypes+=("$ltline")
-            done <<< "$FZFJ_LINK_TYPES"
+            done <<< "$FZFJIRA_LINK_TYPES"
           else
-            ltypes=("${FZFJ_DEFAULT_LINK_TYPES[@]}")
+            ltypes=("${FZFJIRA_DEFAULT_LINK_TYPES[@]}")
           fi
 
           ltlabel="$(printf '%s\n' "${ltypes[@]%%|*}" | fzf \
@@ -677,18 +677,18 @@ fi
 
 usage() {
   cat <<'EOF'
-fzfj - Fuzzy Finder for Jira (acli)
+fzfjira - Fuzzy Finder for Jira (acli)
 
-Usage: fzfj [JQL]
+Usage: fzfjira [JQL]
 
 Examples:
-  fzfj
-  fzfj "project = CORE AND status != Done ORDER BY updated DESC"
-  fzfj "assignee = currentUser() AND sprint in openSprints()"
+  fzfjira
+  fzfjira "project = CORE AND status != Done ORDER BY updated DESC"
+  fzfjira "assignee = currentUser() AND sprint in openSprints()"
 
 If no JQL is given, a picker of named filters is shown
-(Current, Assigned, Backlog). Edit the FZFJ_DEFAULT_FILTERS
-array in this script, or override via the FZFJ_FILTERS env
+(Current, Assigned, Backlog). Edit the FZFJIRA_DEFAULT_FILTERS
+array in this script, or override via the FZFJIRA_FILTERS env
 var, to configure them.
 
 Keybindings:
@@ -714,7 +714,7 @@ The preview shows the work item details, a flag indicator (if flagged), its
 parent (e.g. the Epic), its sub-tasks, its links, and its comment thread.
 
 When a work item has sub-tasks, alt-s opens them in a nested picker (a new
-fzfj list scoped to `parent = <key>`) where every action above is available.
+fzfjira list scoped to `parent = <key>`) where every action above is available.
 
 Setting the Epic (alt-p) and flagging (alt-f) are not supported by acli, so
 they call the Jira REST API directly, reusing the OAuth token acli stored in
@@ -728,18 +728,18 @@ In the links picker (alt-l):
   esc     : back to the list
 
 Environment:
-  FZFJ_LIMIT      Max work items to fetch (default: 250)
-  FZFJ_PROJECT    Project for newly created work items (default: CORE)
-  FZFJ_FLAG_FIELD Custom field id backing the "Flagged" field, used by the
+  FZFJIRA_LIMIT      Max work items to fetch (default: 250)
+  FZFJIRA_PROJECT    Project for newly created work items (default: CORE)
+  FZFJIRA_FLAG_FIELD Custom field id backing the "Flagged" field, used by the
                   flag action (alt-f) and the preview indicator
                   (default: customfield_10002)
-  FZFJ_FILTERS    Override the filter picker entries. Newline-separated
+  FZFJIRA_FILTERS    Override the filter picker entries. Newline-separated
                   "Name|JQL" entries, e.g.
                   $'Mine|assignee = currentUser()\nBugs|type = Bug'
-  FZFJ_STATUSES   Comma-separated transition statuses
+  FZFJIRA_STATUSES   Comma-separated transition statuses
                   (default: CORE project statuses, e.g.
                   "Open,Backlog,In Progress,In Review,Done,Won't do")
-  FZFJ_LINK_TYPES Override the link-type picker entries. Newline-separated
+  FZFJIRA_LINK_TYPES Override the link-type picker entries. Newline-separated
                   "Label|TypeName|direction" entries, where direction is
                   "out" (selected item is the outward side) or "in"
                   (selected item is the inward side), e.g.
@@ -754,17 +754,17 @@ fi
 
 if [[ -n "$1" ]]; then
   # An explicit JQL argument bypasses the filter picker.
-  FZFJ_JQL="$1"
+  FZFJIRA_JQL="$1"
 else
-  # Filters come from the FZFJ_FILTERS env var (newline-separated "Name|JQL"
+  # Filters come from the FZFJIRA_FILTERS env var (newline-separated "Name|JQL"
   # entries) when set, otherwise from the baked defaults.
   filters=()
-  if [[ -n "$FZFJ_FILTERS" ]]; then
+  if [[ -n "$FZFJIRA_FILTERS" ]]; then
     while IFS= read -r line; do
       [[ -n "$line" ]] && filters+=("$line")
-    done <<< "$FZFJ_FILTERS"
+    done <<< "$FZFJIRA_FILTERS"
   else
-    filters=("${FZFJ_DEFAULT_FILTERS[@]}")
+    filters=("${FZFJIRA_DEFAULT_FILTERS[@]}")
   fi
 
   # No JQL given: pick from the configured named filters.
@@ -777,28 +777,28 @@ else
     --border-label-pos center)
   [[ -z "$selected" ]] && exit 0
 
-  FZFJ_JQL=""
+  FZFJIRA_JQL=""
   for f in "${filters[@]}"; do
     if [[ "${f%%|*}" == "$selected" ]]; then
-      FZFJ_JQL="${f#*|}"
+      FZFJIRA_JQL="${f#*|}"
       break
     fi
   done
-  [[ -z "$FZFJ_JQL" ]] && exit 1
+  [[ -z "$FZFJIRA_JQL" ]] && exit 1
 fi
 
-export FZFJ_JQL
-export FZFJ_LIMIT
-export FZFJ_STATUSES
-export FZFJ_PROJECT
-export FZFJ_FLAG_FIELD
-export FZFJ_LINK_TYPES
+export FZFJIRA_JQL
+export FZFJIRA_LIMIT
+export FZFJIRA_STATUSES
+export FZFJIRA_PROJECT
+export FZFJIRA_FLAG_FIELD
+export FZFJIRA_LINK_TYPES
 
 # Pre-flight: validate the query / auth and bail out cleanly on errors or no
 # results, rather than dropping into an empty picker.
 ROWS="$("$SCRIPT" __list)" || exit 1
 if [[ -z "$ROWS" ]]; then
-  echo "No work items found for JQL: $FZFJ_JQL" >&2
+  echo "No work items found for JQL: $FZFJIRA_JQL" >&2
   exit 1
 fi
 
@@ -814,7 +814,7 @@ fzf \
   --prompt "󰌪 Jira: " \
   --pointer ">" \
   --border "rounded" \
-  --border-label " 󰌪 $FZFJ_JQL " \
+  --border-label " 󰌪 $FZFJIRA_JQL " \
   --border-label-pos center \
   --bind "ctrl-d:half-page-down" \
   --bind "ctrl-u:half-page-up" \
