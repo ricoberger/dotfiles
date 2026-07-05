@@ -79,10 +79,10 @@ keybind = super+ctrl+right=goto_split:right
 keybind = super+ctrl+up=goto_split:top
 keybind = super+ctrl+down=goto_split:bottom
 
-keybind = super+ctrl+alt+left=resize_split:left,10
-keybind = super+ctrl+alt+right=resize_split:right,10
-keybind = super+ctrl+alt+up=resize_split:up,10
-keybind = super+ctrl+alt+down=resize_split:down,10
+keybind = super+ctrl+alt+left=resize_split:left,50
+keybind = super+ctrl+alt+right=resize_split:right,50
+keybind = super+ctrl+alt+up=resize_split:up,50
+keybind = super+ctrl+alt+down=resize_split:down,50
 
 keybind = super+home=scroll_to_top
 keybind = super+end=scroll_to_bottom
