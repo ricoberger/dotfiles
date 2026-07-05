@@ -58,11 +58,8 @@ echo "\n- Copy Glamour Configuration"
 cp $(pwd)/.config/glamour-catppuccin-macchiato.json ~/.config/glamour-catppuccin-macchiato.json
 
 # AI
-echo "\n- Copy Claude Configuration"
-mkdir -p ~/.claude
-rm -rf ~/.claude/skills
-cp -r $(pwd)/.config/claude/settings.json ~/.claude/settings.json
-ln -sfn $(pwd)/.config/claude/skills ~/.claude/skills
+echo "\n- Synlink Agents Configuration"
+ln -sfn $(pwd)/.agents ~/.agents
 
 echo "\n- Copy OpenCode Configuration"
 cp -r $(pwd)/.config/opencode ~/.config
