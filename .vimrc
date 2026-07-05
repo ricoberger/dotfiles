@@ -123,19 +123,6 @@ vnoremap <m-k> :m '<-2<cr>gv=gv
 vnoremap < <gv
 vnoremap > >gv
 
-" Surround the visual selection with parentheses, brackets, braces or quotes.
-vnoremap gs( <esc>`>a)<esc>`<i(<esc>
-vnoremap gs) <esc>`>a)<esc>`<i(<esc>
-vnoremap gs{ <esc>`>a}<esc>`<i{<esc>
-vnoremap gs} <esc>`>a}<esc>`<i{<esc>
-vnoremap gs[ <esc>`>a]<esc>`<i[<esc>
-vnoremap gs] <esc>`>a]<esc>`<i[<esc>
-vnoremap gs< <esc>`>a><esc>`<i<<esc>
-vnoremap gs> <esc>`>a><esc>`<i<<esc>
-vnoremap gs" <esc>`>a"<esc>`<i"<esc>
-vnoremap gs' <esc>`>a'<esc>`<i'<esc>
-vnoremap gs` <esc>`>a`<esc>`<i`<esc>
-
 " ------------------------------------------------------------------------------
 " FIND FILES
 " ------------------------------------------------------------------------------
@@ -184,7 +171,6 @@ endif
 " the workspace or directory of the current file, searching for the word under
 " the cursor or visual selection and searching for todo comments.
 nnoremap <leader>ss :silent grep!<space>
-nnoremap <expr> <leader>s/ ":silent grep! --glob='" . expand("%:.") . "' "
 nnoremap <leader>sw :silent grep!<space><c-r><c-w>
 vnoremap <leader>sw y:silent grep!<space><c-r>"
 nnoremap <leader>st :silent grep! -e='todo:' -e='warn:' -e='info:' -e='xxx:' -e='bug:' -e='fixme:' -e='fixit:' -e='bug:' -e='issue:'<cr>
@@ -230,20 +216,6 @@ augroup END
 " Add keymaps for easier acccess to the Quickfix list.
 nnoremap ]q :cnext<cr>
 nnoremap [q :cprevious<cr>
-
-" ------------------------------------------------------------------------------
-" MACROS
-" ------------------------------------------------------------------------------
-
-" Select a pattern and press "Q" + "Q" to record a macro into register "q",
-" starting from the selected pattern. Once the macro is recorded, press "q" to
-" stop the recording. The macro can then be replayed using "<c-q>". If
-" nothing is selected the macro is replayed for the whole file, otherwise it is
-" only replayed for the selected lines.
-vnoremap Q "wyqq
-nnoremap Q V/\%V\V<c-r>w<cr><esc>
-nnoremap <c-q> :g/\V<c-r>w/normal! @q<cr>
-vnoremap <c-q> :g/\V<c-r>w/normal! @q<cr>
 
 " ------------------------------------------------------------------------------
 " COLORSCHEMA
