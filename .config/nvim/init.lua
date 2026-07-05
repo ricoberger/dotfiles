@@ -35,32 +35,6 @@ vim.g.loaded_zipPlugin = 1
 -- nerd font support in Neovim.
 vim.g.have_nerd_font = true
 
--- Define icons for diagnostics and git.
-local icons = {
-  diagnostics = {
-    Error = " ",
-    Warn = " ",
-    Hint = " ",
-    Info = " ",
-  },
-  git = {
-    -- Change type
-    added = "✚",
-    modified = "○",
-    deleted = "✖",
-    renamed = "󰁕",
-    -- Status type
-    untracked = "",
-    ignored = "",
-    unstaged = "󰄱",
-    staged = "󰱒",
-    conflict = "",
-    -- Snacks
-    commit = "󰜘",
-    unmerged = " ",
-  },
-}
-
 --------------------------------------------------------------------------------
 -- OPTIONS
 --------------------------------------------------------------------------------
@@ -73,12 +47,13 @@ vim.opt.completeopt = { "menuone", "noselect", "fuzzy", "nosort", "popup" } -- B
 vim.opt.cursorline = true -- Enable highlighting of the current line
 vim.opt.expandtab = true -- Use spaces instead of tabs
 vim.opt.exrc = true -- Look for .nvim.lua files in the project directory
-vim.opt.formatoptions = "jcroqlnt" -- tcqj
+vim.opt.formatoptions = "jcroqlnt" -- Automatic formatting behavior
 vim.opt.hlsearch = true -- Set highlight on search
 vim.opt.ignorecase = true -- Ignore case
 vim.opt.inccommand = "split" -- Show live preview of substitution
 vim.opt.laststatus = 3 -- global statusline
 vim.opt.list = true -- Show some invisible characters
+vim.opt.listchars = { tab = "│ ", leadmultispace = "│ " } -- Set characters for invisible characters
 vim.opt.mouse = "a" -- Enable mouse mode
 vim.opt.number = true -- Print line number
 vim.opt.relativenumber = true -- Relative line numbers
@@ -258,20 +233,12 @@ vim.keymap.set("x", ">", ">gv")
 -- Clear search with "Esc" in normal and insert mode.
 vim.keymap.set({ "i", "n" }, "<esc>", "<cmd>noh<cr><esc>")
 
--- Surround the visual selection with parentheses, brackets, braces or quotes.
-vim.keymap.set("x", "gs(", "<esc>`>a)<esc>`<i(<esc>")
-vim.keymap.set("x", "gs)", "<esc>`>a)<esc>`<i(<esc>")
-vim.keymap.set("x", "gs{", "<esc>`>a}<esc>`<i{<esc>")
-vim.keymap.set("x", "gs}", "<esc>`>a}<esc>`<i{<esc>")
-vim.keymap.set("x", "gs[", "<esc>`>a]<esc>`<i[<esc>")
-vim.keymap.set("x", "gs]", "<esc>`>a]<esc>`<i[<esc>")
-vim.keymap.set("x", "gs<", "<esc>`>a><esc>`<i<<esc>")
-vim.keymap.set("x", "gs>", "<esc>`>a><esc>`<i<<esc>")
-vim.keymap.set("x", 'gs"', '<esc>`>a"<esc>`<i"<esc>')
-vim.keymap.set("x", "gs'", "<esc>`>a'<esc>`<i'<esc>")
-vim.keymap.set("x", "gs`", "<esc>`>a`<esc>`<i`<esc>")
-vim.keymap.set("x", "gs*", "<esc>`>a*<esc>`<i*<esc>")
-vim.keymap.set("x", "gs_", "<esc>`>a_<esc>`<i_<esc>")
+-- Copy a reference to the current buffer (filename, directory, path with line /
+-- selection or the quickfix list) to the system clipboard, e.g. to paste it
+-- into an AI chat.
+vim.keymap.set({ "n", "x" }, "<leader>y", function()
+  require("core.yank").menu()
+end)
 
 --------------------------------------------------------------------------------
 -- COMMAND LINE
@@ -380,266 +347,90 @@ require("catppuccin").setup({
         background = true,
       },
     },
-    snacks = {
-      enabled = false,
-      indent_scope_color = "",
-    },
     treesitter = true,
   },
   custom_highlights = function(colors)
-    return {
+    local highlights = {
       Pmenu = { bg = colors.mantle },
       PmenuBorder = { bg = colors.mantle, fg = colors.blue },
-      -- Add highlights for GitHub notifications and search results.
-      -- See ":lua Snacks.picker.highlights({pattern = "hl_group:^Snacks"})"
-      GitHubText = { fg = colors.text },
-      GitHubTextSecondary = { fg = colors.overlay0 },
-      GitHubTextHighlight = { fg = colors.blue },
-      GitHubRead = { fg = colors.green },
-      GitHubOpen = { fg = colors.green },
-      GitHubClosed = { fg = colors.mauve },
-      GitHubMerged = { fg = colors.mauve },
-      GitHubUnmerged = { fg = colors.red },
-      GitHubCheckSuccess = { fg = colors.green },
-      GitHubCheckFailed = { fg = colors.red },
-      GitHubCheckPending = { fg = colors.yellow },
+
+      -- Picker (see "lua/core/picker.lua").
+      PickerNormal = { bg = colors.base },
+      PickerBorder = { bg = colors.base, fg = colors.blue },
+
+      -- Explorer marks (see "lua/core/explorer.lua").
+      ExplorerMark = { fg = colors.mauve },
+      ExplorerMarkLine = { bg = colors.surface0 },
+
+      -- Statusline (see "lua/core/statusline.lua").
+      StatuslineC = { fg = colors.text, bg = colors.mantle },
+      StatuslineCompSepB = { fg = colors.overlay1, bg = colors.surface0 },
+      StatuslineCompSepC = { fg = colors.text, bg = colors.mantle },
+      StatuslineSepBC = { fg = colors.surface0, bg = colors.mantle },
+      StatuslineSepXY = { fg = colors.surface0, bg = colors.mantle },
+      StatuslineDiagError = { fg = colors.red, bg = colors.surface0 },
+      StatuslineDiagWarn = { fg = colors.yellow, bg = colors.surface0 },
+      StatuslineDiagInfo = { fg = colors.sky, bg = colors.surface0 },
+      StatuslineDiagHint = { fg = colors.teal, bg = colors.surface0 },
+      StatuslineDiffAdd = { fg = colors.green, bg = colors.surface0 },
+      StatuslineDiffChange = { fg = colors.yellow, bg = colors.surface0 },
+      StatuslineDiffDelete = { fg = colors.red, bg = colors.surface0 },
     }
+
+    -- Mode-dependent statusline groups, one set per mode color. The key
+    -- (e.g. "blue") is used as the highlight group suffix in statusline.lua.
+    local mode_colors = {
+      blue = colors.blue,
+      green = colors.green,
+      mauve = colors.mauve,
+      red = colors.red,
+      peach = colors.peach,
+    }
+    for key, color in pairs(mode_colors) do
+      highlights["StatuslineA_" .. key] =
+        { fg = colors.mantle, bg = color, bold = true }
+      highlights["StatuslineZ_" .. key] =
+        { fg = colors.mantle, bg = color, bold = true }
+      highlights["StatuslineB_" .. key] = { fg = color, bg = colors.surface0 }
+      highlights["StatuslineSepAB_" .. key] =
+        { fg = color, bg = colors.surface0 }
+      highlights["StatuslineSepYZ_" .. key] =
+        { fg = color, bg = colors.surface0 }
+      highlights["StatuslineSepAC_" .. key] = { fg = color, bg = colors.mantle }
+    end
+
+    return highlights
   end,
 })
 
 vim.cmd.colorscheme("catppuccin-nvim")
 
 --------------------------------------------------------------------------------
--- SNACKS
---------------------------------------------------------------------------------
-
-vim.pack.add({
-  {
-    src = "https://github.com/folke/snacks.nvim",
-    name = "snacks",
-    version = "main",
-  },
-}, { confirm = false, load = true })
-
-local fd_args = {
-  "--exclude",
-  ".git",
-  "--exclude",
-  "node_modules",
-  "--exclude",
-  "dist",
-  "--exclude",
-  ".DS_Store",
-}
-
-local rg_args = {
-  "--glob=!.git",
-  "--glob=!node_modules",
-  "--glob=!dist",
-  "--glob=!.DS_Store",
-}
-
-require("snacks").setup({
-  -- Deal with big files. Enable when file is larger then 1MB and show
-  -- notification when big file detected.
-  bigfile = {
-    enabled = true,
-    notify = true,
-    size = 3 * 1024 * 1024,
-  },
-  -- GitHub CLI integration.
-  gh = {
-    enabled = true,
-  },
-  -- Open the current file, branch, commit, or repo in a browser (e.g. GitHub,
-  -- GitLab, Bitbucket).
-  gitbrowse = {
-    enabled = true,
-  },
-  -- Visualize indent guides and scopes based on treesitter or indent.
-  indent = {
-    enabled = true,
-    animate = {
-      enabled = false,
-    },
-  },
-  -- Better "vim.ui.input".
-  input = {
-    enabled = true,
-  },
-  -- Picker for selecting items such as files, grep results, buffers, marks,
-  -- etc.
-  picker = {
-    enabled = true,
-    ui_select = true,
-    icons = {
-      git = {
-        enabled = true,
-        commit = icons.git.commit,
-        staged = icons.git.staged,
-        added = icons.git.added,
-        deleted = icons.git.deleted,
-        ignored = icons.git.ignored,
-        modified = icons.git.modified,
-        renamed = icons.git.renamed,
-        unmerged = icons.git.unmerged,
-        untracked = icons.git.untracked,
-      },
-      diagnostics = icons.diagnostics,
-      kinds = icons.kinds,
-    },
-    win = {
-      list = {
-        wo = {
-          relativenumber = true,
-        },
-      },
-    },
-    sources = {
-      explorer = {
-        auto_close = true,
-        hidden = true,
-        layout = {
-          preset = "default",
-          preview = true,
-        },
-        actions = {
-          -- Overwrite the "explorer_yank" command to provide more options for
-          -- yanking file information. By default the command would copy the
-          -- full path ot the file to the clipboard. Now we can choose what path
-          -- should be copied.
-          explorer_yank_path = {
-            action = function(_, item)
-              if not item then
-                return
-              end
-
-              local vals = {
-                ["basename"] = vim.fn.fnamemodify(item.file, ":t:r"),
-                ["extension"] = vim.fn.fnamemodify(item.file, ":t:e"),
-                ["filename"] = vim.fn.fnamemodify(item.file, ":t"),
-                ["path"] = item.file,
-                ["path (cwd)"] = vim.fn.fnamemodify(item.file, ":."),
-                ["path (home)"] = vim.fn.fnamemodify(item.file, ":~"),
-                ["uri"] = vim.uri_from_fname(item.file),
-              }
-
-              local options = vim.tbl_filter(function(val)
-                return vals[val] ~= ""
-              end, vim.tbl_keys(vals))
-              if vim.tbl_isempty(options) then
-                return
-              end
-              table.sort(options)
-              vim.ui.select(options, {
-                prompt = "Choose to copy to clipboard:",
-                format_item = function(list_item)
-                  return ("%s: %s"):format(list_item, vals[list_item])
-                end,
-              }, function(choice)
-                local result = vals[choice]
-                if result then
-                  vim.fn.setreg("+", result)
-                  vim.notify("Yanked " .. result, vim.log.levels.INFO)
-                end
-              end)
-            end,
-          },
-          -- Show diff between two selected files in a new tab. The files which
-          -- should be compared must be selected using "tab" or "shift+tab".
-          explorer_diff = {
-            action = function(picker)
-              picker:close()
-              local sel = picker:selected()
-              if #sel > 0 and sel then
-                vim.cmd("tabnew " .. sel[1].file)
-                vim.cmd("vert diffs " .. sel[2].file)
-                return
-              end
-            end,
-          },
-        },
-        win = {
-          list = {
-            keys = {
-              ["Y"] = "explorer_yank_path",
-              ["D"] = "explorer_diff",
-            },
-          },
-        },
-      },
-      files = {
-        cmd = "fd",
-        args = fd_args,
-        show_empty = true,
-        hidden = true,
-        ignored = false,
-        follow = false,
-        supports_live = true,
-      },
-      gh_diff = {
-        auto_close = false,
-        focus = "list",
-        layout = {
-          preset = "sidebar",
-          hidden = { "preview" },
-        },
-      },
-      grep = {
-        cmd = "rg",
-        args = rg_args,
-        hidden = true,
-        ignored = false,
-        follow = false,
-        supports_live = true,
-      },
-      marks = {
-        global = true,
-        ["local"] = true,
-        win = {
-          input = {
-            keys = {
-              ["<c-x>"] = { "mark_delete", mode = { "n", "i" } },
-            },
-          },
-        },
-      },
-      projects = {
-        dev = { "/Users/ricoberger/Documents/GitHub" },
-        recent = false,
-        max_depth = 3,
-      },
-    },
-  },
-  -- When doing "nvim somefile.txt", it will render the file as quickly as
-  -- possible, before loading your plugins.
-  quickfile = {
-    enabled = true,
-  },
-  terminal = {
-    enabled = true,
-  },
-})
-
---------------------------------------------------------------------------------
 -- EXPLORER
 --------------------------------------------------------------------------------
 
--- Show file explorer, which can be used to navigate the file system. The
--- explorer also allows to perform file operations such as create, delete, move,
--- etc.
-vim.keymap.set("n", "<leader>ee", function()
-  Snacks.picker.explorer()
-end)
+-- Open the built-in directory browser (the "dir" plugin) for the directory of
+-- the current buffer, or the current working directory when the buffer has no
+-- name. Editing a directory path opens a read-only listing that can be
+-- navigated with "<CR>" (open entry) and "-" (parent directory). The
+-- "core.explorer" module adds file operations to these directory buffers:
+-- "<Tab>" marks files, "q" lists all marks in the quickfix list, "s" greps the
+-- directory, "n" creates a new file, "d" deletes, "r" renames, "m" moves and
+-- "c" copies the marked files into the current directory and "=" diffs two
+-- marked files.
+require("core.explorer").setup()
 
--- Keymap to create a new file and open it in insert mode.
-vim.keymap.set("n", "<leader>en", function()
-  Snacks.input({
-    prompt = "File Name",
-    default = "untitled",
-  }, function(value)
-    vim.cmd("e " .. value .. " | startinsert")
-  end)
+vim.keymap.set("n", "<leader>ee", function()
+  local bufname = vim.api.nvim_buf_get_name(0)
+  local dir
+  if bufname == "" then
+    dir = vim.fn.getcwd()
+  elseif vim.fn.isdirectory(bufname) == 1 then
+    dir = bufname
+  else
+    dir = vim.fn.fnamemodify(bufname, ":p:h")
+  end
+  vim.cmd.edit(vim.fn.fnameescape(dir))
 end)
 
 -- Keymap to save a file without running any auto commands and with creating
@@ -680,37 +471,16 @@ vim.api.nvim_create_autocmd({ "CmdlineLeave" }, {
   end,
 })
 
--- Keymaps for finding files, buffers, recent files, etc. using the Snacks
--- picker.
+-- Keymaps for finding files, buffers and recent files (filtered to the current
+-- working directory) using our fzf based picker.
 vim.keymap.set("n", "<leader>ff", function()
-  Snacks.picker.files()
-end)
-vim.keymap.set("n", "<leader>fs", function()
-  Snacks.picker.smart({ filter = { cwd = true } })
+  require("core.picker").find_files()
 end)
 vim.keymap.set("n", "<leader>fb", function()
-  Snacks.picker.buffers()
+  require("core.picker").buffers()
 end)
 vim.keymap.set("n", "<leader>fr", function()
-  Snacks.picker.recent({ filter = { cwd = true } })
-end)
-vim.keymap.set("n", "<leader>fu", function()
-  Snacks.picker.undo()
-end)
-vim.keymap.set("n", "<leader>fm", function()
-  Snacks.picker.marks()
-end)
-vim.keymap.set("n", "<leader>fd", function()
-  Snacks.picker.diagnostics_buffer()
-end)
-vim.keymap.set("n", "<leader>fD", function()
-  Snacks.picker.diagnostics()
-end)
-vim.keymap.set("n", "<leader>fp", function()
-  Snacks.picker.projects()
-end)
-vim.keymap.set("n", "<leader>fq", function()
-  Snacks.picker.qflist()
+  require("core.picker").recent()
 end)
 
 --------------------------------------------------------------------------------
@@ -722,42 +492,17 @@ vim.opt.grepprg =
   "rg --vimgrep --smart-case --hidden --color=never --glob='!.git' --glob='!node_modules' --glob='!dist' --glob='!.DS_Store'"
 vim.opt.grepformat = "%f:%l:%c:%m"
 
-vim.api.nvim_create_autocmd("CmdlineChanged", {
-  pattern = ":",
-  group = vim.api.nvim_create_augroup("livegrep-command", { clear = true }),
-  callback = function()
-    local cmdline = vim.fn.getcmdline()
-    local words = vim.split(cmdline, " ", { trimempty = true })
-    if words[1] == "livegrep" and #words > 1 then
-      vim.cmd("silent grep! " .. vim.fn.escape(words[2], " "))
-      vim.cmd("cwindow")
-      vim.cmd.redraw()
-    end
-  end,
-})
-
--- Keymaps for searching through files using the Snacks picker.
+-- Keymaps for searching through files using our fzf based picker. "<leader>sw"
+-- greps the word under the cursor (or the visual selection) and "<leader>st"
+-- greps for common todo / warning tags.
 vim.keymap.set("n", "<leader>ss", function()
-  Snacks.picker.grep()
-end)
-vim.keymap.set("n", "<leader>s/", function()
-  Snacks.picker.grep_buffers()
+  require("core.picker").grep_project()
 end)
 vim.keymap.set({ "n", "x" }, "<leader>sw", function()
-  Snacks.picker.grep_word()
+  require("core.picker").grep_word()
 end)
-vim.keymap.set({ "n", "x" }, "<leader>st", function()
-  Snacks.picker.grep({
-    regex = true,
-    cmd = "rg",
-    args = rg_args,
-    format = "file",
-    search = function()
-      return "todo:|warn:|info:|xxx:|bug:|fixme:|fixit:|issue:"
-    end,
-    live = false,
-    supports_live = true,
-  })
+vim.keymap.set("n", "<leader>st", function()
+  require("core.picker").grep_todos()
 end)
 
 --------------------------------------------------------------------------------
@@ -917,7 +662,9 @@ local ts_parsers = {
 }
 
 local ts = require("nvim-treesitter")
-ts.install(ts_parsers)
+vim.schedule(function()
+  ts.install(ts_parsers)
+end)
 
 -- Update treesitter parsers / queries with plugin updates.
 vim.api.nvim_create_autocmd("PackChanged", {
@@ -1014,6 +761,7 @@ vim.lsp.enable({
   "lua_ls",
   "marksman",
   "my_hover_ls",
+  "prlsp",
   "pyright",
   "rust_analyzer",
   "sourcekit",
@@ -1028,11 +776,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local buffer = event.buf
 
     if client then
-      -- Add additional keymaps to the default LSP keymaps and overwrite some
-      -- default keymaps to use Snacks functionalities. Some defaults are
-      -- overridden to show a picker, so that the locations can be opened in a
-      -- new tab, split, etc.
-      --
+      -- Add additional keymaps to the default LSP keymaps.
       -- See: https://neovim.io/doc/user/lsp.html#_global-defaults
       vim.keymap.set("n", "grf", function()
         vim.lsp.buf.format({
@@ -1040,35 +784,23 @@ vim.api.nvim_create_autocmd("LspAttach", {
         })
       end)
       vim.keymap.set("n", "gd", function()
-        Snacks.picker.lsp_definitions({ auto_confirm = false })
+        vim.lsp.buf.definition({ loclist = false })
       end)
       vim.keymap.set("n", "gD", function()
-        Snacks.picker.lsp_declarations({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "gri", function()
-        Snacks.picker.lsp_implementations({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "grr", function()
-        Snacks.picker.lsp_references({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "<leader>grt", function()
-        Snacks.picker.lsp_type_definitions({ auto_confirm = false })
-      end)
-      vim.keymap.set("n", "gO", function()
-        Snacks.picker.lsp_symbols()
+        vim.lsp.buf.declaration({ loclist = false })
       end)
       vim.keymap.set("n", "grh", function()
         vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
       end)
 
-      -- Add "<leader>mlo" keymap for tsgo to organize imports, since the
-      -- default code action keymap "gra" does not provide it.
-      vim.keymap.set("n", "<leader>mlo", function()
-        vim.lsp.buf.code_action({
-          context = { only = { "source.organizeImports" }, diagnostics = {} },
-          apply = true,
-        })
-      end)
+      -- -- Add "<leader>mlo" keymap for tsgo to organize imports, since the
+      -- -- default code action keymap "gra" does not provide it.
+      -- vim.keymap.set("n", "<leader>mlo", function()
+      --   vim.lsp.buf.code_action({
+      --     context = { only = { "source.organizeImports" }, diagnostics = {} },
+      --     apply = true,
+      --   })
+      -- end)
 
       -- Enable completion.
       if
@@ -1109,7 +841,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
             not vim.lsp.inline_completion.get({
               on_accept = function(item)
                 local insert_text = item.insert_text
-                if not type(insert_text) == "string" or not item.range then
+                if type(insert_text) ~= "string" or not item.range then
                   return nil
                 end
                 local end_ = item.range[4]
@@ -1152,6 +884,22 @@ vim.api.nvim_create_autocmd("LspAttach", {
         })
       end
     end
+
+    -- If the prlsp client is attached, load the prlsp plugin and add keymaps
+    -- for creating, replying to and showing review comments.
+    if client and client.name == "prlsp" then
+      require("core.prlsp")
+
+      vim.keymap.set(
+        { "n", "x" },
+        "<leader>ghc",
+        ":PRLSPCreateReviewComment<cr>",
+        { silent = true }
+      )
+      vim.keymap.set("n", "<leader>ghr", "<cmd>PRLSPReplyToReviewThread<cr>")
+      vim.keymap.set("n", "<leader>ghs", "<cmd>PRLSPShowReviewThread<cr>")
+      vim.keymap.set("n", "<leader>ghu", "<cmd>PRLSPRefreshReviewThreads<cr>")
+    end
   end,
 })
 
@@ -1187,6 +935,13 @@ vim.api.nvim_create_autocmd({ "VimLeavePre", "ExitPre" }, {
 -- DIAGNOSTICS
 --------------------------------------------------------------------------------
 
+local icons_diagnostics = {
+  Error = " ",
+  Warn = " ",
+  Info = " ",
+  Hint = " ",
+}
+
 vim.diagnostic.config({
   underline = true,
   update_in_insert = false,
@@ -1194,14 +949,15 @@ vim.diagnostic.config({
     spacing = 4,
     source = "if_many",
     prefix = function(diagnostic)
-      for d, icon in pairs(icons.diagnostics) do
+      for d, icon in pairs(icons_diagnostics) do
         if diagnostic.severity == vim.diagnostic.severity[d:upper()] then
           return icon
         end
       end
     end,
     format = function(diagnostic)
-      -- Replace newline and tab characters with space for more compact diagnostics.
+      -- Replace newline and tab characters with space for more compact
+      -- diagnostics.
       local message = diagnostic.message
         :gsub("\n", " ")
         :gsub("\t", " ")
@@ -1214,10 +970,10 @@ vim.diagnostic.config({
   severity_sort = true,
   signs = {
     text = {
-      [vim.diagnostic.severity.HINT] = icons.diagnostics.Hint,
-      [vim.diagnostic.severity.INFO] = icons.diagnostics.Info,
-      [vim.diagnostic.severity.WARN] = icons.diagnostics.Warn,
-      [vim.diagnostic.severity.ERROR] = icons.diagnostics.Error,
+      [vim.diagnostic.severity.HINT] = icons_diagnostics.Hint,
+      [vim.diagnostic.severity.INFO] = icons_diagnostics.Info,
+      [vim.diagnostic.severity.WARN] = icons_diagnostics.Warn,
+      [vim.diagnostic.severity.ERROR] = icons_diagnostics.Error,
     },
     linehl = {
       [vim.diagnostic.severity.HINT] = "DiagnosticHint",
@@ -1231,88 +987,32 @@ vim.diagnostic.config({
 for _, type in ipairs({ "Error", "Warn", "Hint", "Info" }) do
   vim.fn.sign_define("DiagnosticSign" .. type, {
     name = "DiagnosticSign" .. type,
-    text = icons.diagnostics[type],
+    text = icons_diagnostics[type],
     texthl = "Diagnostic" .. type,
   })
 end
+
+vim.keymap.set("n", "<leader>d", function()
+  vim.diagnostic.setqflist()
+end, {})
 
 --------------------------------------------------------------------------------
 -- STATUSLINE
 --------------------------------------------------------------------------------
 
--- Install lualine as our statusline plugin.
-vim.pack.add({
-  {
-    src = "https://github.com/nvim-lualine/lualine.nvim",
-    name = "lualine",
-    version = "master",
-  },
-}, { confirm = false, load = true })
-
-require("lualine").setup({
-  options = {
-    theme = "catppuccin-nvim",
-    component_separators = { left = "", right = "" },
-    section_separators = { left = "", right = "" },
-    globalstatus = true,
-  },
-  sections = {
-    lualine_a = { "mode" },
-    lualine_b = {
-      "branch",
-      {
-        "diff",
-        symbols = {
-          added = icons.git.added,
-          modified = icons.git.modified,
-          removed = icons.git.deleted,
-        },
-      },
-      {
-        "diagnostics",
-        symbols = {
-          error = icons.diagnostics.Error,
-          warn = icons.diagnostics.Warn,
-          info = icons.diagnostics.Info,
-          hint = icons.diagnostics.Hint,
-        },
-      },
-    },
-    lualine_c = {
-      {
-        -- Show tabs in the form "current/count", e.g. "1/2".
-        function()
-          local tab_count = vim.fn.tabpagenr("$")
-          local current_tab = vim.fn.tabpagenr()
-          return current_tab .. "/" .. tab_count
-        end,
-      },
-      {
-        "filename",
-        file_status = true,
-        newfile_status = false,
-        path = 0,
-        symbols = {
-          modified = icons.git.modified,
-          readonly = "󱈸",
-          unnamed = icons.git.untracked,
-          newfile = icons.git.added,
-        },
-      },
-    },
-    lualine_x = {
-      "encoding",
-      "fileformat",
-      "filetype",
-    },
-    lualine_y = { "progress" },
-    lualine_z = { "location" },
-  },
-})
+require("core.statusline")
 
 --------------------------------------------------------------------------------
 -- GIT
 --------------------------------------------------------------------------------
+
+local icons_git = {
+  -- Change type
+  added = "✚",
+  modified = "○",
+  deleted = "✖",
+  untracked = "",
+}
 
 -- Install gitsigns and use our icons instead of the default ones.
 vim.pack.add({
@@ -1325,20 +1025,20 @@ vim.pack.add({
 
 require("gitsigns").setup({
   signs = {
-    add = { text = icons.git.added },
-    change = { text = icons.git.modified },
-    delete = { text = icons.git.deleted },
-    topdelete = { text = icons.git.deleted },
-    changedelete = { text = icons.git.modified },
-    untracked = { text = icons.git.untracked },
+    add = { text = icons_git.added },
+    change = { text = icons_git.modified },
+    delete = { text = icons_git.deleted },
+    topdelete = { text = icons_git.deleted },
+    changedelete = { text = icons_git.modified },
+    untracked = { text = icons_git.untracked },
   },
   signs_staged = {
-    add = { text = icons.git.added },
-    change = { text = icons.git.deleted },
-    delete = { text = icons.git.deleted },
-    topdelete = { text = icons.git.deleted },
-    changedelete = { text = icons.git.modified },
-    untracked = { text = icons.git.untracked },
+    add = { text = icons_git.added },
+    change = { text = icons_git.deleted },
+    delete = { text = icons_git.deleted },
+    topdelete = { text = icons_git.deleted },
+    changedelete = { text = icons_git.modified },
+    untracked = { text = icons_git.untracked },
   },
   preview_config = {
     border = "single",
@@ -1397,8 +1097,18 @@ require("gitsigns").setup({
       { buffer = bufnr }
     )
 
+    -- Blame line and show full commit details.
+    vim.keymap.set("n", "<leader>gsb", function()
+      gitsigns.blame_line({ full = true })
+    end, { buffer = bufnr })
+
     -- Git diff.
     vim.keymap.set("n", "<leader>gsd", gitsigns.diffthis, { buffer = bufnr })
+
+    -- Show hunks in quickfix list.
+    vim.keymap.set("n", "<leader>gsq", function()
+      gitsigns.setqflist("all")
+    end, { buffer = bufnr })
 
     -- Toggle word diff and deleted lines.
     vim.keymap.set("n", "<leader>gst", function()
@@ -1408,38 +1118,6 @@ require("gitsigns").setup({
     end, { buffer = bufnr })
   end,
 })
-
--- Git blame line via Snacks.
---
--- We are using the gitsigns prefix, also when we are using Snacks for blaming
--- lines.
-vim.keymap.set("n", "<leader>gsb", function()
-  Snacks.git.blame_line()
-end)
-
--- Find related Git actions powered by the Snacks picker. It is possible to find
--- files, diffs, branches, commits, stashed and status entries.
-vim.keymap.set("n", "<leader>gff", function()
-  Snacks.picker.git_files()
-end)
-vim.keymap.set("n", "<leader>gfd", function()
-  Snacks.picker.git_diff()
-end)
-vim.keymap.set("n", "<leader>gfb", function()
-  Snacks.picker.git_branches()
-end)
-vim.keymap.set("n", "<leader>gfl", function()
-  Snacks.picker.git_log_file()
-end)
-vim.keymap.set("n", "<leader>gfL", function()
-  Snacks.picker.git_log()
-end)
-vim.keymap.set("n", "<leader>gfs", function()
-  Snacks.picker.git_status()
-end)
-vim.keymap.set("n", "<leader>gfS", function()
-  Snacks.picker.git_stash()
-end)
 
 -- The "GitDiff <base> <head>" command shows the diff of two branches via
 -- gitsigns. If no branches are provided the diff between the current branch
@@ -1473,8 +1151,8 @@ end, { nargs = "*" })
 
 vim.keymap.set("n", "<leader>gsD", "<cmd>GitDiff<cr>")
 
--- Custom Snacks picker to find all merge conflicts in the current Git
--- repository.
+-- Find all merge conflicts in the current Git repository and display them in
+-- the quickfix list.
 --
 -- See: https://github.com/git/git/blob/215033b3ac599432a17d58f18a92b356d98354a9/contrib/git-jump/git-jump#L59
 vim.keymap.set("n", "<leader>gfm", function()
@@ -1483,154 +1161,42 @@ vim.keymap.set("n", "<leader>gfm", function()
     "git ls-files -u | perl -pe 's/^.*?\t//' | sort -u | while IFS= read fn; do grep -Hn '^<<<<<<<' \"$fn\"; done"
   )
 
-  for idx, file in pairs(files) do
+  for _, file in ipairs(files) do
     local parts = vim.fn.split(file, ":")
     table.insert(items, {
-      idx = idx,
-      text = parts[1] .. ":" .. parts[2],
-      file = parts[1],
-      cwd = Snacks.git.get_root(),
-      pos = { tonumber(parts[2]), 0 },
+      filename = parts[1],
+      lnum = tonumber(parts[2]),
     })
   end
 
-  Snacks.picker({
-    title = "Git Merge Conflicts",
-    items = items,
-  })
+  vim.fn.setqflist({}, " ", { title = "Merge Conflicts", items = items })
+  vim.cmd.copen()
 end)
 
--- Open the position under the cursor on GitHub, GitLab, Bitbucket, etc.
-vim.keymap.set("n", "<leader>gb", function()
-  Snacks.gitbrowse()
+-- Keymaps for the Git pickers ("gf" = git find). "enter" opens the file /
+-- checks out the branch, "ctrl-q" sends the selection to the quickfix list and
+-- "ctrl-s" / "ctrl-v" / "ctrl-t" open in a horizontal / vertical split or a new
+-- tab (file pickers only).
+vim.keymap.set("n", "<leader>gff", function()
+  require("core.picker").git_files()
 end)
-
---------------------------------------------------------------------------------
--- GITHUB
---------------------------------------------------------------------------------
-
-require("core.github")
-
-vim.keymap.set("n", "<leader>ghn", "<cmd>GitHubNotifications<cr>")
-
--- Show pull requests involving, created by, assigned to, mentioning or
--- requesting a review from me.
-vim.keymap.set(
-  "n",
-  "<leader>ghpi",
-  "<cmd>GitHubSearch archived:false is:pr is:open involves:ricoberger<cr>"
-)
-vim.keymap.set(
-  "n",
-  "<leader>ghpc",
-  "<cmd>GitHubSearch archived:false is:pr is:open author:ricoberger<cr>"
-)
-vim.keymap.set(
-  "n",
-  "<leader>ghpa",
-  "<cmd>GitHubSearch archived:false is:pr is:open assignee:ricoberger<cr>"
-)
-vim.keymap.set(
-  "n",
-  "<leader>ghpm",
-  "<cmd>GitHubSearch archived:false is:pr is:open mentions:ricoberger<cr>"
-)
-vim.keymap.set(
-  "n",
-  "<leader>ghpr",
-  "<cmd>GitHubSearch archived:false is:pr is:open review-requested:ricoberger<cr>"
-)
-vim.keymap.set("n", "<leader>ghpp", "<cmd>GitHubPr<cr>")
-vim.keymap.set("n", "<leader>ghP", function()
-  Snacks.picker.gh_pr({ state = "open", live = false })
+vim.keymap.set("n", "<leader>gfb", function()
+  require("core.picker").git_branches()
 end)
-
--- Show issues involving, created by, assigned to or mentioning me.
-vim.keymap.set(
-  "n",
-  "<leader>ghii",
-  "<cmd>GitHubSearch archived:false is:issue is:open involves:ricoberger<cr>"
-)
-vim.keymap.set(
-  "n",
-  "<leader>ghic",
-  "<cmd>GitHubSearch archived:false is:issue is:open author:ricoberger<cr>"
-)
-vim.keymap.set(
-  "n",
-  "<leader>ghia",
-  "<cmd>GitHubSearch archived:false is:issue is:open assignee:ricoberger<cr>"
-)
-vim.keymap.set(
-  "n",
-  "<leader>ghim",
-  "<cmd>GitHubSearch archived:false is:issue is:open mentions:ricoberger<cr>"
-)
-vim.keymap.set("n", "<leader>ghI", function()
-  Snacks.picker.gh_issue({ state = "open", live = false })
+vim.keymap.set("n", "<leader>gfd", function()
+  require("core.picker").git_diff()
 end)
-
--- Keymaps for GitHub related actions.
-vim.keymap.set("n", "<leader>ghac", "<cmd>GitHubChecks<cr>")
-vim.keymap.set("n", "<leader>gham", "<cmd>GitHubMerge<cr>")
-
---------------------------------------------------------------------------------
--- MISC
---------------------------------------------------------------------------------
-
--- Toggle zen mode for distraction-free coding.
-vim.keymap.set("n", "<leader>mz", function()
-  Snacks.zen()
+vim.keymap.set("n", "<leader>gfs", function()
+  require("core.picker").git_status()
 end)
-
--- Toggle spell checking for the current buffer. If spell checking is already
--- enabled with the given language then it will be disabled.
-local function toggle_spell(lang)
-  local spell_on = vim.opt_local.spell:get()
-  local current_langs = vim.opt_local.spelllang:get()
-  local current_lang = spell_on and current_langs[1] or nil
-
-  if current_lang == lang then
-    vim.opt_local.spell = false
-    return
-  end
-
-  vim.opt_local.spell = true
-  vim.opt_local.spelllang = { lang }
-end
-
-vim.keymap.set("n", "<leader>ms", function()
-  toggle_spell("en_us")
+vim.keymap.set("n", "<leader>gfz", function()
+  require("core.picker").git_stash()
 end)
-
--- Toggle terminal.
-vim.keymap.set("n", "<leader>mt", function()
-  Snacks.terminal.toggle()
+vim.keymap.set("n", "<leader>gfl", function()
+  require("core.picker").git_file_log()
 end)
-
--- Set file type.
-vim.keymap.set("n", "<leader>mf", function()
-  local filetypes = {}
-  for _, ft in ipairs(vim.fn.getcompletion("", "filetype")) do
-    table.insert(filetypes, { text = ft, name = ft })
-  end
-
-  Snacks.picker({
-    title = "File Types",
-    layout = "select",
-    items = filetypes,
-    format = function(item)
-      local icon, icon_hl = require("snacks.util").icon(item.text, "filetype")
-      return {
-        { icon .. " ", icon_hl },
-        { item.text },
-      }
-    end,
-    confirm = function(picker, item)
-      picker:close()
-      vim.cmd.set("ft=" .. item.text)
-    end,
-  })
+vim.keymap.set("n", "<leader>gfL", function()
+  require("core.picker").git_log()
 end)
 
 --------------------------------------------------------------------------------
@@ -1645,132 +1211,53 @@ vim.pack.add({
   },
 }, { confirm = false, load = true })
 
-local mc = require("multicursor-nvim")
-mc.setup()
+vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile" }, {
+  group = vim.api.nvim_create_augroup(
+    "lazy-load-multicursor",
+    { clear = true }
+  ),
+  once = true,
+  callback = function()
+    local mc = require("multicursor-nvim")
+    mc.setup()
 
--- Define keymaps for multicursor operations. A new cursor can be added
--- using "Ctrl + k" / "Ctrl + j" for the line above / below, using
--- "Ctrl + n" for the next word under the cursor "Ctrl + a" for all
--- occurrences of the word under the cursor or using "Ctrl = m" for all
--- provided matches.
-vim.keymap.set({ "n", "x" }, "<c-k>", function()
-  mc.addCursor("k")
-end)
-vim.keymap.set({ "n", "x" }, "<c-j>", function()
-  mc.addCursor("j")
-end)
-vim.keymap.set({ "n", "x" }, "<c-n>", function()
-  mc.addCursor("*")
-end)
-vim.keymap.set({ "n", "x" }, "<c-a>", mc.matchAllAddCursors)
-vim.keymap.set("x", "<c-m>", mc.matchCursors)
+    -- Define keymaps for multicursor operations. A new cursor can be added
+    -- using "Ctrl + k" / "Ctrl + j" for the line above / below, using
+    -- "Ctrl + n" for the next word under the cursor "Ctrl + a" for all
+    -- occurrences of the word under the cursor or using "Ctrl = m" for all
+    -- provided matches.
+    vim.keymap.set("n", "<c-k>", function()
+      mc.addCursor("k")
+    end)
+    vim.keymap.set("n", "<c-j>", function()
+      mc.addCursor("j")
+    end)
+    vim.keymap.set({ "n", "x" }, "<c-n>", function()
+      mc.addCursor("*")
+    end)
+    vim.keymap.set({ "n", "x" }, "<c-a>", mc.matchAllAddCursors)
+    vim.keymap.set("x", "<c-m>", mc.matchCursors)
 
-mc.addKeymapLayer(function(layerSet)
-  layerSet("n", "<esc>", function()
-    if not mc.cursorsEnabled() then
-      mc.enableCursors()
-    else
-      mc.clearCursors()
-    end
-  end)
-end)
+    mc.addKeymapLayer(function(layerSet)
+      layerSet("n", "<esc>", function()
+        if not mc.cursorsEnabled() then
+          mc.enableCursors()
+        else
+          mc.clearCursors()
+        end
+      end)
+    end)
 
--- Customize highlight groups for multicursor.
-local hl = vim.api.nvim_set_hl
-hl(0, "MultiCursorCursor", { link = "Cursor" })
-hl(0, "MultiCursorVisual", { link = "Visual" })
-hl(0, "MultiCursorSign", { link = "SignColumn" })
-hl(0, "MultiCursorDisabledCursor", { link = "Visual" })
-hl(0, "MultiCursorDisabledVisual", { link = "Visual" })
-hl(0, "MultiCursorDisabledSign", { link = "SignColumn" })
-
---------------------------------------------------------------------------------
--- AI
---------------------------------------------------------------------------------
-
-vim.pack.add({
-  {
-    src = "https://github.com/folke/sidekick.nvim",
-    name = "sidekick",
-    version = "main",
-  },
-}, { confirm = false, load = true })
-
--- Setup sidekick.nvim for next edit suggestions and AI chat. The next edit
--- suggestions are integrated with the GitHub Copilot LSP server. The AI chat
--- uses the GitHub Copilot CLI tool as backend.
-require("sidekick").setup({
-  nes = {
-    diff = {
-      inline = "chars",
-    },
-  },
-  cli = {
-    win = {
-      keys = {
-        stopinsert = { "<c-q>", "stopinsert", mode = "t" },
-        hide_ctrl_z = { "<c-z>", "blur", mode = "nt" },
-        buffers = { "<a-b>", "buffers", mode = "nt" },
-        files = { "<a-f>", "files", mode = "nt" },
-        prompt = { "<a-p>", "prompt", mode = "t" },
-        hide_n = false,
-        hide_ctrl_q = false,
-        hide_ctrl_dot = false,
-        nav_left = false,
-        nav_down = false,
-        nav_up = false,
-        nav_right = false,
-      },
-    },
-    mux = {
-      backend = "tmux",
-      enabled = false,
-    },
-    tools = {
-      claude = {
-        cmd = { "claude" },
-      },
-      copilot = {
-        cmd = { "copilot", "--banner" },
-        url = "https://github.com/github/copilot-cli",
-      },
-      opencode = {
-        cmd = { "opencode" },
-        -- HACK: https://github.com/sst/opencode/issues/445
-        env = { OPENCODE_THEME = "system" },
-      },
-    },
-  },
+    -- Customize highlight groups for multicursor.
+    local hl = vim.api.nvim_set_hl
+    hl(0, "MultiCursorCursor", { link = "Cursor" })
+    hl(0, "MultiCursorVisual", { link = "Visual" })
+    hl(0, "MultiCursorSign", { link = "SignColumn" })
+    hl(0, "MultiCursorDisabledCursor", { link = "Visual" })
+    hl(0, "MultiCursorDisabledVisual", { link = "Visual" })
+    hl(0, "MultiCursorDisabledSign", { link = "SignColumn" })
+  end,
 })
-
--- Use Tab to jump to the next edit suggestion and to to apply it. If there is
--- no suggestion available Tab works as normal.
-vim.keymap.set({ "i", "n" }, "<tab>", function()
-  if require("sidekick").nes_jump_or_apply() then
-    return
-  end
-
-  return "<tab>"
-end, { expr = true })
-
--- Add keymaps for AI chat related actions. The "Space + aa" can be used toggle
--- the AI chat window and focuses it. The "Space + ap" keymap can be used to
--- select a predifined prompt / context.
-vim.keymap.set({ "n", "x" }, "<leader>aa", function()
-  require("sidekick.cli").toggle({ name = "opencode", focus = true })
-end)
-vim.keymap.set({ "n", "x" }, "<leader>as", function()
-  require("sidekick.cli").toggle()
-end)
-vim.keymap.set({ "n", "x" }, "<leader>ap", function()
-  require("sidekick.cli").prompt()
-end)
-
--- Add keymaps for next edit suggestion actions. The "Space + an" keymap can be
--- used to toggle the next edit suggestion feature.
-vim.keymap.set({ "n" }, "<leader>an", function()
-  require("sidekick.nes").toggle()
-end)
 
 --------------------------------------------------------------------------------
 -- NOTES
@@ -1778,13 +1265,14 @@ end)
 
 local notes_dir = "/Users/ricoberger/Documents/GitHub/ricoberger/notes"
 
+-- Open today's daily note (creating it from the template) or yesterday's note.
 vim.keymap.set("n", "<leader>nd", function()
   local date = vim.fn.strftime("%Y/%m/%Y-%m-%d")
-
-  if vim.uv.fs_stat(notes_dir .. "/daily/" .. date .. ".md") then
-    vim.cmd("e " .. notes_dir .. "/daily/" .. date .. ".md")
+  local path = notes_dir .. "/daily/" .. date .. ".md"
+  if vim.uv.fs_stat(path) then
+    vim.cmd("e " .. path)
   else
-    vim.cmd("e " .. notes_dir .. "/daily/" .. date .. ".md")
+    vim.cmd("e " .. path)
     vim.cmd("r " .. notes_dir .. "/daily/template.md")
   end
 end)
@@ -1794,70 +1282,34 @@ vim.keymap.set("n", "<leader>ny", function()
   vim.cmd("e " .. notes_dir .. "/daily/" .. date .. ".md")
 end)
 
+-- Notes pickers, scoped to the notes directory. "<leader>nt" lists all open
+-- todos ("- [ ]") and "<leader>nk" lists all note tags.
 vim.keymap.set("n", "<leader>nf", function()
-  Snacks.picker.files({
+  require("core.picker").find_files({
     cwd = notes_dir,
-    cmd = "fd",
-    args = fd_args,
-    show_empty = true,
-    hidden = true,
-    ignored = false,
-    follow = false,
-    supports_live = true,
+    icon = "",
+    title = "Notes",
   })
 end)
-
 vim.keymap.set("n", "<leader>nr", function()
-  Snacks.picker.recent({
-    cwd = notes_dir,
-    filter = { cwd = true },
-  })
+  require("core.picker").recent({ cwd = notes_dir, icon = "", title = "Notes" })
 end)
-
 vim.keymap.set("n", "<leader>ns", function()
-  Snacks.picker.grep({
+  require("core.picker").grep_project({
     cwd = notes_dir,
-    cmd = "rg",
-    args = rg_args,
-    hidden = true,
-    ignored = false,
-    follow = false,
-    supports_live = true,
+    icon = "",
+    title = "Notes",
   })
 end)
-
 vim.keymap.set("n", "<leader>nt", function()
-  Snacks.picker.grep({
-    cwd = notes_dir,
-    regex = true,
-    cmd = "rg",
-    args = rg_args,
-    format = "file",
-    search = function()
-      return "- \\[ \\] .*"
-    end,
-    live = false,
-    supports_live = true,
-  })
+  require("core.picker").grep_pattern(
+    [[- \[ \] .*]],
+    { cwd = notes_dir, icon = "", title = "Notes Todos" }
+  )
 end)
-
 vim.keymap.set("n", "<leader>nk", function()
-  Snacks.picker.grep({
-    cwd = notes_dir,
-    regex = true,
-    cmd = "rg",
-    args = rg_args,
-    format = "file",
-    search = function()
-      return "^tags: \\[(.*)\\]$"
-    end,
-    live = false,
-    supports_live = true,
-  })
-end)
-
-vim.keymap.set("n", "<leader>ne", function()
-  Snacks.picker.explorer({
-    cwd = notes_dir,
-  })
+  require("core.picker").grep_pattern(
+    [[^tags: \[.*\]$]],
+    { cwd = notes_dir, icon = "", title = "Notes Tags" }
+  )
 end)
