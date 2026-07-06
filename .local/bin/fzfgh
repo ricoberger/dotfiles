@@ -559,29 +559,20 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
 
-      # Pick the merge method (and whether to use admin privileges) or close the
-      # pull request. Selecting an entry doubles as the confirmation; escape
-      # aborts.
+      # Pick the merge method (and whether to use admin privileges). Selecting
+      # an entry doubles as the confirmation; escape aborts.
       choice="$(printf '%s\n' \
         "Create a merge commit" \
         "Create a merge commit (admin)" \
         "Squash and merge" \
         "Squash and merge (admin)" \
         "Rebase and merge" \
-        "Rebase and merge (admin)" \
-        "Close pull request" | fzf \
+        "Rebase and merge (admin)" | fzf \
         --prompt "$ICON_PR Merge $repo#$number: " \
         --height 100% \
         --reverse \
         --border rounded)"
       [[ -z "$choice" ]] && exit 0
-
-      if [[ "$choice" == "Close pull request" ]]; then
-        if ! gh pr close "$number" --repo "$repo"; then
-          read -n 1 -s -r -p "Press any key to continue..."
-        fi
-        exit 0
-      fi
 
       merge_args=(--repo "$repo" --delete-branch)
       case "$choice" in
@@ -619,6 +610,51 @@ if [[ "$1" == "__action" ]]; then
       fi
 
       if ! gh pr merge "$number" "${merge_args[@]}"; then
+        read -n 1 -s -r -p "Press any key to continue..."
+      fi
+      ;;
+
+    pr-close)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+
+      # Pick how to close the pull request (optionally deleting the branch
+      # and / or leaving a closing comment). Selecting an entry doubles as the
+      # confirmation; escape aborts.
+      choice="$(printf '%s\n' \
+        "Close" \
+        "Close and delete branch" \
+        "Close with comment" \
+        "Close with comment and delete branch" | fzf \
+        --prompt "$ICON_PR Close $repo#$number: " \
+        --height 100% \
+        --reverse \
+        --border rounded)"
+      [[ -z "$choice" ]] && exit 0
+
+      close_args=(--repo "$repo")
+      case "$choice" in
+        *"delete branch") close_args+=(--delete-branch) ;;
+      esac
+
+      # The "with comment" variants open nvim to write the closing comment. An
+      # empty comment aborts the close.
+      if [[ "$choice" == "Close with comment"* ]]; then
+        dir="$(mktemp -d)"
+        tmp="$dir/comment.md"
+        nvim "$tmp"
+        if [[ ! -s "$tmp" ]]; then
+          rm -rf "$dir"
+          echo "A comment is required to close $repo#$number"
+          read -n 1 -s -r -p "Press any key to continue..."
+          exit 0
+        fi
+        close_args+=(--comment "$(cat "$tmp")")
+        rm -rf "$dir"
+      fi
+
+      if ! gh pr close "$number" "${close_args[@]}"; then
         read -n 1 -s -r -p "Press any key to continue..."
       fi
       ;;
@@ -1534,7 +1570,7 @@ Pull request keybindings:
   alt-o   : open the PR in the web browser
   alt-y   : copy the PR url to the clipboard
   alt-m   : merge the PR (pick method: merge / squash / rebase, with/without
-            admin; edit the commit subject & body in nvim) or close the PR
+            admin; edit the commit subject & body in nvim)
   alt-l   : add / remove a label
   alt-e   : edit the PR title / body (opens nvim)
   alt-d   : browse the PR diff hunk-by-hunk in fzf (preview shows the hunk and
@@ -1549,6 +1585,8 @@ Pull request keybindings:
   alt-a   : assign the PR to me
   alt-k   : open the checks sub-picker (GitHub Actions)
   alt-w   : toggle draft / ready for review
+  alt-x   : close the PR (pick: close / and delete branch / with comment /
+            with comment and delete branch)
   alt-r   : reload the list
   ctrl-p  : toggle preview
   ctrl-d  : half page down
@@ -1653,6 +1691,7 @@ run_prs() {
     --bind "alt-a:execute($ACTION pr-assign {1} {2})+refresh-preview" \
     --bind "alt-k:execute($ACTION pr-checks {1} {2})" \
     --bind "alt-w:execute($ACTION pr-toggle-draft {1} {2} {3})+reload($SCRIPT __list prs)" \
+    --bind "alt-x:execute($ACTION pr-close {1} {2})+reload($SCRIPT __list prs)" \
     --preview-window "right:65%" \
     --preview "$SCRIPT __preview pr {1} {2}"
 }
