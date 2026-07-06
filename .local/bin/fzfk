@@ -264,6 +264,15 @@ fi
 
 LIST_CMD="kubectl get $RESOURCE ${KUBECTL_ARGS[*]}"
 
+# Command actually run to populate the list. Merge stderr into stdout so
+# kubectl's diagnostics (e.g. "No resources found in <ns> namespace." when the
+# list is empty, or genuine errors) become normal input rather than being
+# written straight to the terminal, where they would overwrite fzf's TUI and
+# break its layout. The message is then consumed by --header-lines=1 and shown
+# as the header while the list stays empty. $LIST_CMD itself is kept clean for
+# display in the border label.
+LIST_CMD_RUN="$LIST_CMD 2>&1"
+
 # Interval (seconds) for automatically refreshing the listed resources
 # (override via FZFK_REFRESH_INTERVAL).
 FZFK_REFRESH_INTERVAL="${FZFK_REFRESH_INTERVAL:-5}"
@@ -300,14 +309,14 @@ fzf \
   --bind "ctrl-f:preview-half-page-down" \
   --bind "ctrl-b:preview-half-page-up" \
   --bind "ctrl-p:toggle-preview" \
-  --bind "alt-r:reload-sync($LIST_CMD)" \
-  --bind "every($FZFK_REFRESH_INTERVAL):reload-sync($LIST_CMD)" \
+  --bind "alt-r:reload-sync($LIST_CMD_RUN)" \
+  --bind "every($FZFK_REFRESH_INTERVAL):reload-sync($LIST_CMD_RUN)" \
   --bind "enter:execute($ACTION describe $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-p:execute($ACTION portforward $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-e:execute($ACTION exec $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-l:execute($ACTION logs $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-y:execute($ACTION yaml $RESOURCE $NS_FIELD $NAME_FIELD)" \
-  --bind "alt-d:execute($ACTION delete $RESOURCE $ALL_NS $NS_TOKEN {+})+reload-sync($LIST_CMD)" \
+  --bind "alt-d:execute($ACTION delete $RESOURCE $ALL_NS $NS_TOKEN {+})+reload-sync($LIST_CMD_RUN)" \
   --preview-window "right:65%" \
   --preview "$PREVIEW_CMD" \
-  < <(eval "$LIST_CMD")
+  < <(eval "$LIST_CMD_RUN")
