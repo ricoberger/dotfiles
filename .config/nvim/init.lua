@@ -1282,6 +1282,25 @@ vim.keymap.set("n", "<leader>ny", function()
   vim.cmd("e " .. notes_dir .. "/daily/" .. date .. ".md")
 end)
 
+-- Open the explorer for the notes directory. When the current buffer is inside
+-- the notes directory the folder containing the buffer is shown, otherwise the
+-- root of the notes directory is shown.
+vim.keymap.set("n", "<leader>ne", function()
+  local bufname = vim.api.nvim_buf_get_name(0)
+  local dir = notes_dir
+  if bufname ~= "" then
+    local path = vim.fn.fnamemodify(bufname, ":p")
+    if vim.startswith(path, notes_dir .. "/") then
+      if vim.fn.isdirectory(path) == 1 then
+        dir = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
+      else
+        dir = vim.fn.fnamemodify(bufname, ":p:h")
+      end
+    end
+  end
+  vim.cmd.edit(vim.fn.fnameescape(dir))
+end)
+
 -- Notes pickers, scoped to the notes directory. "<leader>nt" lists all open
 -- todos ("- [ ]") and "<leader>nk" lists all note tags.
 vim.keymap.set("n", "<leader>nf", function()
