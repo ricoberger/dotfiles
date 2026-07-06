@@ -643,16 +643,22 @@ if [[ "$1" == "__action" ]]; then
           done
           [[ -z "$ltname" ]] && exit 0
 
-          # 3. Map direction to --out / --in and create the link.
+          # 3. Determine the desired Jira outward/inward roles for this link.
+          #    For an "out" direction (e.g. "blocks") the viewed item is the
+          #    outward/source side; for "in" (e.g. "is blocked by") it is inward.
           if [[ "$ltdir" == "in" ]]; then
-            link_out="$target"
-            link_in="$key"
+            jira_out="$target"
+            jira_in="$key"
           else
-            link_out="$key"
-            link_in="$target"
+            jira_out="$key"
+            jira_in="$target"
           fi
+          # acli's --out/--in flags are inverted relative to Jira's outward/
+          # inward direction (verified against the Jira web UI): --out sets the
+          # inward issue and --in sets the outward issue. Pass the Jira roles
+          # swapped so the link is created in the intended direction.
           if ! acli jira workitem link create \
-            --out "$link_out" --in "$link_in" --type "$ltname" --yes; then
+            --out "$jira_in" --in "$jira_out" --type "$ltname" --yes; then
             read -n 1 -s -r -p "Press any key to continue..."
           fi
           ;;
