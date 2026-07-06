@@ -4,9 +4,9 @@
 #
 # Usage: fzfvault
 #
-# Browse, view, create, edit and delete secrets in Vault's kv secrets engine
-# (v1 and v2 auto-detected). Secrets are viewed as the plain `vault kv get`
-# table and created / edited as JSON files in nvim.
+# Browse, view, create, edit, rename and delete secrets in Vault's kv secrets
+# engine (v1 and v2 auto-detected). Secrets are viewed as the plain
+# `vault kv get` table and created / edited as JSON files in nvim.
 #
 # Requires: vault, jq, fzf, nvim (and, for the yank action, pbcopy). Uses the
 # ambient VAULT_ADDR / VAULT_TOKEN / VAULT_NAMESPACE that the vault CLI reads.
@@ -234,6 +234,127 @@ if [[ "$1" == "__action" ]]; then
       rm -rf "${tmp%/*}"
       ;;
 
+    rename)
+      if [[ -z "$rawname" || "$rawname" == */ ]]; then
+        echo "Not a secret: ${rawname:-<none>}"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      # Vault has no native rename: read the source, write it to the new path
+      # and only then remove the old one. The edit box is prefilled with the
+      # current full path (relative to the mount root); editing the folder part
+      # moves the secret. Empty or unchanged input aborts.
+      #
+      # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
+      # the box is an fzf query seeded with the current path over an empty
+      # candidate list: Enter prints the (edited) query, Esc cancels.
+      newrel="$(fzf --print-query --query "$full" \
+        --prompt "Rename to (relative to $mount/): " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " $ICON_VAULT rename $mount/$full " \
+        --border-label-pos center \
+        --header "Edit the path, then Enter (Esc to cancel)" \
+        < /dev/null)"
+      rc=$?
+      # 0 = match accepted, 1 = query accepted (no match); anything else (130
+      # Esc, 2 error) means cancel.
+      if [[ $rc -ne 0 && $rc -ne 1 ]]; then
+        exit 0
+      fi
+      newrel="$(printf '%s\n' "$newrel" | head -1)"
+      newrel="${newrel#/}"
+      if [[ -z "$newrel" || "$newrel" == "$full" ]]; then
+        exit 0
+      fi
+      if [[ "$newrel" == */ ]]; then
+        echo "Target must be a secret path, not a folder: $newrel"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      # Refuse to clobber an existing secret at the target path. For v2 the
+      # metadata path is what matters (a soft-deleted secret still occupies it).
+      if [[ "$version" == "2" ]]; then
+        exists_cmd=(vault kv metadata get -mount="$mount" "$newrel")
+      else
+        exists_cmd=(vault kv get -mount="$mount" "$newrel")
+      fi
+      if "${exists_cmd[@]}" >/dev/null 2>&1; then
+        echo "Target already exists: $mount/$newrel"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      # Read the source secret's latest data.
+      data="$(vault kv get -format=json -mount="$mount" "$full" 2>/dev/null | jq "$data_jq")"
+      if [[ -z "$data" || "$data" == "null" ]]; then
+        echo "Could not read $mount/$full"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      if ! printf '%s' "$data" | jq -e 'type == "object" and length > 0' >/dev/null; then
+        echo "Source secret has no data to move: $mount/$full"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      # Reproduce the source metadata at the target (v2 only): custom_metadata
+      # plus the per-secret config max_versions / cas_required /
+      # delete_version_after.
+      meta_args=()
+      if [[ "$version" == "2" ]]; then
+        meta="$(vault kv metadata get -format=json -mount="$mount" "$full" 2>/dev/null | jq '.data')"
+        if [[ -n "$meta" && "$meta" != "null" ]]; then
+          meta_args+=(
+            "-max-versions=$(printf '%s' "$meta" | jq -r '.max_versions // 0')"
+            "-cas-required=$(printf '%s' "$meta" | jq -r '.cas_required // false')"
+            "-delete-version-after=$(printf '%s' "$meta" | jq -r '.delete_version_after // "0s"')"
+          )
+          while IFS= read -r cm; do
+            [[ -n "$cm" ]] && meta_args+=("-custom-metadata=$cm")
+          done < <(printf '%s' "$meta" | jq -r '(.custom_metadata // {}) | to_entries[] | "\(.key)=\(.value)"')
+        fi
+      fi
+
+      # Write the data to the new path first; the old path is only removed once
+      # every write has succeeded, so a failure never loses the secret.
+      tmp="$(mktemp -d)/data.json"
+      printf '%s' "$data" > "$tmp"
+      if ! vault kv put -mount="$mount" "$newrel" @"$tmp"; then
+        rm -rf "${tmp%/*}"
+        echo "Failed to write $mount/$newrel; $mount/$full left unchanged."
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      rm -rf "${tmp%/*}"
+
+      if [[ "$version" == "2" && ${#meta_args[@]} -gt 0 ]]; then
+        if ! vault kv metadata put -mount="$mount" "${meta_args[@]}" "$newrel"; then
+          echo "Wrote data but failed to set metadata on $mount/$newrel;"
+          echo "$mount/$full left unchanged. Resolve before retrying."
+          read -n 1 -s -r -p "Press any key to continue..."
+          exit 0
+        fi
+      fi
+
+      # New path is fully written; remove the old one (permanently for v2, to
+      # match the delete action so no orphaned metadata/versions remain).
+      if [[ "$version" == "2" ]]; then
+        if ! vault kv metadata delete -mount="$mount" "$full"; then
+          echo "New secret is at $mount/$newrel but removing $mount/$full failed."
+          read -n 1 -s -r -p "Press any key to continue..."
+        fi
+      else
+        if ! vault kv delete -mount="$mount" "$full"; then
+          echo "New secret is at $mount/$newrel but removing $mount/$full failed."
+          read -n 1 -s -r -p "Press any key to continue..."
+        fi
+      fi
+      ;;
+
     delete)
       if [[ -z "$rawname" || "$rawname" == */ ]]; then
         echo "Not a secret: ${rawname:-<none>}"
@@ -359,6 +480,7 @@ if [[ "$1" == "__browse" ]]; then
     --bind "enter:execute($ENTER {1})+reload($LIST)+refresh-preview" \
     --bind "alt-e:execute($ACTION edit '$mount' '$version' '$path' {1})+reload($LIST)+refresh-preview" \
     --bind "alt-n:execute($ACTION create '$mount' '$version' '$path' {1})+reload($LIST)" \
+    --bind "alt-m:execute($ACTION rename '$mount' '$version' '$path' {1})+reload($LIST)+refresh-preview" \
     --bind "alt-d:execute($ACTION delete '$mount' '$version' '$path' {1})+reload($LIST)+refresh-preview" \
     --bind "alt-y:execute($ACTION yank '$mount' '$version' '$path' {1})" \
     --bind "alt-o:execute($ACTION web '$mount' '$version' '$path' {1})" \
@@ -383,6 +505,7 @@ Keybindings (browser):
   enter   : open a folder (descend) or view a secret (opens read-only in nvim)
   alt-e   : edit the secret (data JSON in nvim; full overwrite on save)
   alt-n   : create a new secret (path relative to the current folder)
+  alt-m   : rename / move the secret (within the same mount)
   alt-d   : delete the secret permanently (after confirmation)
   alt-y   : yank one field's value to the clipboard (pbcopy)
   alt-o   : open the secret / folder in the Vault web UI
@@ -400,6 +523,14 @@ read-only in nvim. Edits and new secrets are the data-only JSON object; on save
 the JSON is validated with jq and, if valid and non-empty, written back with
 `vault kv put`. Delete is permanent: `vault kv metadata delete` for v2 (removes
 all versions) and `vault kv delete` for v1.
+
+Rename/move (alt-m) has no native Vault equivalent, so it copies the secret to
+the new path and then removes the old one; the old path is only deleted once
+every write succeeds, so a failure never loses data. For v2 the latest data is
+copied along with its custom_metadata and per-secret config (max_versions,
+cas_required, delete_version_after); older versions are not carried over.
+Renaming into another folder moves the secret; an existing target is never
+overwritten. Moves stay within the same mount.
 
 Environment:
   VAULT_ADDR      Vault server address (used by the vault CLI and the web UI).
