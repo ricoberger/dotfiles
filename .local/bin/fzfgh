@@ -6,7 +6,7 @@
 #   fzfgh          open your GitHub notifications (gh-notifications, else gh api)
 #   fzfgh prs      pick a pull request filter, then browse the matching PRs
 #   fzfgh issues   pick an issue filter, then browse the matching issues
-#   fzfgh view [url]  open a PR / issue in nvim (gh://); no url = current PR
+#   fzfgh view [url]  open a single PR / issue in the fzf picker; no url = current PR
 #
 # The pull request and issue filters (involves / author / assignee / mentions /
 # review-requested) mirror the searches from the Neovim configuration and are
@@ -1552,7 +1552,7 @@ Usage:
   fzfgh          open your GitHub notifications
   fzfgh prs      pick a pull request filter, then browse the matching PRs
   fzfgh issues   pick an issue filter, then browse the matching issues
-  fzfgh view [url]  open a PR / issue in nvim (gh://); no url opens the current PR
+  fzfgh view [url]  open a single PR / issue in the fzf picker; no url opens the current PR
 
 Pull request / issue filters (sub-picker):
   Involves           involving you      (involves:USER)
