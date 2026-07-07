@@ -800,7 +800,7 @@ function M.git_status()
   run_fzf({
     -- Strip the "XY " status prefix and, for renames, the "old -> " part so
     -- that only the path remains.
-    source = "git -c core.quotepath=false status --porcelain | sed -E 's/^...//; s/.* -> //'",
+    source = "git -c core.quotepath=false status --porcelain --untracked-files=all | sed -E 's/^...//; s/.* -> //'",
     fzf = fzf,
     cwd = root,
     expect = EXPECT,
