@@ -414,10 +414,11 @@ vim.cmd.colorscheme("catppuccin-nvim")
 -- name. Editing a directory path opens a read-only listing that can be
 -- navigated with "<CR>" (open entry) and "-" (parent directory). The
 -- "core.explorer" module adds file operations to these directory buffers:
--- "<Tab>" marks files, "q" lists all marks in the quickfix list, "s" greps the
--- directory, "n" creates a new file, "d" deletes, "r" renames, "m" moves and
--- "c" copies the marked files into the current directory and "=" diffs two
--- marked files.
+-- "<Tab>" marks files, "<C-s>", "<C-v>" and "<C-t>" open the marked files (or
+-- the entry under the cursor) in a split, vertical split or new tab, "<C-q>"
+-- lists all marks in the quickfix list, "s" greps the directory, "n" creates a
+-- new file, "d" deletes, "r" renames, "m" moves and "c" copies the marked files
+-- into the current directory and "=" diffs two marked files.
 require("core.explorer").setup()
 
 vim.keymap.set("n", "<leader>ee", function()

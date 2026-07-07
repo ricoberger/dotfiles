@@ -292,6 +292,23 @@ function M.create()
   reload()
 end
 
+-- Open the target files with "cmd" ("split", "vsplit" or "tabedit"). Operates
+-- on the marked set if any, otherwise the entry under the cursor; the marks are
+-- cleared afterwards.
+function M.open(cmd)
+  local buf = vim.api.nvim_get_current_buf()
+  local lnum = vim.api.nvim_win_get_cursor(0)[1]
+  local paths = targets(buf, lnum)
+  if #paths == 0 then
+    return
+  end
+  clear_marks()
+  redisplay(buf)
+  for _, path in ipairs(paths) do
+    vim.cmd(cmd .. " " .. vim.fn.fnameescape(path))
+  end
+end
+
 -- Show all marked files in the quickfix list.
 function M.list_marks()
   local list = marked_list()
@@ -348,12 +365,21 @@ local function attach(buf)
     clear_marks()
     redisplay(buf)
   end)
+  map("n", "<C-s>", function()
+    M.open("split")
+  end)
+  map("n", "<C-v>", function()
+    M.open("vsplit")
+  end)
+  map("n", "<C-t>", function()
+    M.open("tabedit")
+  end)
   map("n", "d", M.delete)
   map("n", "r", M.rename)
   map("n", "m", M.move)
   map("n", "c", M.copy)
   map("n", "n", M.create)
-  map("n", "q", M.list_marks)
+  map("n", "<C-q>", M.list_marks)
   map("n", "s", M.grep)
   map("n", "=", M.diff)
 end
