@@ -12,10 +12,9 @@ description: |
   verification + apply target, and never edits cluster resources directly.
   Detects common database and JVM engines (MongoDB, PostgreSQL, Redis, Kafka,
   ClickHouse, Elasticsearch/OpenSearch, generic JVM) and sizes memory from the
-  engine's own cache/heap model instead of raw working set when an exporter is
-  present. Also recognises page-cache-sensitive non-engine services (Vault,
-  etcd, Loki, BoltDB-backed Go services) that thrash without OOM/PSI, using
-  major page faults as the memory-pressure guard.
+  engine cache/heap model instead of raw working set. Also recognises
+  page-cache-sensitive services (Vault, etcd, Loki) that thrash without
+  OOM/PSI, using major page faults as the memory guard.
 ---
 
 # SRE: Kubernetes Right-Sizing
