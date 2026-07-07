@@ -22,15 +22,86 @@ FZFE_PREVIEW_COMMAND="${FZFE_PREVIEW_COMMAND:-bat}"
 # pasted in another, like the previous /tmp/fzfe-files behaviour. The first line
 # is the operation (cp / mv); the remaining lines are the absolute source paths.
 FZFE_CLIPBOARD="${FZFE_CLIPBOARD:-${TMPDIR:-/tmp}/fzfe-clipboard}"
+# strftime format for the modification-time column (override via
+# FZFE_TIME_FORMAT). Keep it fixed-width so the name column stays aligned.
+FZFE_TIME_FORMAT="${FZFE_TIME_FORMAT:-%Y-%m-%d %H:%M}"
+# Startup sort order: "name" (A->Z) or "modified" (newest first). Toggled at
+# runtime with ctrl-s; override just the startup default via FZFE_DEFAULT_SORT.
+FZFE_DEFAULT_SORT="${FZFE_DEFAULT_SORT:-name}"
 
 # ---------- List mode ----------
 #
 # Called for the initial feed and on every reload. Lists the entries of the
 # current working directory (the fzf child processes inherit the directory the
-# explorer navigated into).
+# explorer navigated into) as aligned rows of "permissions size modified name".
+# Only the trailing name is meant to be searchable (see --nth in the main
+# mode); the metadata is dimmed and the name is colored by ls itself.
 
 if [[ "$1" == "__list" ]]; then
-  eval "$FZFE_LIST_COMMAND"
+  tf="$FZFE_TIME_FORMAT"
+  mode="$(cat "$FZFE_SORT_STATE" 2>/dev/null)"
+  [[ "$mode" != "modified" ]] && mode="name"
+
+  # Fixed width of the timestamp column so the name column lines up.
+  sample="$(date +"$tf")"
+  tw="${#sample}"
+
+  # Collect entry names (including . .. and dotfiles), one per line.
+  names=()
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] && names+=("$entry")
+  done < <(ls -a -1)
+  [[ ${#names[@]} -eq 0 ]] && exit 0
+
+  # Pair each entry's metadata with the name colored by ls itself, so every
+  # file type (directory, symlink, executable, socket, sticky / other-writable
+  # directory, ...) matches `ls` exactly and honors any custom LSCOLORS. Both
+  # lists come from the same `ls -a` ordering, so paste aligns them 1:1. Tab
+  # separated so names with spaces stay intact. Columns:
+  #   epoch <tab> perms <tab> bytes <tab> time <tab> name <tab> colored-name
+  combined="$(paste \
+    <(stat -f $'%m\t%Sp\t%z\t%Sm\t%N' -t "$tf" -- "${names[@]}" 2>/dev/null) \
+    <(ls -a -1 --color))"
+  [[ -z "$combined" ]] && exit 0
+
+  # Renders one row: dimmed, aligned metadata columns (with a human-readable
+  # size, powers of 1024, matching `ls -lh`) followed by the ls-colored name.
+  fmt='
+    function human(b,  s, u) {
+      split("B,K,M,G,T,P", u, ",")
+      s = 1
+      while (b >= 1024 && s < 6) { b /= 1024; s++ }
+      return (s == 1) ? sprintf("%d%s", b, u[s]) \
+                      : sprintf((b < 10 ? "%.1f%s" : "%.0f%s"), b, u[s])
+    }
+    {
+      printf "\033[2m%-10s  %6s  %-*s\033[0m  %s\n", $2, human($3 + 0), tw, $4, $6
+    }'
+
+  if [[ "$mode" == "modified" ]]; then
+    # Keep . and .. pinned at the top; sort the rest by mtime, newest first.
+    {
+      printf '%s\n' "$combined" | awk -F'\t' '$5 == "." || $5 == ".."'
+      printf '%s\n' "$combined" | awk -F'\t' '$5 != "." && $5 != ".."' | sort -t$'\t' -k1,1nr
+    } | awk -F'\t' -v tw="$tw" "$fmt"
+  else
+    # Alphabetical order (ls -a already sorts this way, with . and .. first).
+    printf '%s\n' "$combined" | awk -F'\t' -v tw="$tw" "$fmt"
+  fi
+  exit 0
+fi
+
+# ---------- Sort toggle ----------
+#
+# Flips the per-instance sort state between "name" and "modified". Bound to
+# ctrl-s in the main mode and followed by a reload.
+
+if [[ "$1" == "__togglesort" ]]; then
+  if [[ "$(cat "$FZFE_SORT_STATE" 2>/dev/null)" == "modified" ]]; then
+    printf 'name\n' > "$FZFE_SORT_STATE"
+  else
+    printf 'modified\n' > "$FZFE_SORT_STATE"
+  fi
   exit 0
 fi
 
@@ -199,6 +270,9 @@ If a directory is given, browsing starts there; otherwise the current
 working directory is used. Select ".." to move to the parent directory and
 select a directory to enter it.
 
+Each row shows the entry's permissions, human-readable size and last
+modification time, followed by the name. Only the name is searchable.
+
 Keybindings:
   enter     : open the file / enter the directory
   tab       : select item and move down
@@ -211,6 +285,7 @@ Keybindings:
   alt-p     : paste the copied/moved selection into the current directory
   alt-d     : delete the selection (rm -r, with confirmation)
   alt-r     : reload the list
+  ctrl-s    : toggle sort order (name A->Z / modified newest first)
   ctrl-p    : toggle preview
   ctrl-d    : half page down
   ctrl-u    : half page up
@@ -223,8 +298,12 @@ view for files.
 Environment:
   FZFE_MEDIA_OPENER    Command to open media files (default: open)
   FZFE_TEXT_EDITOR     Editor for text/binary files (default: nvim)
-  FZFE_LIST_COMMAND    Command used to list entries (default: ls -a --color)
+  FZFE_LIST_COMMAND    Command used to preview folder contents
+                       (default: ls -a --color)
   FZFE_PREVIEW_COMMAND Command used to preview files (default: bat)
+  FZFE_TIME_FORMAT     strftime format for the time column
+                       (default: %Y-%m-%d %H:%M)
+  FZFE_DEFAULT_SORT    Startup sort order, name or modified (default: name)
 EOF
 }
 
@@ -243,9 +322,28 @@ if [[ -n "$1" ]]; then
   fi
 fi
 
-# Export the resolved configuration (including the shared clipboard path) so the
-# child __list / __preview / __action processes use the same values.
-export FZFE_CLIPBOARD FZFE_MEDIA_OPENER FZFE_TEXT_EDITOR FZFE_LIST_COMMAND FZFE_PREVIEW_COMMAND
+# Per-instance sort state (name | modified). A PID-scoped path so the order
+# resets on each fresh fzfe launch and never leaks between concurrent instances.
+FZFE_SORT_STATE="${TMPDIR:-/tmp}/fzfe-sort-$$"
+sort_default="$FZFE_DEFAULT_SORT"
+[[ "$sort_default" != "modified" ]] && sort_default="name"
+printf '%s\n' "$sort_default" > "$FZFE_SORT_STATE"
+trap 'rm -f "$FZFE_SORT_STATE"' EXIT
+
+# Number of leading (whitespace-delimited) metadata columns before the name:
+# permissions + size + however many words the timestamp format expands to. This
+# keeps search (--nth) and name extraction correct even for a custom
+# FZFE_TIME_FORMAT.
+time_words="$(date +"$FZFE_TIME_FORMAT" | wc -w | tr -d '[:space:]')"
+[[ "$time_words" =~ ^[0-9]+$ ]] || time_words=2
+[[ "$time_words" -lt 1 ]] && time_words=2
+meta_fields=$((2 + time_words))
+name_field=$((meta_fields + 1))
+
+# Export the resolved configuration (including the shared clipboard path and the
+# sort state) so the child __list / __preview / __action / __togglesort
+# processes use the same values.
+export FZFE_CLIPBOARD FZFE_MEDIA_OPENER FZFE_TEXT_EDITOR FZFE_LIST_COMMAND FZFE_PREVIEW_COMMAND FZFE_TIME_FORMAT FZFE_SORT_STATE
 
 ACTION="$SCRIPT __action"
 
@@ -257,6 +355,7 @@ while true; do
     --reverse \
     --height 100% \
     --info right \
+    --nth "${name_field}.." \
     --prompt "󰥨 Search: " \
     --pointer ">" \
     --marker "󰄲" \
@@ -268,28 +367,33 @@ while true; do
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "ctrl-p:toggle-preview" \
+    --bind "ctrl-s:execute-silent($SCRIPT __togglesort)+reload($SCRIPT __list)" \
     --bind "tab:toggle+down" \
     --bind "shift-tab:toggle+up" \
     --bind "alt-a:select-all" \
     --bind "alt-x:deselect-all" \
     --bind "alt-r:reload($SCRIPT __list)" \
-    --bind "alt-y:execute($ACTION yank {+})" \
-    --bind "alt-c:execute($ACTION copy {+})+deselect-all" \
-    --bind "alt-m:execute($ACTION move {+})+deselect-all" \
+    --bind "alt-y:execute($ACTION yank {+${name_field}..})" \
+    --bind "alt-c:execute($ACTION copy {+${name_field}..})+deselect-all" \
+    --bind "alt-m:execute($ACTION move {+${name_field}..})+deselect-all" \
     --bind "alt-p:execute($ACTION paste)+reload($SCRIPT __list)" \
-    --bind "alt-d:execute($ACTION delete {+})+reload($SCRIPT __list)" \
+    --bind "alt-d:execute($ACTION delete {+${name_field}..})+reload($SCRIPT __list)" \
     --bind "enter:accept" \
     --preview-window "right:65%" \
-    --preview "$SCRIPT __preview {}")
+    --preview "$SCRIPT __preview {${name_field}..}")
 
   [[ -z "$selection" ]] && break
 
-  if [[ "$selection" == ".." ]]; then
+  # The accepted line still carries the metadata columns; strip them to recover
+  # the entry name (which may itself contain spaces).
+  name="$(printf '%s' "$selection" | sed -E "s/^([^[:space:]]+[[:space:]]+){${meta_fields}}//")"
+
+  if [[ "$name" == ".." ]]; then
     cd .. || break
-  elif [[ -d "$selection" ]]; then
-    cd "$selection" || break
-  elif [[ -e "$selection" ]]; then
-    "$SCRIPT" __action open "$selection"
+  elif [[ -d "$name" ]]; then
+    cd "$name" || break
+  elif [[ -e "$name" ]]; then
+    "$SCRIPT" __action open "$name"
   else
     break
   fi
