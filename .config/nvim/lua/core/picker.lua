@@ -19,13 +19,13 @@ local FZF_COLORS = table.concat({
 local FILE_PREVIEW = table.concat({
   "if [ -d {} ]; then",
   "ls -la --color=always {} 2>/dev/null || ls -la {};",
-  "else bat --style=numbers --color=always -- {}; fi",
+  "else bat --style=numbers,changes --color=always -- {}; fi",
 }, " ")
 
 -- Preview command for the grep pickers. These use a ":" delimiter, so "{1}" is
 -- the file and "{2}" the line number, which "bat" highlights and scrolls to.
 local GREP_PREVIEW =
-  "bat --style=numbers --color=always --highlight-line {2} -- {1}"
+  "bat --style=numbers,changes --color=always --highlight-line {2} -- {1}"
 local GREP_PREVIEW_WINDOW = "right,60%,border-left,+{2}-/2"
 
 -- Directories / files ignored by the "fd" and "rg" pickers. Keep this in sync
