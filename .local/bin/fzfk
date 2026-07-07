@@ -88,11 +88,16 @@ if [[ "$1" == "__action" ]]; then
 
   case "$action" in
     describe)
-      kubectl describe "${ns_arg[@]}" "$resource" "$name" | nvim
+      kubectl describe "${ns_arg[@]}" "$resource" "$name" | nvim -R -
       ;;
 
     yaml)
-      kubectl get "${ns_arg[@]}" "$resource" "$name" -o yaml | nvim
+      kubectl get "${ns_arg[@]}" "$resource" "$name" -o yaml | nvim -R -
+      ;;
+
+    edit)
+      kubectl edit "${ns_arg[@]}" "$resource" "$name"
+      read -n 1 -s -r -p "Press any key to continue..."
       ;;
 
     logs)
@@ -144,8 +149,23 @@ if [[ "$1" == "__action" ]]; then
         --reverse \
         --border rounded)
       [[ -z "$port" ]] && exit 0
-      printf "Local port [%s]: " "$port"
-      read -r local_port
+      # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
+      # the box is an fzf query seeded with the remote port over an empty
+      # candidate list: Enter accepts, Esc cancels.
+      local_port="$(fzf --print-query --query "$port" \
+        --prompt "󰮏 Local port: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " 󰮏 port-forward $resource/$name -> $port " \
+        --border-label-pos center \
+        --header "Edit the local port, then Enter (Esc to cancel)" \
+        < /dev/null)"
+      rc=$?
+      # 0 = match accepted, 1 = query accepted (no match); anything else (130
+      # Esc, 2 error) means cancel.
+      [[ $rc -ne 0 && $rc -ne 1 ]] && exit 0
+      local_port="$(printf '%s\n' "$local_port" | head -1)"
       local_port=${local_port:-$port}
       echo "Forwarding $resource/$name $local_port -> $port (Ctrl-C to stop)"
       kubectl port-forward "${ns_arg[@]}" "$resource/$name" "$local_port:$port"
@@ -179,9 +199,10 @@ Keybindings:
   shift-tab: unmark a resource and move up
   enter    : describe the resource under the cursor
   alt-p    : port-forward (pick port via fzf)
-  alt-e    : exec into container (pick container via fzf)
+  alt-x    : exec into container (pick container via fzf)
   alt-l    : show container logs (pick container via fzf)
-  alt-y    : open YAML manifest in nvim
+  alt-y    : open YAML manifest in nvim (read-only)
+  alt-e    : edit the resource manifest (kubectl edit)
   alt-d    : delete the marked resources (or the one under the cursor);
              the confirmation offers a force option (--grace-period=0 --force)
   alt-r    : reload the list
@@ -313,9 +334,10 @@ fzf \
   --bind "every($FZFK_REFRESH_INTERVAL):reload-sync($LIST_CMD_RUN)" \
   --bind "enter:execute($ACTION describe $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-p:execute($ACTION portforward $RESOURCE $NS_FIELD $NAME_FIELD)" \
-  --bind "alt-e:execute($ACTION exec $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-x:execute($ACTION exec $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-l:execute($ACTION logs $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-y:execute($ACTION yaml $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-e:execute($ACTION edit $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-d:execute($ACTION delete $RESOURCE $ALL_NS $NS_TOKEN {+})+reload-sync($LIST_CMD_RUN)" \
   --preview-window "right:65%" \
   --preview "$PREVIEW_CMD" \
