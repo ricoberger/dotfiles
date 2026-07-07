@@ -307,7 +307,7 @@ if [[ "$1" == "__action" ]]; then
 
   case "$action" in
     view)
-      acli jira workitem view "$key" --fields "*all" | nvim
+      acli jira workitem view "$key" --fields "*all" | nvim -R -
       ;;
 
     web)
@@ -343,8 +343,23 @@ if [[ "$1" == "__action" ]]; then
         "default")         assign_args+=(--assignee "default") ;;
         "remove assignee") assign_args+=(--remove-assignee) ;;
         "custom…")
-          printf "Assignee (email or account ID): "
-          read -r email
+          # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt,
+          # so the box is an fzf query over an empty candidate list: type the
+          # value, Enter accepts, Esc cancels.
+          email="$(fzf --print-query --query "" \
+            --prompt "󰋐 Assignee (email or account ID): " \
+            --height 100% \
+            --reverse \
+            --border rounded \
+            --border-label " 󰋐 assign $key " \
+            --border-label-pos center \
+            --header "Type the assignee, then Enter (Esc to cancel)" \
+            < /dev/null)"
+          rc=$?
+          # 0 = match accepted, 1 = query accepted (no match); anything else
+          # (130 Esc, 2 error) means cancel.
+          [[ $rc -ne 0 && $rc -ne 1 ]] && exit 0
+          email="$(printf '%s\n' "$email" | head -1)"
           [[ -z "$email" ]] && exit 0
           assign_args+=(--assignee "$email")
           ;;
@@ -504,8 +519,23 @@ if [[ "$1" == "__action" ]]; then
             --border rounded)
       [[ -z "$type" ]] && exit 0
 
-      printf "Summary: "
-      read -r summary
+      # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
+      # the box is an fzf query over an empty candidate list: type the summary,
+      # Enter accepts, Esc cancels.
+      summary="$(fzf --print-query --query "" \
+        --prompt "󰏫 Summary ($project): " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " 󰜢 new $type in $project " \
+        --border-label-pos center \
+        --header "Type the summary, then Enter (Esc to cancel)" \
+        < /dev/null)"
+      rc=$?
+      # 0 = match accepted, 1 = query accepted (no match); anything else (130
+      # Esc, 2 error) means cancel.
+      [[ $rc -ne 0 && $rc -ne 1 ]] && exit 0
+      summary="$(printf '%s\n' "$summary" | head -1)"
       [[ -z "$summary" ]] && exit 0
 
       create_args=(--project "$project" --type "$type" --summary "$summary")
@@ -666,7 +696,7 @@ if [[ "$1" == "__action" ]]; then
         *)
           # enter (or any other accept): open the linked work item.
           [[ -z "$linkedkey" ]] && exit 0
-          acli jira workitem view "$linkedkey" --fields "*all" | nvim
+          acli jira workitem view "$linkedkey" --fields "*all" | nvim -R -
           ;;
       esac
       ;;
