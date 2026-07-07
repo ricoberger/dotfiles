@@ -200,14 +200,26 @@ if [[ "$1" == "__action" ]]; then
       ;;
 
     create)
-      printf "New secret path (relative to %s/%s): " "$mount" "${path:+$path/}"
-      read -r rel
-      [[ -z "$rel" ]] && exit 0
-      rel="${rel#/}"
-      if [[ -n "$path" ]]; then
-        newfull="$path/$rel"
-      else
-        newfull="$rel"
+      # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
+      # the box is an fzf query seeded with the current folder over an empty
+      # candidate list: type the leaf name, Enter accepts, Esc cancels.
+      newfull="$(fzf --print-query --query "${path:+$path/}" \
+        --prompt "New secret (relative to $mount/): " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " $ICON_VAULT new secret in $mount/${path:+$path/} " \
+        --border-label-pos center \
+        --header "Type the path, then Enter (Esc to cancel)" \
+        < /dev/null)"
+      rc=$?
+      # 0 = match accepted, 1 = query accepted (no match); anything else (130
+      # Esc, 2 error) means cancel.
+      [[ $rc -ne 0 && $rc -ne 1 ]] && exit 0
+      newfull="$(printf '%s\n' "$newfull" | head -1)"
+      newfull="${newfull#/}"
+      if [[ -z "$newfull" || "$newfull" == */ ]]; then
+        exit 0
       fi
 
       tmp="$(mktemp -d)/data.json"
