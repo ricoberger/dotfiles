@@ -1,0 +1,634 @@
+#!/usr/bin/env bash
+
+# fzfrclone - Fuzzy Finder for Object Storage (rclone)
+#
+# Usage: fzfrclone
+#
+# A single-pane navigator that browses the local filesystem and rclone remotes
+# (S3, Azure Blob, GCS, ...) in one interface and copies / moves files between
+# any of them: local <-> remote, remote <-> remote, local <-> local.
+#
+# Requires: rclone, fzf, bat (preview), file (mime detection).
+#
+# Inspired by the sibling fzfe script.
+
+SCRIPT="$(realpath "$0")"
+
+# rclone binary (override via FZFRCLONE_RCLONE).
+FZFRCLONE_RCLONE="${FZFRCLONE_RCLONE:-rclone}"
+# Command used to open media files (override via FZFRCLONE_MEDIA_OPENER).
+FZFRCLONE_MEDIA_OPENER="${FZFRCLONE_MEDIA_OPENER:-open}"
+# Editor for text / binary files (override via FZFRCLONE_TEXT_EDITOR). Files are
+# opened read-only (via the vim/nvim -R flag) since edits to the local / temp
+# copy are never uploaded back to the remote.
+FZFRCLONE_TEXT_EDITOR="${FZFRCLONE_TEXT_EDITOR:-nvim}"
+# Command used to preview files (override via FZFRCLONE_PREVIEW_COMMAND).
+FZFRCLONE_PREVIEW_COMMAND="${FZFRCLONE_PREVIEW_COMMAND:-bat}"
+# Clipboard file holding the copy / move marks. A stable, shared path (override
+# via FZFRCLONE_CLIPBOARD) so a selection marked in one instance can be pasted
+# in another. The first line is the operation (copy / move); the remaining lines
+# are fully-qualified source locations (remote:bucket/key or absolute local
+# paths). Kept separate from fzfe's clipboard because entries may be remotes.
+FZFRCLONE_CLIPBOARD="${FZFRCLONE_CLIPBOARD:-${TMPDIR:-/tmp}/fzfrclone-clipboard}"
+# Number of bytes of a text object to show in the preview content head.
+FZFRCLONE_CAT_BYTES="${FZFRCLONE_CAT_BYTES:-102400}"
+# Objects larger than this (bytes) are not downloaded for a content preview.
+FZFRCLONE_PREVIEW_MAX_BYTES="${FZFRCLONE_PREVIEW_MAX_BYTES:-10485760}"
+
+# Sentinel used for the top-level view (list of remotes + local entry).
+TOP_SENTINEL="__top__"
+# Label of the local entry shown in the top-level view.
+LOCAL_ENTRY="local/"
+
+# ---------- Location helpers ----------
+#
+# A "location" is either the top-level sentinel, a remote path
+# (remote:bucket/prefix/) or an absolute local path. Remotes are detected by a
+# leading "name:" token.
+
+is_remote() {
+  [[ "$1" =~ ^[A-Za-z0-9_.-]+: ]]
+}
+
+# Join a location with a child entry. Entries produced by "rclone lsf" carry a
+# trailing "/" for directories; that is preserved so navigation keeps working.
+join_location() {
+  local base="$1" entry="$2"
+  if is_remote "$base"; then
+    # A bare "remote:" already ends in ":"; otherwise ensure a single "/".
+    if [[ "$base" == *: || "$base" == */ ]]; then
+      printf '%s%s' "$base" "$entry"
+    else
+      printf '%s/%s' "$base" "$entry"
+    fi
+  else
+    # Local path.
+    if [[ "$base" == */ ]]; then
+      printf '%s%s' "$base" "$entry"
+    else
+      printf '%s/%s' "$base" "$entry"
+    fi
+  fi
+}
+
+# Return the parent of a location, or the top-level sentinel when already at a
+# remote's root or the local filesystem root.
+parent_location() {
+  local loc="$1"
+  loc="${loc%/}"
+  if is_remote "$loc"; then
+    if [[ "$loc" == *: ]]; then
+      printf '%s' "$TOP_SENTINEL"
+      return
+    fi
+    local rest="${loc#*:}"
+    local remote="${loc%%:*}:"
+    if [[ "$rest" != */* ]]; then
+      # One segment below the remote root -> back to "remote:".
+      printf '%s' "$remote"
+    else
+      printf '%s%s' "$remote" "${rest%/*}"
+    fi
+  else
+    if [[ "$loc" == "/" || -z "$loc" ]]; then
+      printf '%s' "$TOP_SENTINEL"
+    else
+      local parent="${loc%/*}"
+      [[ -z "$parent" ]] && parent="/"
+      printf '%s' "$parent"
+    fi
+  fi
+}
+
+# Basename of a location (last path segment, no trailing slash).
+location_basename() {
+  local loc="${1%/}"
+  if is_remote "$loc"; then
+    local rest="${loc#*:}"
+    printf '%s' "${rest##*/}"
+  else
+    printf '%s' "${loc##*/}"
+  fi
+}
+
+# Human-readable label for the border / prompt.
+location_label() {
+  local loc="$1"
+  if [[ "$loc" == "$TOP_SENTINEL" ]]; then
+    printf 'remotes'
+  else
+    printf '%s' "$loc"
+  fi
+}
+
+# ---------- List mode ----------
+#
+# Called for the initial feed and on every reload:
+#   fzfrclone __list
+#
+# The current location is passed to the child processes through the exported
+# FZFRCLONE_LOCATION variable so that locations containing spaces or other shell
+# metacharacters never have to be interpolated into fzf bind strings.
+
+if [[ "$1" == "__list" ]]; then
+  loc="$FZFRCLONE_LOCATION"
+
+  if [[ -z "$loc" || "$loc" == "$TOP_SENTINEL" ]]; then
+    # Top-level: configured remotes followed by the local entry.
+    "$FZFRCLONE_RCLONE" listremotes 2>/dev/null
+    printf '%s\n' "$LOCAL_ENTRY"
+    exit 0
+  fi
+
+  # Every non top-level location offers ".." to go up.
+  printf '..\n'
+  "$FZFRCLONE_RCLONE" lsf --dir-slash "$loc" 2>/dev/null
+  exit 0
+fi
+
+# ---------- Preview mode ----------
+#
+# Hybrid preview:
+#   fzfrclone __preview <entry>
+# The current location comes from the exported FZFRCLONE_LOCATION variable. For
+# a directory the child listing is shown; for a file the metadata plus a
+# syntax-highlighted head of the content is shown (skipped for large / binary
+# objects).
+
+if [[ "$1" == "__preview" ]]; then
+  loc="$FZFRCLONE_LOCATION"
+  entry="$2"
+  [[ -z "$entry" ]] && exit 0
+
+  if [[ "$loc" == "$TOP_SENTINEL" || -z "$loc" ]]; then
+    if [[ "$entry" == "$LOCAL_ENTRY" ]]; then
+      echo "󰉋 Local filesystem: $(pwd)"
+      echo ""
+      "$FZFRCLONE_RCLONE" lsf --dir-slash "$(pwd)" 2>/dev/null
+    else
+      echo "󰅟 Remote: $entry"
+      echo ""
+      "$FZFRCLONE_RCLONE" lsf --dir-slash "$entry" 2>/dev/null
+    fi
+    exit 0
+  fi
+
+  if [[ "$entry" == ".." ]]; then
+    echo "󰉖 Parent directory"
+    exit 0
+  fi
+
+  target="$(join_location "$loc" "$entry")"
+
+  if [[ "$entry" == */ ]]; then
+    echo "󰉋 Folder: $target"
+    echo ""
+    "$FZFRCLONE_RCLONE" lsf --dir-slash "$target" 2>/dev/null
+    exit 0
+  fi
+
+  echo "󰈙 File: $target"
+  echo ""
+  # Metadata (size + modtime) via lsl.
+  "$FZFRCLONE_RCLONE" lsl "$target" 2>/dev/null | head -1
+  echo ""
+
+  # Size guard: fetch just the object size to decide whether to download a head.
+  size="$("$FZFRCLONE_RCLONE" size --json "$target" 2>/dev/null \
+    | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')"
+  if [[ -n "$size" && "$size" -gt "$FZFRCLONE_PREVIEW_MAX_BYTES" ]]; then
+    echo "(object is ${size} bytes; larger than preview limit — content hidden)"
+    exit 0
+  fi
+
+  # Download a head into a temp file so mime detection and bat both work.
+  tmp="$(mktemp "${TMPDIR:-/tmp}/fzfrclone-preview.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  "$FZFRCLONE_RCLONE" cat --count "$FZFRCLONE_CAT_BYTES" "$target" >"$tmp" 2>/dev/null
+
+  if [[ ! -s "$tmp" ]]; then
+    echo "(empty or unreadable)"
+    exit 0
+  fi
+
+  mime_type="$(file --mime-type -b "$tmp" 2>/dev/null)"
+  case "$mime_type" in
+    text/*|application/json|application/xml|application/javascript|application/x-shellscript|inode/x-empty)
+      $FZFRCLONE_PREVIEW_COMMAND --style=numbers --color=always "$tmp" 2>/dev/null \
+        || cat "$tmp"
+      ;;
+    *)
+      echo "(binary object, mime: ${mime_type:-unknown} — content hidden)"
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Action handlers ----------
+#
+# Called recursively from fzf bindings as:
+#   fzfrclone __action <action> [entries...]
+#
+# The current location comes from the exported FZFRCLONE_LOCATION variable; the
+# entries are the fzf {} / {+} placeholders (safely quoted by fzf). Marks
+# recorded by copy / move are stored in the shared clipboard file
+# (FZFRCLONE_CLIPBOARD): the first line is the operation (copy / move) and the
+# remaining lines are fully-qualified source locations.
+
+if [[ "$1" == "__action" ]]; then
+  shift
+  action="$1"
+  loc="$FZFRCLONE_LOCATION"
+  shift
+
+  case "$action" in
+    open)
+      entry="$1"
+      [[ -z "$entry" || "$entry" == ".." ]] && exit 0
+      target="$(join_location "$loc" "$entry")"
+
+      if is_remote "$target"; then
+        base="$(location_basename "$target")"
+        tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/fzfrclone-open.XXXXXX")"
+        local_file="$tmp_dir/$base"
+        echo "󰇚 Downloading $target ..."
+        if ! "$FZFRCLONE_RCLONE" copyto "$target" "$local_file" 2>&1; then
+          echo "Failed to download $target"
+          read -n 1 -s -r -p "Press any key to continue..."
+          clear
+          exit 0
+        fi
+      else
+        local_file="$target"
+      fi
+
+      mime_type="$(file --mime-type -b "$local_file" 2>/dev/null)"
+      case "$mime_type" in
+        text/*|application/json|application/xml|application/javascript|application/x-shellscript)
+          $FZFRCLONE_TEXT_EDITOR -R "$local_file"
+          clear
+          ;;
+        image/*|video/*|audio/*|application/pdf)
+          if [[ -n "$FZFRCLONE_MEDIA_OPENER" ]]; then
+            $FZFRCLONE_MEDIA_OPENER "$local_file" &>/dev/null &
+          else
+            echo "No media opener available. Cannot open $local_file"
+            read -n 1 -s -r -p "Press any key to continue..."
+            clear
+          fi
+          ;;
+        *)
+          if [ -B "$local_file" ]; then
+            $FZFRCLONE_TEXT_EDITOR -R "$local_file"
+            clear
+          elif [[ -n "$FZFRCLONE_MEDIA_OPENER" ]]; then
+            $FZFRCLONE_MEDIA_OPENER "$local_file" &>/dev/null || {
+              $FZFRCLONE_TEXT_EDITOR -R "$local_file"
+              clear
+            }
+          else
+            $FZFRCLONE_TEXT_EDITOR -R "$local_file"
+            clear
+          fi
+          ;;
+      esac
+      ;;
+
+    yank)
+      [[ $# -eq 0 ]] && exit 0
+      {
+        for entry in "$@"; do
+          [[ -z "$entry" || "$entry" == ".." ]] && continue
+          join_location "$loc" "$entry"
+          printf '\n'
+        done
+      } | pbcopy
+      ;;
+
+    copy|move)
+      [[ $# -eq 0 || -z "$FZFRCLONE_CLIPBOARD" ]] && exit 0
+      {
+        printf '%s\n' "$action"
+        for entry in "$@"; do
+          [[ -z "$entry" || "$entry" == ".." ]] && continue
+          join_location "$loc" "$entry"
+          printf '\n'
+        done
+      } > "$FZFRCLONE_CLIPBOARD"
+      ;;
+
+    paste)
+      [[ -z "$FZFRCLONE_CLIPBOARD" || ! -s "$FZFRCLONE_CLIPBOARD" ]] && exit 0
+      [[ -z "$loc" || "$loc" == "$TOP_SENTINEL" ]] && {
+        echo "Cannot paste at the top-level view. Enter a location first."
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      }
+      op="$(sed -n '1p' "$FZFRCLONE_CLIPBOARD")"
+
+      # Collect sources (skip blank lines).
+      sources=()
+      while IFS= read -r src || [[ -n "$src" ]]; do
+        [[ -z "$src" ]] && continue
+        sources+=("$src")
+      done < <(sed '1d' "$FZFRCLONE_CLIPBOARD")
+      [[ ${#sources[@]} -eq 0 ]] && exit 0
+
+      confirm="$(printf '%s\n' "No" "Yes" | fzf \
+        --prompt "󰆐 $op ${#sources[@]} item(s) -> $loc : " \
+        --height 100% \
+        --reverse \
+        --border rounded)"
+      [[ "$confirm" != "Yes" ]] && exit 0
+
+      ok=1
+      for src in "${sources[@]}"; do
+        base="$(location_basename "$src")"
+        dest="$(join_location "$loc" "$base")"
+        if [[ "$src" == */ ]]; then
+          # Source is a directory / prefix: copy into a same-named subdir so the
+          # folder itself is preserved (rclone copies contents otherwise).
+          if [[ "$op" == "move" ]]; then
+            "$FZFRCLONE_RCLONE" move -P "$src" "$dest" || ok=0
+          else
+            "$FZFRCLONE_RCLONE" copy -P "$src" "$dest" || ok=0
+          fi
+        else
+          # Source is a file: copyto / moveto control the destination name.
+          if [[ "$op" == "move" ]]; then
+            "$FZFRCLONE_RCLONE" moveto -P "$src" "$dest" || ok=0
+          else
+            "$FZFRCLONE_RCLONE" copyto -P "$src" "$dest" || ok=0
+          fi
+        fi
+      done
+
+      # A move empties the clipboard (the sources no longer exist); a copy keeps
+      # it so the selection can be pasted into several locations.
+      [[ "$op" == "move" ]] && : > "$FZFRCLONE_CLIPBOARD"
+
+      if [[ $ok -eq 0 ]]; then
+        echo ""
+        echo "One or more transfers failed."
+      else
+        echo ""
+        echo "Done."
+      fi
+      read -n 1 -s -r -p "Press any key to continue..."
+      ;;
+
+    delete)
+      [[ $# -eq 0 ]] && exit 0
+      targets=()
+      for entry in "$@"; do
+        [[ -z "$entry" || "$entry" == ".." ]] && continue
+        targets+=("$(join_location "$loc" "$entry")")
+      done
+      [[ ${#targets[@]} -eq 0 ]] && exit 0
+
+      confirm="$(printf '%s\n' "No" "Yes" | fzf \
+        --prompt "󰩺 Delete ${#targets[@]} item(s): " \
+        --height 100% \
+        --reverse \
+        --border rounded)"
+      if [[ "$confirm" == "Yes" ]]; then
+        for target in "${targets[@]}"; do
+          if [[ "$target" == */ ]]; then
+            "$FZFRCLONE_RCLONE" purge "$target"
+          else
+            "$FZFRCLONE_RCLONE" deletefile "$target"
+          fi
+        done
+      fi
+      ;;
+
+    rename)
+      entry="$1"
+      [[ -z "$entry" || "$entry" == ".." ]] && exit 0
+      old_base="$(location_basename "$entry")"
+      src="$(join_location "$loc" "$entry")"
+
+      # rclone has no in-place rename, so we moveto a new basename within the
+      # same location. The edit box is prefilled with the current name so only
+      # the part that changes has to be typed. Empty or unchanged input aborts.
+      #
+      # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
+      # the box is an fzf query seeded with the current name over an empty
+      # candidate list: Enter prints the (edited) query, Esc cancels.
+      new_base="$(fzf --print-query --query "$old_base" \
+        --prompt "Rename to: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " 󰏫 rename $(location_label "$loc")/$old_base " \
+        --border-label-pos center \
+        --header "Edit the name, then Enter (Esc to cancel)" \
+        < /dev/null)"
+      rc=$?
+      # 0 = match accepted, 1 = query accepted (no match); anything else (130
+      # Esc, 2 error) means cancel.
+      [[ $rc -ne 0 && $rc -ne 1 ]] && exit 0
+      new_base="$(printf '%s\n' "$new_base" | head -1)"
+      [[ -z "$new_base" || "$new_base" == "$old_base" ]] && exit 0
+      # Preserve the trailing slash for directories.
+      [[ "$entry" == */ && "$new_base" != */ ]] && new_base="$new_base/"
+      dest="$(join_location "$loc" "$new_base")"
+      "$FZFRCLONE_RCLONE" moveto "$src" "$dest" || {
+        echo "Rename failed."
+        read -n 1 -s -r -p "Press any key to continue..."
+      }
+      ;;
+
+    mkdir)
+      [[ -z "$loc" || "$loc" == "$TOP_SENTINEL" ]] && {
+        echo "Cannot create a directory at the top-level view."
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      }
+      # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
+      # the box is an fzf query over an empty candidate list: type the name,
+      # Enter accepts, Esc cancels.
+      name="$(fzf --print-query --query "" \
+        --prompt "New directory name: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " 󰉖 new directory in $(location_label "$loc") " \
+        --border-label-pos center \
+        --header "Type the name, then Enter (Esc to cancel)" \
+        < /dev/null)"
+      rc=$?
+      # 0 = match accepted, 1 = query accepted (no match); anything else (130
+      # Esc, 2 error) means cancel.
+      [[ $rc -ne 0 && $rc -ne 1 ]] && exit 0
+      name="$(printf '%s\n' "$name" | head -1)"
+      [[ -z "$name" ]] && exit 0
+      target="$(join_location "$loc" "$name")"
+      "$FZFRCLONE_RCLONE" mkdir "$target" || {
+        echo "mkdir failed."
+        read -n 1 -s -r -p "Press any key to continue..."
+      }
+      ;;
+
+    *)
+      echo "Unknown action: $action"
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Main mode ----------
+
+usage() {
+  cat <<'EOF'
+fzfrclone - Fuzzy Finder for Object Storage (rclone)
+
+Usage: fzfrclone
+
+Browses the local filesystem and rclone remotes (S3, Azure Blob, GCS, ...) in a
+single pane and copies / moves files between any of them: local <-> remote,
+remote <-> remote and local <-> local.
+
+The top-level view lists your configured rclone remotes plus a "local/" entry
+that drops you into the local filesystem at the current working directory.
+Configure remotes first with `rclone config`.
+
+Keybindings:
+  enter     : enter the directory / remote, or open the file
+  tab       : select item and move down
+  shift-tab : select item and move up
+  alt-a     : select all
+  alt-x     : deselect all
+  alt-y     : copy full path(s) of the selection to the clipboard
+  alt-c     : mark the selection to be copied (paste with alt-p)
+  alt-m     : mark the selection to be moved (paste with alt-p)
+  alt-p     : paste the copied / moved selection into the current location
+  alt-n     : rename the item under the cursor (rclone moveto)
+  alt-k     : create a new directory in the current location (rclone mkdir)
+  alt-d     : delete the selection (rclone deletefile / purge, with confirm)
+  alt-h     : jump back to the top-level remotes overview from anywhere
+  alt-r     : reload the list
+  ctrl-p    : toggle preview
+  ctrl-d    : half page down
+  ctrl-u    : half page up
+  ctrl-f    : preview half page down
+  ctrl-b    : preview half page up
+
+Selecting ".." moves to the parent directory; at a remote's root or the local
+filesystem root it returns to the top-level view. Press alt-h at any time to
+jump straight back to the top-level remotes overview.
+
+Environment:
+  FZFRCLONE_RCLONE            rclone binary (default: rclone)
+  FZFRCLONE_MEDIA_OPENER      Command to open media files (default: open)
+  FZFRCLONE_TEXT_EDITOR       Editor for text / binary files, opened read-only (default: nvim)
+  FZFRCLONE_PREVIEW_COMMAND   Command used to preview files (default: bat)
+  FZFRCLONE_CLIPBOARD         Path of the copy / move clipboard file
+  FZFRCLONE_CAT_BYTES         Bytes of a text object shown in preview (default: 102400)
+  FZFRCLONE_PREVIEW_MAX_BYTES Skip content preview above this size (default: 10485760)
+EOF
+}
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if ! command -v "$FZFRCLONE_RCLONE" >/dev/null 2>&1; then
+  echo "rclone not found. Install it and configure remotes with 'rclone config'." >&2
+  exit 1
+fi
+
+# Export the resolved configuration so the child __list / __preview / __action
+# processes use the same values. FZFRCLONE_LOCATION carries the current location
+# (re-exported each iteration below) so it never has to be interpolated into fzf
+# bind strings, keeping locations with spaces / metacharacters safe.
+export FZFRCLONE_RCLONE FZFRCLONE_MEDIA_OPENER FZFRCLONE_TEXT_EDITOR \
+  FZFRCLONE_PREVIEW_COMMAND FZFRCLONE_CLIPBOARD FZFRCLONE_CAT_BYTES \
+  FZFRCLONE_PREVIEW_MAX_BYTES FZFRCLONE_LOCATION
+
+ACTION="$SCRIPT __action"
+
+# Current location; starts at the top-level view.
+location="$TOP_SENTINEL"
+
+clear
+while true; do
+  export FZFRCLONE_LOCATION="$location"
+  # --expect lets alt-h exit fzf with a marker on the first output line so the
+  # loop can jump straight back to the top-level view (a bind alone cannot change
+  # this parent shell's $location). Line 1 = the pressed key (empty on enter);
+  # line 2 = the selected entry.
+  fzf_out=$("$SCRIPT" __list | fzf \
+    --ansi \
+    --multi \
+    --reverse \
+    --height 100% \
+    --info right \
+    --expect "alt-h" \
+    --prompt "󰥨 Search: " \
+    --pointer ">" \
+    --marker "󰄲" \
+    --border "rounded" \
+    --border-label " 󰅟 $(location_label "$location") " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "tab:toggle+down" \
+    --bind "shift-tab:toggle+up" \
+    --bind "alt-a:select-all" \
+    --bind "alt-x:deselect-all" \
+    --bind "alt-r:reload($SCRIPT __list)" \
+    --bind "alt-y:execute($ACTION yank {+})" \
+    --bind "alt-c:execute($ACTION copy {+})+deselect-all" \
+    --bind "alt-m:execute($ACTION move {+})+deselect-all" \
+    --bind "alt-p:execute($ACTION paste)+reload($SCRIPT __list)" \
+    --bind "alt-n:execute($ACTION rename {})+reload($SCRIPT __list)" \
+    --bind "alt-k:execute($ACTION mkdir)+reload($SCRIPT __list)" \
+    --bind "alt-d:execute($ACTION delete {+})+reload($SCRIPT __list)" \
+    --bind "enter:accept" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview {}")
+
+  # Empty output means the user aborted (esc / ctrl-c).
+  [[ -z "$fzf_out" ]] && break
+  key="$(sed -n '1p' <<<"$fzf_out")"
+  selection="$(sed -n '2p' <<<"$fzf_out")"
+
+  # alt-h jumps straight back to the top-level remotes overview.
+  if [[ "$key" == "alt-h" ]]; then
+    location="$TOP_SENTINEL"
+    continue
+  fi
+
+  [[ -z "$selection" ]] && break
+
+  if [[ "$selection" == ".." ]]; then
+    location="$(parent_location "$location")"
+    continue
+  fi
+
+  if [[ "$location" == "$TOP_SENTINEL" ]]; then
+    # Top-level: entering a remote or the local filesystem.
+    if [[ "$selection" == "$LOCAL_ENTRY" ]]; then
+      location="$(pwd)"
+    else
+      location="$selection"
+    fi
+    continue
+  fi
+
+  target="$(join_location "$location" "$selection")"
+  if [[ "$selection" == */ ]]; then
+    # Directory / prefix: enter it.
+    location="$target"
+  else
+    # File: open it. FZFRCLONE_LOCATION is already exported above, so __action
+    # picks up the current location from the environment.
+    "$SCRIPT" __action open "$selection"
+  fi
+done
