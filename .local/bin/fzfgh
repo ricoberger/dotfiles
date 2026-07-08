@@ -132,7 +132,7 @@ if [[ "$1" == "__list" ]]; then
         # View command: a single pull request, fetched directly and wrapped in
         # an array so the renderer below is unchanged.
         out="$(gh pr view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
-          --json number,title,author,state,isDraft,url 2>"$err" \
+          --json number,title,author,state,isDraft,createdAt,url 2>"$err" \
           | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
         status=$?
       elif [[ "$query" == "__repo "* ]]; then
@@ -140,7 +140,7 @@ if [[ "$1" == "__list" ]]; then
         # (gh pr list) instead of the search index, which lags for new PRs.
         one_repo="${query#__repo }"
         out="$(gh pr list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
-          --json number,title,author,state,isDraft,url 2>"$err" \
+          --json number,title,author,state,isDraft,createdAt,url 2>"$err" \
           | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
         status=$?
       else
@@ -152,7 +152,7 @@ if [[ "$1" == "__list" ]]; then
         read -ra query_args <<< "$query"
         out="$(gh search prs "${query_args[@]}" \
           --limit "$FZFGH_LIMIT" \
-          --json number,title,repository,author,state,isDraft,url 2>"$err")"
+          --json number,title,repository,author,state,isDraft,createdAt,url 2>"$err")"
         status=$?
       fi
       if [[ $status -ne 0 ]]; then
@@ -167,6 +167,20 @@ if [[ "$1" == "__list" ]]; then
       # addressable in bindings via {1}/{2}/{3}.
       printf '%s' "$out" | jq -r '
         def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
+        def reltime($ts):
+          if ($ts|type) != "string" then ""
+          else
+            (try ($ts|fromdate) catch null) as $t
+            | if $t == null then ""
+              else (now - $t) as $d
+                | if $d < 60 then "just now"
+                  elif $d < 3600 then "\(($d/60)|floor)m ago"
+                  elif $d < 86400 then "\(($d/3600)|floor)h ago"
+                  elif $d < 604800 then "\(($d/86400)|floor)d ago"
+                  elif $d < 2592000 then "\(($d/604800)|floor)w ago"
+                  else ($t|gmtime|strftime("%b %d")) end
+              end
+          end;
         .[]
         | .repository.nameWithOwner as $repo
         | (.number|tostring) as $num
@@ -179,7 +193,7 @@ if [[ "$1" == "__list" ]]; then
           + "\u001b[" + color($c) + "m\uf407\u001b[0m"
           + " [#" + $num + "] " + $repo + ": "
           + ((.title // "-") | gsub("[\t\n\r]"; " "))
-          + "  (" + (.author.login // "-") + ")"
+          + "  (" + (.author.login // "-") + " \u00b7 " + reltime(.createdAt) + ")"
       '
       exit 0
       ;;
@@ -190,7 +204,7 @@ if [[ "$1" == "__list" ]]; then
       if [[ -n "$FZFGH_ONE_REPO" ]]; then
         # View command: a single issue, fetched directly and wrapped in an array.
         out="$(gh issue view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
-          --json number,title,author,state,url 2>"$err" \
+          --json number,title,author,state,createdAt,url 2>"$err" \
           | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
         status=$?
       elif [[ "$query" == "__repo "* ]]; then
@@ -199,7 +213,7 @@ if [[ "$1" == "__list" ]]; then
         # issues.
         one_repo="${query#__repo }"
         out="$(gh issue list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
-          --json number,title,author,state,url 2>"$err" \
+          --json number,title,author,state,createdAt,url 2>"$err" \
           | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
         status=$?
       else
@@ -207,7 +221,7 @@ if [[ "$1" == "__list" ]]; then
         read -ra query_args <<< "$query"
         out="$(gh search issues "${query_args[@]}" \
           --limit "$FZFGH_LIMIT" \
-          --json number,title,repository,author,state,url 2>"$err")"
+          --json number,title,repository,author,state,createdAt,url 2>"$err")"
         status=$?
       fi
       if [[ $status -ne 0 ]]; then
@@ -222,6 +236,20 @@ if [[ "$1" == "__list" ]]; then
       # bindings via {1}/{2}.
       printf '%s' "$out" | jq -r '
         def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
+        def reltime($ts):
+          if ($ts|type) != "string" then ""
+          else
+            (try ($ts|fromdate) catch null) as $t
+            | if $t == null then ""
+              else (now - $t) as $d
+                | if $d < 60 then "just now"
+                  elif $d < 3600 then "\(($d/60)|floor)m ago"
+                  elif $d < 86400 then "\(($d/3600)|floor)h ago"
+                  elif $d < 604800 then "\(($d/86400)|floor)d ago"
+                  elif $d < 2592000 then "\(($d/604800)|floor)w ago"
+                  else ($t|gmtime|strftime("%b %d")) end
+              end
+          end;
         .[]
         | .repository.nameWithOwner as $repo
         | (.number|tostring) as $num
@@ -232,7 +260,7 @@ if [[ "$1" == "__list" ]]; then
           + "\u001b[" + color($c) + "m\uf41b\u001b[0m"
           + " [#" + $num + "] " + $repo + ": "
           + ((.title // "-") | gsub("[\t\n\r]"; " "))
-          + "  (" + (.author.login // "-") + ")"
+          + "  (" + (.author.login // "-") + " \u00b7 " + reltime(.createdAt) + ")"
       '
       exit 0
       ;;
@@ -369,12 +397,12 @@ FZFGH_DIFF_MAP_JQ='
 # Render the full preview for a pull request as markdown (details, description,
 # reviews, comments and a checks table), piped through md. "gh ... view" is
 # queried as JSON so the markdown can be assembled with jq.
-render_pr_preview() {
+build_pr_preview() {
   local repo="$1"
   local number="$2"
   {
     gh pr view "$number" --repo "$repo" \
-      --json number,title,state,isDraft,author,assignees,labels,additions,deletions,baseRefName,headRefName,reviewDecision,reviewRequests,body,reviews,comments \
+      --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,reviewDecision,reviewRequests,body,reviews,comments \
       2>/dev/null | jq -r '
       [
         "# " + (.title // "-"),
@@ -383,6 +411,7 @@ render_pr_preview() {
         "- **State:** " + (.state // "?") + (if .isDraft then " \u00b7 draft" else "" end),
         "- **Author:** @" + (.author.login // "?"),
         (if (.assignees|length) > 0 then "- **Assignees:** " + (.assignees|map("@"+.login)|join(" ")) else empty end),
+        "- **Created:** " + (.createdAt // ""),
         "- **Branch:** `" + (.baseRefName // "?") + " \u2190 " + (.headRefName // "?") + "`",
         "- **Changes:** +" + (.additions|tostring) + " / \u2212" + (.deletions|tostring),
         (if (.reviewDecision // "") != "" then "- **Review:** " + (.reviewDecision|ascii_downcase|gsub("_";" ")) else empty end),
@@ -443,12 +472,18 @@ render_pr_preview() {
         | join("\n")
       '
     fi
-  } | md_render
+  }
+}
+
+# Wrap build_pr_preview through md_render for the fzf preview.
+render_pr_preview() {
+  build_pr_preview "$1" "$2" | md_render
 }
 
 # Render the full preview for an issue as markdown (details, description and
-# comments), piped through md.
-render_issue_preview() {
+# comments). build_issue_preview emits the raw markdown; render_issue_preview
+# pipes it through md_render for the fzf preview.
+build_issue_preview() {
   local repo="$1"
   local number="$2"
   gh issue view "$number" --repo "$repo" \
@@ -471,7 +506,11 @@ render_issue_preview() {
                 | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";"")) + "\n" ]
          else [] end)
     | join("\n")
-  ' | md_render
+  '
+}
+
+render_issue_preview() {
+  build_issue_preview "$1" "$2" | md_render
 }
 
 if [[ "$1" == "__preview" ]]; then
@@ -552,6 +591,19 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
       printf '%s' "https://github.com/$repo/pull/$number" | pbcopy
+      ;;
+
+    pr-view)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      # Render the same markdown the preview shows and open it read-only in
+      # nvim. The file is uniquely named (and kept, not deleted) so several can
+      # be open at once; it shares the pruning of the checks view files.
+      find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfgh-view-*' -type f -mmin +60 -delete 2>/dev/null
+      out="${TMPDIR:-/tmp}/fzfgh-view-${repo//\//-}-pr${number}-$$-${RANDOM}.md"
+      build_pr_preview "$repo" "$number" > "$out" 2>/dev/null
+      nvim -R "$out"
       ;;
 
     pr-merge)
@@ -916,7 +968,19 @@ if [[ "$1" == "__action" ]]; then
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
       fi
-      nvim -c "GitDiff"
+
+      # Diff against the PR's up-to-date base branch (matching GitHub's "Files
+      # changed" tab). Fetch the base ref so origin/<base> is current, then diff
+      # HEAD against it; the merge-base of the two is the PR's fork point. This
+      # avoids showing extra commits when the local base branch is stale. If the
+      # fetch fails (offline, base branch deleted, ...) fall back to the plain
+      # GitDiff.
+      base_ref="$(gh pr view "$number" --repo "$repo" --json baseRefName -q .baseRefName 2>/dev/null)"
+      if [[ -n "$base_ref" ]] && git fetch origin "$base_ref" 2>/dev/null; then
+        nvim -c "GitDiff HEAD origin/$base_ref"
+      else
+        nvim -c "GitDiff"
+      fi
       ;;
 
     issue-browse)
@@ -931,6 +995,19 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
       printf '%s' "https://github.com/$repo/issues/$number" | pbcopy
+      ;;
+
+    issue-view)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      # Render the same markdown the preview shows and open it read-only in
+      # nvim. The file is uniquely named (and kept, not deleted) so several can
+      # be open at once; it shares the pruning of the checks view files.
+      find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfgh-view-*' -type f -mmin +60 -delete 2>/dev/null
+      out="${TMPDIR:-/tmp}/fzfgh-view-${repo//\//-}-issue${number}-$$-${RANDOM}.md"
+      build_issue_preview "$repo" "$number" > "$out" 2>/dev/null
+      nvim -R "$out"
       ;;
 
     issue-assign)
@@ -1566,7 +1643,8 @@ When "fzfgh prs" / "fzfgh issues" is run inside a repository, a
 is added to the top of the picker.
 
 Pull request keybindings:
-  enter   : (no-op)
+  enter   : open the preview (details, description, checks, comments) read-only
+            in nvim
   alt-o   : open the PR in the web browser
   alt-y   : copy the PR url to the clipboard
   alt-m   : merge the PR (pick method: merge / squash / rebase, with/without
@@ -1602,7 +1680,7 @@ In the checks sub-picker (alt-k):
   alt-o   : open the check in the web browser
 
 Issue keybindings:
-  enter   : (no-op)
+  enter   : open the preview (details, description, comments) read-only in nvim
   alt-o   : open the issue in the web browser
   alt-y   : copy the issue url to the clipboard
   alt-l   : add / remove a label
@@ -1677,7 +1755,7 @@ run_prs() {
     --bind "ctrl-b:preview-half-page-up" \
     --bind "ctrl-p:toggle-preview" \
     --bind "alt-r:reload($SCRIPT __list prs)" \
-    --bind "enter:ignore" \
+    --bind "enter:execute($ACTION pr-view {1} {2})" \
     --bind "alt-o:execute($ACTION pr-browse {1} {2})" \
     --bind "alt-y:execute($ACTION pr-yank {1} {2})" \
     --bind "alt-m:execute($ACTION pr-merge {1} {2})+reload($SCRIPT __list prs)" \
@@ -1780,7 +1858,7 @@ run_issues() {
     --bind "ctrl-b:preview-half-page-up" \
     --bind "ctrl-p:toggle-preview" \
     --bind "alt-r:reload($SCRIPT __list issues)" \
-    --bind "enter:ignore" \
+    --bind "enter:execute($ACTION issue-view {1} {2})" \
     --bind "alt-o:execute($ACTION issue-browse {1} {2})" \
     --bind "alt-y:execute($ACTION issue-yank {1} {2})" \
     --bind "alt-l:execute($ACTION issue-labels {1} {2})+refresh-preview" \
