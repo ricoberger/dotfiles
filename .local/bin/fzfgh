@@ -1457,23 +1457,59 @@ if [[ "$1" == "__diff-action" ]]; then
       ')"
       [[ -z "$linerows" ]] && exit 0
 
+      # tab marks lines for a multi-line (range) comment; enter accepts the
+      # marked line(s), or the highlighted line if none were marked.
       sel="$(printf '%s\n' "$linerows" | fzf \
+        --multi \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 3 \
-        --prompt "$ICON_PR Comment on line: " \
+        --prompt "$ICON_PR Comment on line(s): " \
         --height 100% \
         --reverse \
         --border rounded)"
       [[ -z "$sel" ]] && exit 0
-      line="$(printf '%s' "$sel" | cut -f1)"
-      side="$(printf '%s' "$sel" | cut -f2)"
+
+      # A range must stay on one side (all RIGHT or all LEFT); GitHub rejects
+      # comments that straddle the old / new sides of the diff.
+      side="$(printf '%s\n' "$sel" | cut -f2 | sort -u)"
+      if [[ "$(printf '%s\n' "$side" | grep -c .)" != "1" ]]; then
+        echo "A multi-line comment must stay on one side (all + or all -)"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      # start_line = lowest marked line, line (end) = highest; gaps are ignored,
+      # matching how GitHub's own UI treats a selected range.
+      start_line="$(printf '%s\n' "$sel" | cut -f1 | sort -n | head -n1)"
+      line="$(printf '%s\n' "$sel" | cut -f1 | sort -n | tail -n1)"
       [[ -z "$line" || -z "$side" ]] && exit 0
 
       dir="$(mktemp -d)"
       tmp="$dir/comment.md"
+      # Pre-fill a ```suggestion``` block with the current source of the selected
+      # range (on the chosen side), so a comment can easily become a GitHub code
+      # suggestion: edit the code and save, or delete everything to cancel.
+      # Original indentation / tabs are preserved.
+      suggestion="$(printf '%s' "$node" | jq -r \
+        --arg side "$side" --argjson lo "$start_line" --argjson hi "$line" '
+        (.body | split("\n")) as $lines
+        | reduce $lines[] as $l ({out:[], o:.os, n:.ns};
+            if ($l|startswith("@@")) then .
+            elif ($l|startswith("+")) then
+              (if $side=="RIGHT" and .n>=$lo and .n<=$hi then .out += [($l[1:])] else . end) | .n += 1
+            elif ($l|startswith("-")) then
+              (if $side=="LEFT" and .o>=$lo and .o<=$hi then .out += [($l[1:])] else . end) | .o += 1
+            elif ($l|startswith("\\")) then .
+            else
+              (if $side=="RIGHT" and .n>=$lo and .n<=$hi then .out += [($l[1:])]
+               elif $side=="LEFT" and .o>=$lo and .o<=$hi then .out += [($l[1:])]
+               else . end) | .n += 1 | .o += 1
+            end)
+        | .out | join("\n")
+      ')"
+      { printf '```suggestion\n'; printf '%s\n' "$suggestion"; printf '```\n'; } > "$tmp"
       nvim "$tmp"
       if [[ ! -s "$tmp" ]]; then
         rm -rf "$dir"
@@ -1486,12 +1522,18 @@ if [[ "$1" == "__diff-action" ]]; then
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
       fi
-      if ! gh api --method POST "repos/$repo/pulls/$number/comments" \
-        -f body="$(cat "$tmp")" \
-        -f commit_id="$commit" \
-        -f path="$path" \
-        -F line="$line" \
-        -f side="$side" >/dev/null 2>&1; then
+      # start_line must be strictly less than line; a single line (or a range
+      # that collapsed to one line) posts as a normal single-line comment.
+      create_args=(--method POST "repos/$repo/pulls/$number/comments"
+        -f body="$(cat "$tmp")"
+        -f commit_id="$commit"
+        -f path="$path"
+        -F line="$line"
+        -f side="$side")
+      if [[ "$start_line" -lt "$line" ]]; then
+        create_args+=(-F start_line="$start_line" -f start_side="$side")
+      fi
+      if ! gh api "${create_args[@]}" >/dev/null 2>&1; then
         rm -rf "$dir"
         echo "Failed to create the comment"
         read -n 1 -s -r -p "Press any key to continue..."
@@ -1681,7 +1723,9 @@ Pull request keybindings:
   alt-e   : edit the PR title / body (opens nvim)
   alt-d   : browse the PR diff hunk-by-hunk in fzf (preview shows the hunk and
             its review threads with resolved state; alt-c reply, alt-n new
-            thread on a line, alt-x resolve/unresolve, alt-o web, alt-y yank path)
+            thread on a line or range (tab to mark lines; nvim opens pre-filled
+            with a ```suggestion``` block), alt-x resolve/unresolve, alt-o web,
+            alt-y yank path)
   alt-g   : check out the PR and open nvim with :GitDiff (current repo only,
             requires a clean worktree)
   alt-v   : review the PR (approve / comment / request changes, body in nvim)
