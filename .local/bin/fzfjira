@@ -331,6 +331,8 @@ if [[ "$1" == "__action" ]]; then
 
     assign)
       choice=$(printf '%s\n' "@me" "default" "remove assignee" "custom…" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰋐 Assign $key: " \
         --height 100% \
         --reverse \
@@ -372,6 +374,8 @@ if [[ "$1" == "__action" ]]; then
 
     transition)
       status=$(printf '%s' "$FZFJIRA_STATUSES" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰒍 Transition $key: " \
         --height 100% \
         --reverse \
@@ -391,6 +395,8 @@ if [[ "$1" == "__action" ]]; then
 
     edit)
       field=$(printf '%s\n' "Type" "Summary" "Description" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰏫 Edit $key: " \
         --height 100% \
         --reverse \
@@ -403,6 +409,8 @@ if [[ "$1" == "__action" ]]; then
             | jq -r '(if type == "array" then .[0] else . end)
                      | .issueTypes[] | select(.subtask | not) | .name' \
             | fzf \
+                --bind "ctrl-d:half-page-down" \
+                --bind "ctrl-u:half-page-up" \
                 --prompt "󰜢 Type ($key): " \
                 --height 100% \
                 --reverse \
@@ -473,6 +481,8 @@ if [[ "$1" == "__action" ]]; then
       fi
 
       esel="$(printf '%s\n' "$epic_rows" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --ansi \
         --prompt "󰜢 Epic $key: " \
         --header "KEY          STATUS         SUMMARY" \
@@ -490,6 +500,8 @@ if [[ "$1" == "__action" ]]; then
       # Add / remove the "Flagged" (Impediment) marker. acli can't edit this
       # field, so this calls the Jira REST API directly.
       choice=$(printf '%s\n' "Flag (Impediment)" "Unflag" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰈻 Flag $key: " \
         --height 100% \
         --reverse \
@@ -513,6 +525,8 @@ if [[ "$1" == "__action" ]]; then
         | jq -r '(if type == "array" then .[0] else . end)
                  | .issueTypes[] | select(.subtask | not) | .name' \
         | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --prompt "󰜢 Type ($project): " \
             --height 100% \
             --reverse \
@@ -541,6 +555,8 @@ if [[ "$1" == "__action" ]]; then
       create_args=(--project "$project" --type "$type" --summary "$summary")
 
       adddesc="$(printf '%s\n' "No" "Yes" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰏫 Add description: " \
         --height 100% \
         --reverse \
@@ -594,6 +610,8 @@ if [[ "$1" == "__action" ]]; then
       ')"
 
       out="$(printf '%s\n' "$rows" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 3 \
@@ -613,6 +631,8 @@ if [[ "$1" == "__action" ]]; then
         alt-d)
           [[ -z "$linkid" ]] && exit 0
           confirm="$(printf '%s\n' "No" "Yes" | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --prompt "󰩺 Delete link to ${linkedkey:-?}: " \
             --height 100% \
             --reverse \
@@ -630,6 +650,8 @@ if [[ "$1" == "__action" ]]; then
           target_rows="$("$SCRIPT" __list "project = $FZFJIRA_PROJECT AND statusCategory != Done ORDER BY updated DESC" 2>/dev/null \
             | awk -v k="$key" 'NF && $1 != k')"
           tsel="$(printf '%s\n' "$target_rows" | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --ansi \
             --print-query \
             --prompt "󰌹 Link $key: " \
@@ -655,6 +677,8 @@ if [[ "$1" == "__action" ]]; then
           fi
 
           ltlabel="$(printf '%s\n' "${ltypes[@]%%|*}" | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --prompt "󰌹 $key … $target: " \
             --height 100% \
             --reverse \
@@ -805,6 +829,8 @@ else
 
   # No JQL given: pick from the configured named filters.
   selected=$(printf '%s\n' "${filters[@]%%|*}" | fzf \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
     --prompt "󰈲 Filter: " \
     --height 100% \
     --reverse \

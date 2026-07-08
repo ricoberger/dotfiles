@@ -375,6 +375,8 @@ if [[ "$1" == "__action" ]]; then
       fi
 
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_TRASH Permanently delete $mount/$full: " \
         --height 100% \
         --reverse \
@@ -407,6 +409,8 @@ if [[ "$1" == "__action" ]]; then
       fi
 
       key="$(printf '%s' "$data" | jq -r 'keys[]' | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_COPY Yank field ($rawname): " \
         --height 100% \
         --reverse \
@@ -606,6 +610,8 @@ fi
 while true; do
   clear
   sel="$(printf '%s\n' "$MOUNT_ROWS" | fzf \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
     --ansi \
     --delimiter $'\t' \
     --with-nth 3 \

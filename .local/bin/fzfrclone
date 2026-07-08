@@ -335,6 +335,8 @@ if [[ "$1" == "__action" ]]; then
       [[ ${#sources[@]} -eq 0 ]] && exit 0
 
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰆐 $op ${#sources[@]} item(s) -> $loc : " \
         --height 100% \
         --reverse \
@@ -387,6 +389,8 @@ if [[ "$1" == "__action" ]]; then
       [[ ${#targets[@]} -eq 0 ]] && exit 0
 
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰩺 Delete ${#targets[@]} item(s): " \
         --height 100% \
         --reverse \

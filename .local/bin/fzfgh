@@ -620,6 +620,8 @@ if [[ "$1" == "__action" ]]; then
         "Squash and merge (admin)" \
         "Rebase and merge" \
         "Rebase and merge (admin)" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_PR Merge $repo#$number: " \
         --height 100% \
         --reverse \
@@ -679,6 +681,8 @@ if [[ "$1" == "__action" ]]; then
         "Close and delete branch" \
         "Close with comment" \
         "Close with comment and delete branch" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_PR Close $repo#$number: " \
         --height 100% \
         --reverse \
@@ -716,6 +720,8 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
       choice="$(printf '%s\n' "Add label" "Remove label" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_PR Labels $repo#$number: " \
         --height 100% \
         --reverse \
@@ -723,6 +729,8 @@ if [[ "$1" == "__action" ]]; then
       case "$choice" in
         "Add label")
           label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --prompt "$ICON_PR Add label: " \
             --height 100% \
             --reverse \
@@ -734,6 +742,8 @@ if [[ "$1" == "__action" ]]; then
           ;;
         "Remove label")
           label="$(gh pr view "$number" --repo "$repo" --json labels --jq '.labels[].name' 2>/dev/null | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --prompt "$ICON_PR Remove label: " \
             --height 100% \
             --reverse \
@@ -833,6 +843,8 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
       choice="$(printf '%s\n' "Approve" "Comment" "Request changes" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_PR Review $repo#$number: " \
         --height 100% \
         --reverse \
@@ -919,6 +931,8 @@ if [[ "$1" == "__action" ]]; then
 
       # Multi-select the reviewers; the hidden first field is the login.
       logins="$(printf '%s\n' "$rows" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 2 \
@@ -1024,6 +1038,8 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
       choice="$(printf '%s\n' "Add label" "Remove label" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_ISSUE Labels $repo#$number: " \
         --height 100% \
         --reverse \
@@ -1031,6 +1047,8 @@ if [[ "$1" == "__action" ]]; then
       case "$choice" in
         "Add label")
           label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --prompt "$ICON_ISSUE Add label: " \
             --height 100% \
             --reverse \
@@ -1042,6 +1060,8 @@ if [[ "$1" == "__action" ]]; then
           ;;
         "Remove label")
           label="$(gh issue view "$number" --repo "$repo" --json labels --jq '.labels[].name' 2>/dev/null | fzf \
+            --bind "ctrl-d:half-page-down" \
+            --bind "ctrl-u:half-page-up" \
             --prompt "$ICON_ISSUE Remove label: " \
             --height 100% \
             --reverse \
@@ -1061,6 +1081,8 @@ if [[ "$1" == "__action" ]]; then
       # Pick the close reason. Selecting an entry doubles as the confirmation;
       # escape aborts.
       choice="$(printf '%s\n' "Close as completed" "Close as not planned" "Close as duplicate" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "$ICON_ISSUE Close $repo#$number: " \
         --height 100% \
         --reverse \
@@ -1376,6 +1398,8 @@ if [[ "$1" == "__diff-action" ]]; then
         root_id="$(printf '%s' "$threads" | cut -f1)"
       else
         sel="$(printf '%s\n' "$threads" | fzf \
+          --bind "ctrl-d:half-page-down" \
+          --bind "ctrl-u:half-page-up" \
           --ansi \
           --delimiter $'\t' \
           --with-nth 2 \
@@ -1434,6 +1458,8 @@ if [[ "$1" == "__diff-action" ]]; then
       [[ -z "$linerows" ]] && exit 0
 
       sel="$(printf '%s\n' "$linerows" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 3 \
@@ -1496,6 +1522,8 @@ if [[ "$1" == "__diff-action" ]]; then
         sel="$threads"
       else
         sel="$(printf '%s\n' "$threads" | fzf \
+          --bind "ctrl-d:half-page-down" \
+          --bind "ctrl-u:half-page-up" \
           --ansi \
           --delimiter $'\t' \
           --with-nth 3 \
@@ -1880,6 +1908,8 @@ choose_query() {
 
   local selected
   selected=$(printf '%s\n' "${entries[@]%%|*}" | fzf \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
     --prompt "$ICON_GH Filter: " \
     --height 100% \
     --reverse \

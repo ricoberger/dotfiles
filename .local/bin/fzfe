@@ -234,6 +234,8 @@ if [[ "$1" == "__action" ]]; then
     delete)
       [[ $# -eq 0 ]] && exit 0
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
         --prompt "󰩺 Delete $# item(s): " \
         --height 100% \
         --reverse \
