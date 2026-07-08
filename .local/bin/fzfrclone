@@ -496,6 +496,7 @@ Configure remotes first with `rclone config`.
 
 Keybindings:
   enter     : enter the directory / remote, or open the file
+  esc       : go up one level (at the top-level view, quit)
   tab       : select item and move down
   shift-tab : select item and move up
   alt-a     : select all
@@ -507,7 +508,6 @@ Keybindings:
   alt-n     : rename the item under the cursor (rclone moveto)
   alt-k     : create a new directory in the current location (rclone mkdir)
   alt-d     : delete the selection (rclone deletefile / purge, with confirm)
-  alt-h     : jump back to the top-level remotes overview from anywhere
   alt-r     : reload the list
   ctrl-p    : toggle preview
   ctrl-d    : half page down
@@ -516,8 +516,8 @@ Keybindings:
   ctrl-b    : preview half page up
 
 Selecting ".." moves to the parent directory; at a remote's root or the local
-filesystem root it returns to the top-level view. Press alt-h at any time to
-jump straight back to the top-level remotes overview.
+filesystem root it returns to the top-level view. Press esc (or ctrl-c) to go
+up one level the same way; at the top-level view it exits fzfrclone.
 
 Environment:
   FZFRCLONE_RCLONE            rclone binary (default: rclone)
@@ -556,17 +556,13 @@ location="$TOP_SENTINEL"
 clear
 while true; do
   export FZFRCLONE_LOCATION="$location"
-  # --expect lets alt-h exit fzf with a marker on the first output line so the
-  # loop can jump straight back to the top-level view (a bind alone cannot change
-  # this parent shell's $location). Line 1 = the pressed key (empty on enter);
-  # line 2 = the selected entry.
+  # fzf prints the accepted entry, or nothing when aborted with esc / ctrl-c.
   fzf_out=$("$SCRIPT" __list | fzf \
     --ansi \
     --multi \
     --reverse \
     --height 100% \
     --info right \
-    --expect "alt-h" \
     --prompt "󰥨 Search: " \
     --pointer ">" \
     --marker "󰄲" \
@@ -594,18 +590,17 @@ while true; do
     --preview-window "right:65%" \
     --preview "$SCRIPT __preview {}")
 
-  # Empty output means the user aborted (esc / ctrl-c).
-  [[ -z "$fzf_out" ]] && break
-  key="$(sed -n '1p' <<<"$fzf_out")"
-  selection="$(sed -n '2p' <<<"$fzf_out")"
-
-  # alt-h jumps straight back to the top-level remotes overview.
-  if [[ "$key" == "alt-h" ]]; then
-    location="$TOP_SENTINEL"
+  # Aborting with esc / ctrl-c steps up one level, like the other pickers; at
+  # the top-level view there is nowhere higher, so it exits fzfrclone.
+  if [[ -z "$fzf_out" ]]; then
+    [[ "$location" == "$TOP_SENTINEL" ]] && break
+    location="$(parent_location "$location")"
     continue
   fi
 
-  [[ -z "$selection" ]] && break
+  # Navigation acts on the entry under the cursor (first output line); the batch
+  # actions operate on the multi-selection inside fzf via {+}.
+  selection="$(sed -n '1p' <<<"$fzf_out")"
 
   if [[ "$selection" == ".." ]]; then
     location="$(parent_location "$location")"
