@@ -3,9 +3,6 @@
 # fzfjira - Fuzzy Finder for Jira (acli)
 #
 # Usage: fzfjira [JQL]
-#
-# Requires: acli jira auth login --web
-# Reference: https://developer.atlassian.com/cloud/acli/reference/commands/jira/
 
 SCRIPT="$(realpath "$0")"
 
@@ -333,10 +330,13 @@ if [[ "$1" == "__action" ]]; then
       choice=$(printf '%s\n' "@me" "default" "remove assignee" "custom…" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰋐 Assign $key: " \
+        --border rounded \
+        --border-label " 󰋐 Assign $key " \
+        --border-label-pos center \
         --height 100% \
-        --reverse \
-        --border rounded)
+        --reverse)
       [[ -z "$choice" ]] && exit 0
 
       assign_args=(--key "$key" --yes)
@@ -349,13 +349,13 @@ if [[ "$1" == "__action" ]]; then
           # so the box is an fzf query over an empty candidate list: type the
           # value, Enter accepts, Esc cancels.
           email="$(fzf --print-query --query "" \
-            --prompt "󰋐 Assignee (email or account ID): " \
+            --prompt "󰋐 Assignee: " \
             --height 100% \
             --reverse \
             --border rounded \
-            --border-label " 󰋐 assign $key " \
+            --border-label " 󰋐 Assign $key " \
             --border-label-pos center \
-            --header "Type the assignee, then Enter (Esc to cancel)" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             < /dev/null)"
           rc=$?
           # 0 = match accepted, 1 = query accepted (no match); anything else
@@ -376,10 +376,13 @@ if [[ "$1" == "__action" ]]; then
       status=$(printf '%s' "$FZFJIRA_STATUSES" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰒍 Transition $key: " \
+        --border rounded \
+        --border-label " 󰒍 Transition $key " \
+        --border-label-pos center \
         --height 100% \
-        --reverse \
-        --border rounded)
+        --reverse)
       [[ -z "$status" ]] && exit 0
 
       if ! acli jira workitem transition --key "$key" --status "$status" --yes; then
@@ -397,10 +400,13 @@ if [[ "$1" == "__action" ]]; then
       field=$(printf '%s\n' "Type" "Summary" "Description" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰏫 Edit $key: " \
+        --border rounded \
+        --border-label " 󰏫 Edit $key " \
+        --border-label-pos center \
         --height 100% \
-        --reverse \
-        --border rounded)
+        --reverse)
       [[ -z "$field" ]] && exit 0
 
       case "$field" in
@@ -411,10 +417,13 @@ if [[ "$1" == "__action" ]]; then
             | fzf \
                 --bind "ctrl-d:half-page-down" \
                 --bind "ctrl-u:half-page-up" \
+                --bind "alt-h:execute($SCRIPT --help | less -R)" \
                 --prompt "󰜢 Type ($key): " \
+                --border rounded \
+                --border-label " 󰜢 Type ($key) " \
+                --border-label-pos center \
                 --height 100% \
-                --reverse \
-                --border rounded)
+                --reverse)
           [[ -z "$new_type" ]] && exit 0
           if ! acli jira workitem edit --key "$key" --type "$new_type" --yes; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -483,12 +492,15 @@ if [[ "$1" == "__action" ]]; then
       esel="$(printf '%s\n' "$epic_rows" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --ansi \
         --prompt "󰜢 Epic $key: " \
+        --border rounded \
+        --border-label " 󰜢 Epic $key " \
+        --border-label-pos center \
         --header "KEY          STATUS         SUMMARY" \
         --height 100% \
-        --reverse \
-        --border rounded)"
+        --reverse)"
       [[ -z "$esel" ]] && exit 0
       epic="$(printf '%s' "$esel" | awk '{print $1}')"
       [[ -z "$epic" ]] && exit 0
@@ -502,10 +514,13 @@ if [[ "$1" == "__action" ]]; then
       choice=$(printf '%s\n' "Flag (Impediment)" "Unflag" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰈻 Flag $key: " \
+        --border rounded \
+        --border-label " 󰈻 Flag $key " \
+        --border-label-pos center \
         --height 100% \
-        --reverse \
-        --border rounded)
+        --reverse)
       [[ -z "$choice" ]] && exit 0
 
       case "$choice" in
@@ -527,10 +542,13 @@ if [[ "$1" == "__action" ]]; then
         | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --prompt "󰜢 Type ($project): " \
+            --border rounded \
+            --border-label " 󰜢 Type ($project) " \
+            --border-label-pos center \
             --height 100% \
-            --reverse \
-            --border rounded)
+            --reverse)
       [[ -z "$type" ]] && exit 0
 
       # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
@@ -541,9 +559,9 @@ if [[ "$1" == "__action" ]]; then
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " 󰜢 new $type in $project " \
+        --border-label " 󰏫 Summary ($project) " \
         --border-label-pos center \
-        --header "Type the summary, then Enter (Esc to cancel)" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         < /dev/null)"
       rc=$?
       # 0 = match accepted, 1 = query accepted (no match); anything else (130
@@ -557,10 +575,13 @@ if [[ "$1" == "__action" ]]; then
       adddesc="$(printf '%s\n' "No" "Yes" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰏫 Add description: " \
+        --border rounded \
+        --border-label " 󰏫 Add description " \
+        --border-label-pos center \
         --height 100% \
-        --reverse \
-        --border rounded)"
+        --reverse)"
       desc_file=""
       if [[ "$adddesc" == "Yes" ]]; then
         desc_file="$(mktemp)"
@@ -612,13 +633,16 @@ if [[ "$1" == "__action" ]]; then
       out="$(printf '%s\n' "$rows" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 3 \
         --prompt "󰌹 Links $key: " \
+        --border rounded \
+        --border-label " 󰌹 Links $key " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
-        --border rounded \
         --expect=alt-n,alt-d)"
       [[ $? -ne 0 ]] && exit 0
 
@@ -633,10 +657,13 @@ if [[ "$1" == "__action" ]]; then
           confirm="$(printf '%s\n' "No" "Yes" | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --prompt "󰩺 Delete link to ${linkedkey:-?}: " \
+            --border rounded \
+            --border-label " 󰩺 Delete link to ${linkedkey:-?} " \
+            --border-label-pos center \
             --height 100% \
-            --reverse \
-            --border rounded)"
+            --reverse)"
           [[ "$confirm" != "Yes" ]] && exit 0
           if ! acli jira workitem link delete --id "$linkid" --yes; then
             read -n 1 -s -r -p "Press any key to continue..."
@@ -652,13 +679,16 @@ if [[ "$1" == "__action" ]]; then
           tsel="$(printf '%s\n' "$target_rows" | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --ansi \
             --print-query \
             --prompt "󰌹 Link $key: " \
+            --border rounded \
+            --border-label " 󰌹 Link $key " \
+            --border-label-pos center \
             --header "KEY          STATUS         SUMMARY" \
             --height 100% \
-            --reverse \
-            --border rounded)"
+            --reverse)"
           case $? in
             0) target="$(printf '%s\n' "$tsel" | sed -n '2p' | awk '{print $1}')" ;;
             1) target="$(printf '%s\n' "$tsel" | sed -n '1p' | tr -d '[:space:]')" ;;
@@ -679,10 +709,13 @@ if [[ "$1" == "__action" ]]; then
           ltlabel="$(printf '%s\n' "${ltypes[@]%%|*}" | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --prompt "󰌹 $key … $target: " \
+            --border rounded \
+            --border-label " 󰌹 $key … $target " \
+            --border-label-pos center \
             --height 100% \
-            --reverse \
-            --border rounded)"
+            --reverse)"
           [[ -z "$ltlabel" ]] && exit 0
 
           ltname=""
@@ -699,7 +732,8 @@ if [[ "$1" == "__action" ]]; then
 
           # 3. Determine the desired Jira outward/inward roles for this link.
           #    For an "out" direction (e.g. "blocks") the viewed item is the
-          #    outward/source side; for "in" (e.g. "is blocked by") it is inward.
+          #    outward/source side; for "in" (e.g. "is blocked by") it is
+          #    inward.
           if [[ "$ltdir" == "in" ]]; then
             jira_out="$target"
             jira_in="$key"
@@ -741,71 +775,54 @@ fzfjira - Fuzzy Finder for Jira (acli)
 
 Usage: fzfjira [JQL]
 
+Browse Jira issues. If no JQL is given, a picker of named filters is shown
+(Board, Assigned, Backlog).
+
 Examples:
   fzfjira
   fzfjira "project = CORE AND status != Done ORDER BY updated DESC"
   fzfjira "assignee = currentUser() AND sprint in openSprints()"
 
-If no JQL is given, a picker of named filters is shown
-(Current, Assigned, Backlog). Edit the FZFJIRA_DEFAULT_FILTERS
-array in this script, or override via the FZFJIRA_FILTERS env
-var, to configure them.
-
 Keybindings:
-  enter   : view the work item (opens in nvim)
-  alt-a   : assign the work item (@me / default / remove / custom)
-  alt-t   : transition the work item (pick a status)
-  alt-c   : add a comment to the work item (opens in nvim)
-  alt-e   : edit the work item (type / summary / description)
-  alt-p   : set / change the work item's parent Epic (pick a project Epic)
-  alt-f   : flag / unflag the work item (Impediment)
-  alt-n   : create a new work item
-  alt-l   : manage links (list / delete / create)
-  alt-s   : show the work item's sub-tasks in a nested picker
-  alt-o   : open the work item in the web browser
-  ctrl-r  : reload the list
-  ctrl-p  : toggle preview
-  ctrl-d  : half page down
-  ctrl-u  : half page up
-  ctrl-f  : preview half page down
-  ctrl-b  : preview half page up
-  home    : scroll preview to top
-  end     : scroll preview to bottom
-
-The preview shows the work item details, a flag indicator (if flagged), its
-parent (e.g. the Epic), its sub-tasks, its links, and its comment thread.
-
-When a work item has sub-tasks, alt-s opens them in a nested picker (a new
-fzfjira list scoped to `parent = <key>`) where every action above is available.
-
-Setting the Epic (alt-p) and flagging (alt-f) are not supported by acli, so
-they call the Jira REST API directly, reusing the OAuth token acli stored in
-the macOS keychain (requires `security`, `curl`, and a prior
-`acli jira auth login --web`).
-
-In the links picker (alt-l):
-  enter   : open the linked work item
-  alt-d   : delete the highlighted link (after confirmation)
-  alt-n   : create a new link (pick a target work item, then a link type)
-  esc     : back to the list
+  enter  : view work item
+  alt-a  : assign work item
+  alt-t  : transition work item
+  alt-c  : add comment to the work item
+  alt-e  : edit work item
+  alt-p  : set / change the work item's parent epic
+  alt-f  : flag / unflag the work item
+  alt-n  : create new work item
+  alt-l  : manage links; enter - open linked work item; alt-d - delete link;
+           alt-n - create new link
+  alt-s  : show work item's sub-tasks in a nested picker
+  alt-o  : open work item in the web browser
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
 Environment:
-  FZFJIRA_LIMIT      Max work items to fetch (default: 250)
-  FZFJIRA_PROJECT    Project for newly created work items (default: CORE)
-  FZFJIRA_FLAG_FIELD Custom field id backing the "Flagged" field, used by the
-                  flag action (alt-f) and the preview indicator
-                  (default: customfield_10002)
-  FZFJIRA_FILTERS    Override the filter picker entries. Newline-separated
-                  "Name|JQL" entries, e.g.
-                  $'Mine|assignee = currentUser()\nBugs|type = Bug'
-  FZFJIRA_STATUSES   Comma-separated transition statuses
-                  (default: CORE project statuses, e.g.
-                  "Open,Backlog,In Progress,In Review,Done,Won't do")
-  FZFJIRA_LINK_TYPES Override the link-type picker entries. Newline-separated
-                  "Label|TypeName|direction" entries, where direction is
-                  "out" (selected item is the outward side) or "in"
-                  (selected item is the inward side), e.g.
-                  $'blocks|Blocks|out\nis blocked by|Blocks|in'
+  FZFJIRA_LIMIT      : max work items to fetch (default: 250)
+  FZFJIRA_PROJECT    : project for newly created work items (default: CORE)
+  FZFJIRA_FLAG_FIELD : custom field id backing the "flagged" field, used by the
+                       flag action (alt-f) and the preview indicator
+                       (default: customfield_10002)
+  FZFJIRA_FILTERS    : override the filter picker entries; newline-separated
+                       "Name|JQL" entries, e.g.
+                       $'Mine|assignee = currentUser()\nBugs|type = Bug'
+  FZFJIRA_STATUSES   : comma-separated transition statuses
+                       (default: CORE project statuses, e.g.
+                       "Open,Backlog,In Progress,In Review,Done,Won't do")
+  FZFJIRA_LINK_TYPES : override the link-type picker entries; newline-separated
+                       "Label|TypeName|direction" entries, where direction is
+                       "out" (selected item is the outward side) or "in"
+                       (selected item is the inward side), e.g.
+                       $'blocks|Blocks|out\nis blocked by|Blocks|in'
 EOF
 }
 
@@ -833,11 +850,12 @@ else
   selected=$(printf '%s\n' "${filters[@]%%|*}" | fzf \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
-    --prompt "󰈲 Filter: " \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --prompt "󰈲 Filters: " \
     --height 100% \
     --reverse \
     --border rounded \
-    --border-label " 󰌪 Jira Filters " \
+    --border-label " 󰈲 Filters " \
     --border-label-pos center)
   [[ -z "$selected" ]] && exit 0
 
@@ -875,13 +893,14 @@ fzf \
   --height 100% \
   --info right \
   --header "KEY          STATUS         SUMMARY" \
-  --prompt "󰌪 Jira: " \
+  --prompt "󰌪 Search: " \
   --pointer ">" \
   --border "rounded" \
   --border-label " 󰌪 $FZFJIRA_JQL " \
   --border-label-pos center \
   --bind "ctrl-d:half-page-down" \
   --bind "ctrl-u:half-page-up" \
+  --bind "alt-h:execute($SCRIPT --help | less -R)" \
   --bind "ctrl-f:preview-half-page-down" \
   --bind "ctrl-b:preview-half-page-up" \
   --bind "home:preview-top" \

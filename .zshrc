@@ -114,7 +114,7 @@ zstyle ':fzf-tab:*' fzf-flags --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:
 
 eval "$(fzf --zsh)"
 export FZF_DEFAULT_COMMAND='fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store'
-export FZF_DEFAULT_OPTS='--color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6'
+export FZF_DEFAULT_OPTS='--bind ctrl-p:toggle-preview --bind ctrl-d:half-page-down --bind ctrl-u:half-page-up --bind ctrl-f:preview-half-page-down --bind ctrl-b:preview-half-page-up --bind home:preview-top --bind end:preview-bottom --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6'
 
 
 

@@ -59,11 +59,13 @@ if [[ "$1" == "__action" ]]; then
     confirm="$(printf '%s\n' "No" "Yes" "Yes (force)" | fzf \
       --bind "ctrl-d:half-page-down" \
       --bind "ctrl-u:half-page-up" \
-      --prompt "󰩺 Confirm delete (${#targets[@]}): " \
-      --header "$(printf '%s\n' "${labels[@]}")" \
+      --bind "alt-h:execute($SCRIPT --help | less -R)" \
+      --prompt "󰩺 Delete ${#targets[@]} item(s): " \
       --height 100% \
       --reverse \
-      --border rounded)"
+      --border rounded \
+      --border-label " 󰩺 Delete ${#targets[@]} item(s) " \
+      --border-label-pos center)"
     [[ "$confirm" != "Yes" && "$confirm" != "Yes (force)" ]] && exit 0
 
     force_args=()
@@ -113,10 +115,13 @@ if [[ "$1" == "__action" ]]; then
       container=$(echo "$containers" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰆧 Container: " \
         --height 100% \
         --reverse \
-        --border rounded)
+        --border rounded \
+        --border-label " 󰆧 Logs $resource/$name " \
+        --border-label-pos center)
       [[ -z "$container" ]] && exit 0
       kubectl logs "${ns_arg[@]}" "$resource/$name" -c "$container" --tail=500 -f
       ;;
@@ -132,10 +137,13 @@ if [[ "$1" == "__action" ]]; then
       container=$(echo "$containers" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰆧 Container: " \
         --height 100% \
         --reverse \
-        --border rounded)
+        --border rounded \
+        --border-label " 󰆧 Exec $resource/$name " \
+        --border-label-pos center)
       [[ -z "$container" ]] && exit 0
       kubectl exec "${ns_arg[@]}" -it "$resource/$name" -c "$container" -- \
         sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
@@ -152,10 +160,13 @@ if [[ "$1" == "__action" ]]; then
       port=$(echo "$ports" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰮏 Port: " \
         --height 100% \
         --reverse \
-        --border rounded)
+        --border rounded \
+        --border-label " 󰮏 Port-forward $resource/$name " \
+        --border-label-pos center)
       [[ -z "$port" ]] && exit 0
       # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
       # the box is an fzf query seeded with the remote port over an empty
@@ -165,9 +176,9 @@ if [[ "$1" == "__action" ]]; then
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " 󰮏 port-forward $resource/$name -> $port " \
+        --border-label " 󰮏 Port-forward $resource/$name -> $port " \
         --border-label-pos center \
-        --header "Edit the local port, then Enter (Esc to cancel)" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         < /dev/null)"
       rc=$?
       # 0 = match accepted, 1 = query accepted (no match); anything else (130
@@ -196,6 +207,11 @@ fzfk - Fuzzy Finder for Kubernetes
 
 Usage: fzfk <resource> [kubectl get args...]
 
+Browse Kubernetes resources with fzf, previewing their details and performing
+common actions, like describe, edit, delete, logs, exec, and port-forward. The
+list is automatically refreshed every 5 seconds, preserving the cursor position
+and marked resources.
+
 Examples:
   fzfk pods
   fzfk pods -A
@@ -203,28 +219,26 @@ Examples:
   fzfk deployments -l app=foo
 
 Keybindings:
-  tab      : mark / unmark a resource (multi-select)
-  shift-tab: unmark a resource and move up
-  enter    : describe the resource under the cursor
-  alt-p    : port-forward (pick port via fzf)
-  alt-x    : exec into container (pick container via fzf)
-  alt-l    : show container logs (pick container via fzf)
-  alt-y    : open YAML manifest in nvim (read-only)
-  alt-e    : edit the resource manifest (kubectl edit)
-  alt-d    : delete the marked resources (or the one under the cursor);
-             the confirmation offers a force option (--grace-period=0 --force)
-  ctrl-r   : reload the list
-  ctrl-p   : toggle preview
-  ctrl-d   : half page down
-  ctrl-u   : half page up
-  ctrl-f   : preview half page down
-  ctrl-b   : preview half page up
-  home     : scroll preview to top
-  end      : scroll preview to bottom
+  enter  : describe the resource under the cursor
+  alt-p  : port-forward
+  alt-x  : exec into container
+  alt-l  : show container logs
+  alt-y  : open manifest
+  alt-e  : edit manifest
+  alt-d  : delete marked resources; the confirmation offers a force option
+           (--grace-period=0 --force)
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
-Mark several resources with tab / shift-tab and press alt-d to delete them all
-at once. The list is automatically refreshed every 5 seconds; marks and the
-cursor position are preserved across refreshes.
+Environment:
+  FZFK_REFRESH_INTERVAL : seconds between automatic list refreshes (default: 5)
 EOF
 }
 
@@ -337,6 +351,7 @@ fzf \
   --border-label-pos center \
   --bind "ctrl-d:half-page-down" \
   --bind "ctrl-u:half-page-up" \
+  --bind "alt-h:execute($SCRIPT --help | less -R)" \
   --bind "ctrl-f:preview-half-page-down" \
   --bind "ctrl-b:preview-half-page-up" \
   --bind "home:preview-top" \

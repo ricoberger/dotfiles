@@ -2,20 +2,7 @@
 
 # fzfgh - Fuzzy Finder for GitHub (gh)
 #
-# Usage:
-#   fzfgh          open your GitHub notifications (gh-notifications, else gh api)
-#   fzfgh prs      pick a pull request filter, then browse the matching PRs
-#   fzfgh issues   pick an issue filter, then browse the matching issues
-#   fzfgh view [url]  open a single PR / issue in the fzf picker; no url = current PR
-#
-# The pull request and issue filters (involves / author / assignee / mentions /
-# review-requested) mirror the searches from the Neovim configuration and are
-# powered by "gh search prs" / "gh search issues".
-#
-# Requires: gh, jq, fzf, nvim. The notifications feature uses the
-# "gh-notifications" script (mobile inbox, needs GITHUB_NOTIFICATIONS_TOKEN)
-# when it is on PATH, and otherwise falls back to the GitHub REST notifications
-# API via "gh api".
+# Usage: fzfgh [prs | issues | view [url]]
 
 SCRIPT="$(realpath "$0")"
 
@@ -49,7 +36,6 @@ FZFGH_ISSUE_DEFAULT_FILTERS=(
 
 # Nerd font glyphs used in bash-side prompts / labels. Defined via byte escapes
 # so they do not depend on a bash that supports the \u / \U printf escapes.
-ICON_GH=$'\xef\x90\x87'     # pull request
 ICON_PR=$'\xef\x90\x87'     # pull request
 ICON_ISSUE=$'\xef\x90\x9b'  # issue
 ICON_NOTIF=$'\xee\xa9\xb1'  # notification
@@ -622,7 +608,10 @@ if [[ "$1" == "__action" ]]; then
         "Rebase and merge (admin)" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "$ICON_PR Merge $repo#$number: " \
+        --border-label " $ICON_PR Merge $repo#$number " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
         --border rounded)"
@@ -683,7 +672,10 @@ if [[ "$1" == "__action" ]]; then
         "Close with comment and delete branch" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "$ICON_PR Close $repo#$number: " \
+        --border-label " $ICON_PR Close $repo#$number " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
         --border rounded)"
@@ -722,7 +714,10 @@ if [[ "$1" == "__action" ]]; then
       choice="$(printf '%s\n' "Add label" "Remove label" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "$ICON_PR Labels $repo#$number: " \
+        --border-label " $ICON_PR Labels $repo#$number " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
         --border rounded)"
@@ -731,7 +726,10 @@ if [[ "$1" == "__action" ]]; then
           label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --prompt "$ICON_PR Add label: " \
+            --border-label " $ICON_PR Add label " \
+            --border-label-pos center \
             --height 100% \
             --reverse \
             --border rounded)"
@@ -744,7 +742,10 @@ if [[ "$1" == "__action" ]]; then
           label="$(gh pr view "$number" --repo "$repo" --json labels --jq '.labels[].name' 2>/dev/null | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --prompt "$ICON_PR Remove label: " \
+            --border-label " $ICON_PR Remove label " \
+            --border-label-pos center \
             --height 100% \
             --reverse \
             --border rounded)"
@@ -845,7 +846,10 @@ if [[ "$1" == "__action" ]]; then
       choice="$(printf '%s\n' "Approve" "Comment" "Request changes" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "$ICON_PR Review $repo#$number: " \
+        --border-label " $ICON_PR Review $repo#$number " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
         --border rounded)"
@@ -933,6 +937,7 @@ if [[ "$1" == "__action" ]]; then
       logins="$(printf '%s\n' "$rows" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 2 \
@@ -940,6 +945,8 @@ if [[ "$1" == "__action" ]]; then
         --height 100% \
         --reverse \
         --prompt "$ICON_PR Request review $repo#$number: " \
+        --border-label " $ICON_PR Request review $repo#$number " \
+        --border-label-pos center \
         --marker "$ICON_MARK" \
         --border rounded \
         | cut -f1)"
@@ -1040,7 +1047,10 @@ if [[ "$1" == "__action" ]]; then
       choice="$(printf '%s\n' "Add label" "Remove label" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "$ICON_ISSUE Labels $repo#$number: " \
+        --border-label " $ICON_ISSUE Labels $repo#$number " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
         --border rounded)"
@@ -1049,7 +1059,10 @@ if [[ "$1" == "__action" ]]; then
           label="$(gh label list --repo "$repo" --json name --jq '.[].name' 2>/dev/null | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --prompt "$ICON_ISSUE Add label: " \
+            --border-label " $ICON_ISSUE Add label " \
+            --border-label-pos center \
             --height 100% \
             --reverse \
             --border rounded)"
@@ -1062,7 +1075,10 @@ if [[ "$1" == "__action" ]]; then
           label="$(gh issue view "$number" --repo "$repo" --json labels --jq '.labels[].name' 2>/dev/null | fzf \
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
+            --bind "alt-h:execute($SCRIPT --help | less -R)" \
             --prompt "$ICON_ISSUE Remove label: " \
+            --border-label " $ICON_ISSUE Remove label " \
+            --border-label-pos center \
             --height 100% \
             --reverse \
             --border rounded)"
@@ -1083,7 +1099,10 @@ if [[ "$1" == "__action" ]]; then
       choice="$(printf '%s\n' "Close as completed" "Close as not planned" "Close as duplicate" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "$ICON_ISSUE Close $repo#$number: " \
+        --border-label " $ICON_ISSUE Close $repo#$number " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
         --border rounded)"
@@ -1291,10 +1310,11 @@ if [[ "$1" == "__checks" ]]; then
     --prompt "$ICON_PR Checks $repo#$number: " \
     --pointer ">" \
     --border rounded \
-    --border-label " $ICON_GH Checks $repo#$number " \
+    --border-label " $ICON_PR Checks $repo#$number " \
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "enter:execute($CHECKS_ACTION view $repo {1})" \
     --bind "alt-r:execute($CHECKS_ACTION rerun $repo {1})" \
     --bind "alt-o:execute($CHECKS_ACTION browse $repo {1})"
@@ -1400,10 +1420,13 @@ if [[ "$1" == "__diff-action" ]]; then
         sel="$(printf '%s\n' "$threads" | fzf \
           --bind "ctrl-d:half-page-down" \
           --bind "ctrl-u:half-page-up" \
+          --bind "alt-h:execute($SCRIPT --help | less -R)" \
           --ansi \
           --delimiter $'\t' \
           --with-nth 2 \
           --prompt "$ICON_PR Reply to thread: " \
+          --border-label " $ICON_PR Reply to thread " \
+          --border-label-pos center \
           --height 100% \
           --reverse \
           --border rounded)"
@@ -1463,10 +1486,13 @@ if [[ "$1" == "__diff-action" ]]; then
         --multi \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 3 \
         --prompt "$ICON_PR Comment on line(s): " \
+        --border-label " $ICON_PR Comment on line(s) " \
+        --border-label-pos center \
         --height 100% \
         --reverse \
         --border rounded)"
@@ -1566,10 +1592,13 @@ if [[ "$1" == "__diff-action" ]]; then
         sel="$(printf '%s\n' "$threads" | fzf \
           --bind "ctrl-d:half-page-down" \
           --bind "ctrl-u:half-page-up" \
+          --bind "alt-h:execute($SCRIPT --help | less -R)" \
           --ansi \
           --delimiter $'\t' \
           --with-nth 3 \
           --prompt "$ICON_PR Resolve / unresolve thread: " \
+          --border-label " $ICON_PR Resolve / unresolve thread " \
+          --border-label-pos center \
           --height 100% \
           --reverse \
           --border rounded)"
@@ -1669,10 +1698,11 @@ if [[ "$1" == "__diff" ]]; then
     --prompt "$ICON_PR Diff $repo#$number: " \
     --pointer ">" \
     --border rounded \
-    --border-label " $ICON_GH Diff $repo#$number " \
+    --border-label " $ICON_PR Diff $repo#$number " \
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "home:preview-top" \
@@ -1698,96 +1728,96 @@ usage() {
 fzfgh - Fuzzy Finder for GitHub (gh)
 
 Usage:
-  fzfgh          open your GitHub notifications
-  fzfgh prs      pick a pull request filter, then browse the matching PRs
-  fzfgh issues   pick an issue filter, then browse the matching issues
-  fzfgh view [url]  open a single PR / issue in the fzf picker; no url opens the current PR
+  fzfgh              browser notifications
+  fzfgh prs          browse pull requests matching a filter
+  fzfgh issues       browser issues matching a filter
+  fzfgh view [url]   open a single pull request; no url opens the current
+                     pull request
 
-Pull request / issue filters (sub-picker):
-  Involves           involving you      (involves:USER)
-  Created            created by you      (author:USER)
-  Assigned           assigned to you     (assignee:USER)
-  Mentions           mentioning you      (mentions:USER)
-  Review Requested   awaiting your review (review-requested:USER, PRs only)
+Browse GitHub notifications, pull requests and issues. Mark notifications as
+read or done. Open, edit, assign, label, merge, review, comment, and close pull
+requests. Browse pull request diffs hunk-by-hunk, view and reply to review
+threads, and create new comments on a line or range. Open, edit, assign, label,
+comment, and close issues.
 
-When "fzfgh prs" / "fzfgh issues" is run inside a repository, a
-"Repository (owner/name)" filter for that repo's open pull requests / issues
-is added to the top of the picker.
+Notification Keybindings:
+  enter  : open notification
+  alt-d  : mark selected notifications as done
+  alt-e  : mark selected notifications as read
+  alt-o  : open notification in the web browser
+  alt-y  : copy notification url to the clipboard
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
-Pull request keybindings:
-  enter   : open the preview (details, description, checks, comments) read-only
-            in nvim
-  alt-o   : open the PR in the web browser
-  alt-y   : copy the PR url to the clipboard
-  alt-m   : merge the PR (pick method: merge / squash / rebase, with/without
-            admin; edit the commit subject & body in nvim)
-  alt-l   : add / remove a label
-  alt-e   : edit the PR title / body (opens nvim)
-  alt-d   : browse the PR diff hunk-by-hunk in fzf (preview shows the hunk and
-            its review threads with resolved state; alt-r reply, alt-c new
-            thread on a line or range (tab to mark lines; nvim opens pre-filled
-            with a ```suggestion``` block), alt-x resolve/unresolve, alt-o web,
-            alt-y yank path)
-  alt-g   : check out the PR and open nvim with :GitDiff (current repo only,
-            requires a clean worktree)
-  alt-v   : review the PR (approve / comment / request changes, body in nvim)
-  alt-q   : request a review (pick from suggested + assignable reviewers,
-            multi-select)
-  alt-c   : add a comment (opens nvim)
-  alt-a   : assign the PR to me
-  alt-k   : open the checks sub-picker (GitHub Actions)
-  alt-w   : toggle draft / ready for review
-  alt-x   : close the PR (pick: close / and delete branch / with comment /
-            with comment and delete branch)
-  ctrl-r  : reload the list
-  ctrl-p  : toggle preview
-  ctrl-d  : half page down
-  ctrl-u  : half page up
-  ctrl-f  : preview half page down
-  ctrl-b  : preview half page up
-  home    : scroll preview to top
-  end     : scroll preview to bottom
+Pull Request Keybindings:
+  enter  : open preview (details, description, checks, comments) in nvim
+  alt-o  : open pull request in the web browser
+  alt-y  : copy pull request url to the clipboard
+  alt-m  : merge pull request (merge / squash / rebase, with/without admin;
+           edit the commit subject & body in nvim)
+  alt-l  : add / remove label
+  alt-a  : assign pull request to me
+  alt-e  : edit pull request title and body
+  alt-c  : add a comment
+  alt-x  : close pull request (close / and delete branch / with comment / with
+           comment and delete branch)
+  alt-k  : show checks; enter - view job summary and logs; alt-r - rerun failed
+           job; alt-o - open check in the web browser
+  alt-w  : toggle draft / ready for review
+  alt-v  : review pull request (approve / comment / request changes)
+  alt-q  : request a review (suggested + assignable reviewers)
+  alt-d  : browse pull request diff hunk-by-hunk in fzf (shows the hunk and its
+           review threads with resolved state); alt-o - open in the web browser;
+           alt-y - yank path to file; alt-r - reply to thread,
+           alt-x - resolve / unresolve thread; alt-c - new thread on a line or
+           range (nvim opens pre-filled with a ```suggestion``` block)
+  alt-g  : check out pull request and open nvim with :GitDiff command (current
+           repo only, requires a clean worktree)
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
-The PR preview shows the details and description, the checks, and the comments.
-
-In the checks sub-picker (alt-k):
-  enter   : view the job summary and logs in nvim
-  alt-r   : rerun failed jobs for the check's run
-  alt-o   : open the check in the web browser
-
-Issue keybindings:
-  enter   : open the preview (details, description, comments) read-only in nvim
-  alt-o   : open the issue in the web browser
-  alt-y   : copy the issue url to the clipboard
-  alt-l   : add / remove a label
-  alt-a   : assign the issue to me
-  alt-e   : edit the issue title / body (opens nvim)
-  alt-c   : add a comment (opens nvim)
-  alt-x   : close the issue (pick reason: completed / not planned / duplicate)
-  ctrl-r  : reload the list
-
-The issue preview shows the details and description and the comments.
-
-Notification keybindings:
-  enter   : open the notification (PR / issue in nvim, else in the browser)
-  tab     : select / deselect (multi-select for batch read / done)
-  alt-d   : mark selected notifications as done
-  alt-e   : mark selected notifications as read
-  alt-o   : open the notification in the web browser
-  alt-y   : copy the notification url to the clipboard
-  ctrl-r  : reload the list
-  ctrl-p  : toggle preview
-
-The notification preview shows the PR / issue (with comments and checks) or
-the notification summary for other subject types.
+Issue Keybindings:
+  enter  : open preview (details, description, comments) in nvim
+  alt-o  : open issue in the web browser
+  alt-y  : copy issue url to the clipboard
+  alt-l  : add / remove a label
+  alt-a  : assign issue to me
+  alt-e  : edit issue title / body
+  alt-c  : add a comment
+  alt-x  : close the issue (completed / not planned / duplicate)
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
 Environment:
-  FZFGH_USER          GitHub login used in the filters (default: ricoberger)
-  FZFGH_LIMIT         Max pull requests / issues to fetch (default: 100)
-  FZFGH_PR_FILTERS    Override the PR filter sub-picker entries. Newline-
-                     separated "Name|query" entries, e.g.
-                     $'Mine|is:open author:me\nTeam|is:open team:org/x'
-  FZFGH_ISSUE_FILTERS Override the issue filter sub-picker entries (same format)
+  FZFGH_USER          : login used in the filters (default: ricoberger)
+  FZFGH_LIMIT         : max pull requests / issues to fetch (default: 100)
+  FZFGH_PR_FILTERS    : override the pull request filters; newline-separated
+                        "Name|query" entries, e.g.
+                        $'Mine|is:open author:me\nTeam|is:open team:org/x'
+  FZFGH_ISSUE_FILTERS : override the issue filters; newline-separated
+                        "Name|query" entries, e.g.
+                        $'Mine|is:open author:me\nTeam|is:open team:org/x'
 EOF
 }
 
@@ -1823,10 +1853,11 @@ run_prs() {
     --prompt "$ICON_PR Pull Requests: " \
     --pointer ">" \
     --border rounded \
-    --border-label " $ICON_GH ${query#__repo } " \
+    --border-label " $ICON_PR ${query#__repo } " \
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "home:preview-top" \
@@ -1884,10 +1915,11 @@ run_notifications() {
     --pointer ">" \
     --marker "$ICON_MARK" \
     --border rounded \
-    --border-label " $ICON_GH Notifications " \
+    --border-label " $ICON_NOTIF Notifications " \
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "home:preview-top" \
@@ -1934,6 +1966,7 @@ run_issues() {
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "home:preview-top" \
@@ -1957,6 +1990,7 @@ run_issues() {
 # are the "Name|query" filter entries.
 choose_query() {
   local label="$1"
+  local icon="${label%% *}"
   shift
   local entries=("$@")
 
@@ -1964,7 +1998,8 @@ choose_query() {
   selected=$(printf '%s\n' "${entries[@]%%|*}" | fzf \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
-    --prompt "$ICON_GH Filter: " \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --prompt "$icon Filter: " \
     --height 100% \
     --reverse \
     --border rounded \

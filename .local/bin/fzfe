@@ -3,9 +3,6 @@
 # fzfe - Fuzzy Finder File Explorer
 #
 # Usage: fzfe [directory]
-#
-# Inspired by https://github.com/ashish0kumar/fzfm/tree/main and
-# https://thevaluable.dev/practical-guide-fzf-example/
 
 SCRIPT="$(realpath "$0")"
 
@@ -13,7 +10,7 @@ SCRIPT="$(realpath "$0")"
 FZFE_MEDIA_OPENER="${FZFE_MEDIA_OPENER:-open}"
 # Editor for text/binary files (override via FZFE_TEXT_EDITOR).
 FZFE_TEXT_EDITOR="${FZFE_TEXT_EDITOR:-nvim}"
-# Command used to list directory entries (override via FZFE_LIST_COMMAND).
+# Command used to preview folder contents (override via FZFE_LIST_COMMAND).
 FZFE_LIST_COMMAND="${FZFE_LIST_COMMAND:-ls -a --color}"
 # Command used to preview files (override via FZFE_PREVIEW_COMMAND).
 FZFE_PREVIEW_COMMAND="${FZFE_PREVIEW_COMMAND:-bat}"
@@ -236,10 +233,13 @@ if [[ "$1" == "__action" ]]; then
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰩺 Delete $# item(s): " \
+        --border rounded \
+        --border-label " 󰩺 Delete $# item(s) " \
+        --border-label-pos center \
         --height 100% \
-        --reverse \
-        --border rounded)"
+        --reverse)"
       if [[ "$confirm" == "Yes" ]]; then
         for f in "$@"; do
           [[ -n "$f" ]] && rm -r "$f"
@@ -259,13 +259,13 @@ if [[ "$1" == "__action" ]]; then
       # the box is an fzf query seeded with the current name over an empty
       # candidate list: Enter prints the (edited) query, Esc cancels.
       new="$(fzf --print-query --query "$old" \
-        --prompt "Rename to: " \
+        --prompt "󰏫 Rename to: " \
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " 󰏫 rename $old " \
+        --border-label " 󰏫 Rename $old " \
         --border-label-pos center \
-        --header "Edit the name, then Enter (Esc to cancel)" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         < /dev/null)"
       rc=$?
       # 0 = match accepted, 1 = query accepted (no match); anything else (130
@@ -300,52 +300,44 @@ fzfe - Fuzzy Finder File Explorer
 
 Usage: fzfe [directory]
 
+Browse directories and open files with a fuzzy search. If a directory is given,
+browsing starts there; otherwise the current working directory is used.
+
 Examples:
   fzfe
   fzfe ~/Documents
   fzfe /tmp
 
-If a directory is given, browsing starts there; otherwise the current
-working directory is used. Select ".." to move to the parent directory and
-select a directory to enter it.
-
-Each row shows the entry's permissions, human-readable size and last
-modification time, followed by the name. Only the name is searchable.
-
 Keybindings:
-  enter     : open the file / enter the directory
-  tab       : select item and move down
-  shift-tab : select item and move up
-  alt-a     : select all
-  alt-x     : deselect all
-  alt-y     : copy absolute paths of the selection to the clipboard
-  alt-c     : mark the selection to be copied (paste with alt-p)
-  alt-m     : mark the selection to be moved (paste with alt-p)
-  alt-p     : paste the copied/moved selection into the current directory
-  alt-r     : rename the item under the cursor (mv)
-  alt-d     : delete the selection (rm -r, with confirmation)
-  alt-s     : toggle sort order (name A->Z / modified newest first)
-  ctrl-r    : reload the list
-  ctrl-p    : toggle preview
-  ctrl-d    : half page down
-  ctrl-u    : half page up
-  ctrl-f    : preview half page down
-  ctrl-b    : preview half page up
-  home      : scroll preview to top
-  end       : scroll preview to bottom
-
-The preview shows directory contents for folders and a syntax-highlighted
-view for files.
+  enter  : open file / enter directory
+  alt-y  : copy absolute paths of the selection to the clipboard
+  alt-c  : mark selection to be copied
+  alt-m  : mark selection to be moved
+  alt-p  : paste copied / moved selection into the current directory
+  alt-r  : rename item under the cursor
+  alt-d  : delete selection
+  alt-s  : toggle sort order
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
 Environment:
-  FZFE_MEDIA_OPENER    Command to open media files (default: open)
-  FZFE_TEXT_EDITOR     Editor for text/binary files (default: nvim)
-  FZFE_LIST_COMMAND    Command used to preview folder contents
-                       (default: ls -a --color)
-  FZFE_PREVIEW_COMMAND Command used to preview files (default: bat)
-  FZFE_TIME_FORMAT     strftime format for the time column
-                       (default: %Y-%m-%d %H:%M)
-  FZFE_DEFAULT_SORT    Startup sort order, name or modified (default: name)
+  FZFE_MEDIA_OPENER    : command to open media files (default: open)
+  FZFE_TEXT_EDITOR     : editor for text / binary files (default: nvim)
+  FZFE_LIST_COMMAND    : command used to preview folder contents
+                         (default: ls -a --color)
+  FZFE_PREVIEW_COMMAND : command used to preview files (default: bat)
+  FZFE_CLIPBOARD       : path to the shared clipboard file for copy / move
+                         (default: ${TMPDIR:-/tmp}/fzfe-clipboard)
+  FZFE_TIME_FORMAT     : strftime format for the time column
+                         (default: %Y-%m-%d %H:%M)
+  FZFE_DEFAULT_SORT    : startup sort order, name or modified (default: name)
 EOF
 }
 
@@ -402,10 +394,11 @@ while true; do
     --pointer ">" \
     --marker "󰄲" \
     --border "rounded" \
-    --border-label " 󱉭 $(pwd)/ " \
+    --border-label " 󰥨 $(pwd)/ " \
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "home:preview-top" \
@@ -414,8 +407,6 @@ while true; do
     --bind "alt-s:execute-silent($SCRIPT __togglesort)+reload($SCRIPT __list)" \
     --bind "tab:toggle+down" \
     --bind "shift-tab:toggle+up" \
-    --bind "alt-a:select-all" \
-    --bind "alt-x:deselect-all" \
     --bind "ctrl-r:reload($SCRIPT __list)" \
     --bind "alt-y:execute($ACTION yank {+${name_field}..})" \
     --bind "alt-c:execute($ACTION copy {+${name_field}..})+deselect-all" \

@@ -3,14 +3,6 @@
 # fzfvault - Fuzzy Finder for Vault (kv secrets engine)
 #
 # Usage: fzfvault
-#
-# Browse, view, create, edit, rename and delete secrets in Vault's kv secrets
-# engine (v1 and v2 auto-detected). Secrets are viewed as the plain
-# `vault kv get` table and created / edited as JSON files in nvim.
-#
-# Requires: vault, jq, fzf, nvim (and, for the yank action, pbcopy). Uses the
-# ambient VAULT_ADDR / VAULT_TOKEN / VAULT_NAMESPACE that the vault CLI reads.
-# Reference: https://developer.hashicorp.com/vault/docs/commands/kv
 
 SCRIPT="$(realpath "$0")"
 
@@ -204,13 +196,13 @@ if [[ "$1" == "__action" ]]; then
       # the box is an fzf query seeded with the current folder over an empty
       # candidate list: type the leaf name, Enter accepts, Esc cancels.
       newfull="$(fzf --print-query --query "${path:+$path/}" \
-        --prompt "New secret (relative to $mount/): " \
+        --prompt "$ICON_VAULT New secret (relative to $mount/): " \
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " $ICON_VAULT new secret in $mount/${path:+$path/} " \
+        --border-label " $ICON_VAULT New secret (relative to $mount/) " \
         --border-label-pos center \
-        --header "Type the path, then Enter (Esc to cancel)" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         < /dev/null)"
       rc=$?
       # 0 = match accepted, 1 = query accepted (no match); anything else (130
@@ -262,13 +254,13 @@ if [[ "$1" == "__action" ]]; then
       # the box is an fzf query seeded with the current path over an empty
       # candidate list: Enter prints the (edited) query, Esc cancels.
       newrel="$(fzf --print-query --query "$full" \
-        --prompt "Rename to (relative to $mount/): " \
+        --prompt "$ICON_VAULT Rename (relative to $mount/) to: " \
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " $ICON_VAULT rename $mount/$full " \
+        --border-label " $ICON_VAULT Rename (relative to $mount/) " \
         --border-label-pos center \
-        --header "Edit the path, then Enter (Esc to cancel)" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         < /dev/null)"
       rc=$?
       # 0 = match accepted, 1 = query accepted (no match); anything else (130
@@ -377,10 +369,13 @@ if [[ "$1" == "__action" ]]; then
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
-        --prompt "$ICON_TRASH Permanently delete $mount/$full: " \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
+        --prompt "$ICON_TRASH Delete $mount/$full: " \
         --height 100% \
         --reverse \
-        --border rounded)"
+        --border rounded \
+        --border-label " $ICON_TRASH Delete $mount/$full " \
+        --border-label-pos center)"
       [[ "$confirm" != "Yes" ]] && exit 0
 
       if [[ "$version" == "2" ]]; then
@@ -411,10 +406,13 @@ if [[ "$1" == "__action" ]]; then
       key="$(printf '%s' "$data" | jq -r 'keys[]' | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "$ICON_COPY Yank field ($rawname): " \
         --height 100% \
         --reverse \
-        --border rounded)"
+        --border rounded \
+        --border-label " $ICON_COPY Yank field ($rawname) " \
+        --border-label-pos center)"
       [[ -z "$key" ]] && exit 0
 
       printf '%s' "$data" \
@@ -489,6 +487,7 @@ if [[ "$1" == "__browse" ]]; then
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "home:preview-top" \
@@ -515,51 +514,38 @@ fzfvault - Fuzzy Finder for Vault (kv secrets engine)
 
 Usage: fzfvault
 
-Starts with a picker of the kv secrets engines (v1 and v2 are auto-detected),
-then opens a drill-down browser of that mount's paths. Folders are listed with
-a trailing "/"; enter descends into a folder or opens a secret.
+Browse secrets in Vault. Starts with a picker of the kv secrets engines (v1 and
+v2 are auto-detected), then opens a drill-down browser of that mount's paths.
+Folders are listed with a trailing "/"; enter descends into a folder or opens a
+secret. Supports editing, creating, renaming/moving, deleting and yanking
+secrets, plus opening the Vault web UI at the selected path.
 
 Keybindings (browser):
-  enter   : open a folder (descend) or view a secret (opens read-only in nvim)
-  alt-e   : edit the secret (data JSON in nvim; full overwrite on save)
-  alt-n   : create a new secret (path relative to the current folder)
-  alt-r   : rename / move the secret (within the same mount)
-  alt-d   : delete the secret permanently (after confirmation)
-  alt-y   : yank one field's value to the clipboard (pbcopy)
-  alt-o   : open the secret / folder in the Vault web UI
-  esc     : go up one level (at the root, back to the mount picker)
-  ctrl-r  : reload the current level
-  ctrl-p  : toggle preview
-  ctrl-d  : half page down
-  ctrl-u  : half page up
-  ctrl-f  : preview half page down
-  ctrl-b  : preview half page up
-  home    : scroll preview to top
-  end     : scroll preview to bottom
-
-The preview shows a folder's children, or a secret's full `vault kv get` table
-(including plaintext values). Viewing a secret (enter) shows the same table
-read-only in nvim. Edits and new secrets are the data-only JSON object; on save
-the JSON is validated with jq and, if valid and non-empty, written back with
-`vault kv put`. Delete is permanent: `vault kv metadata delete` for v2 (removes
-all versions) and `vault kv delete` for v1.
-
-Rename/move (alt-r) has no native Vault equivalent, so it copies the secret to
-the new path and then removes the old one; the old path is only deleted once
-every write succeeds, so a failure never loses data. For v2 the latest data is
-copied along with its custom_metadata and per-secret config (max_versions,
-cas_required, delete_version_after); older versions are not carried over.
-Renaming into another folder moves the secret; an existing target is never
-overwritten. Moves stay within the same mount.
+  enter  : open folder / view secret
+  alt-e  : edit secret
+  alt-n  : create new secret
+  alt-r  : rename / move secret
+  alt-d  : delete secret
+  alt-y  : yank one field's value to the clipboard
+  alt-o  : open secret / folder in the Vault web UI
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
 Environment:
-  VAULT_ADDR      Vault server address (used by the vault CLI and the web UI).
-  VAULT_TOKEN     Vault token (or ~/.vault-token, as the vault CLI reads it).
-  VAULT_NAMESPACE Vault namespace (Enterprise / HCP), honoured by the vault CLI.
-  FZFVAULT_MOUNTS Override mount discovery when the token cannot enumerate
-                  mounts (needs sys/mounts read otherwise). Comma-separated
-                  "name:version" pairs, e.g. "secret:2,kv:1". Version defaults
-                  to 2 when omitted.
+  VAULT_ADDR      : Vault server address (used by the vault CLI and the web UI)
+  VAULT_TOKEN     : Vault token (or ~/.vault-token, as the vault CLI reads it)
+  VAULT_NAMESPACE : Vault namespace, honoured by the vault CLI
+  FZFVAULT_MOUNTS : Override mount discovery when the token cannot enumerate
+                    mounts (needs sys/mounts read otherwise). Comma-separated
+                    "name:version" pairs, e.g. "secret:2,kv:1". Version defaults
+                    to 2 when omitted.
 EOF
 }
 
@@ -616,16 +602,17 @@ while true; do
   sel="$(printf '%s\n' "$MOUNT_ROWS" | fzf \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --ansi \
     --delimiter $'\t' \
     --with-nth 3 \
     --reverse \
     --height 100% \
     --info right \
-    --prompt "$ICON_VAULT Mount: " \
+    --prompt "$ICON_VAULT Mounts: " \
     --pointer ">" \
     --border "rounded" \
-    --border-label " $ICON_VAULT Vault kv mounts " \
+    --border-label " $ICON_VAULT Mounts " \
     --border-label-pos center)"
   [[ -z "$sel" ]] && break
 

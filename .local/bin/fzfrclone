@@ -3,14 +3,6 @@
 # fzfrclone - Fuzzy Finder for Object Storage (rclone)
 #
 # Usage: fzfrclone
-#
-# A single-pane navigator that browses the local filesystem and rclone remotes
-# (S3, Azure Blob, GCS, ...) in one interface and copies / moves files between
-# any of them: local <-> remote, remote <-> remote, local <-> local.
-#
-# Requires: rclone, fzf, bat (preview), file (mime detection).
-#
-# Inspired by the sibling fzfe script.
 
 SCRIPT="$(realpath "$0")"
 
@@ -115,7 +107,7 @@ location_basename() {
 location_label() {
   local loc="$1"
   if [[ "$loc" == "$TOP_SENTINEL" ]]; then
-    printf 'remotes'
+    printf 'Remotes'
   else
     printf '%s' "$loc"
   fi
@@ -162,7 +154,7 @@ if [[ "$1" == "__preview" ]]; then
 
   if [[ "$loc" == "$TOP_SENTINEL" || -z "$loc" ]]; then
     if [[ "$entry" == "$LOCAL_ENTRY" ]]; then
-      echo "󰉋 Local filesystem: $(pwd)"
+      echo "󰉋 Local: $(pwd)"
       echo ""
       "$FZFRCLONE_RCLONE" lsf --dir-slash "$(pwd)" 2>/dev/null
     else
@@ -337,10 +329,13 @@ if [[ "$1" == "__action" ]]; then
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰆐 $op ${#sources[@]} item(s) -> $loc : " \
         --height 100% \
         --reverse \
-        --border rounded)"
+        --border rounded \
+        --border-label " 󰆐 $op ${#sources[@]} item(s) -> $loc " \
+        --border-label-pos center)"
       [[ "$confirm" != "Yes" ]] && exit 0
 
       ok=1
@@ -391,10 +386,13 @@ if [[ "$1" == "__action" ]]; then
       confirm="$(printf '%s\n' "No" "Yes" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         --prompt "󰩺 Delete ${#targets[@]} item(s): " \
         --height 100% \
         --reverse \
-        --border rounded)"
+        --border rounded \
+        --border-label " 󰩺 Delete ${#targets[@]} item(s) " \
+        --border-label-pos center)"
       if [[ "$confirm" == "Yes" ]]; then
         for target in "${targets[@]}"; do
           if [[ "$target" == */ ]]; then
@@ -420,13 +418,13 @@ if [[ "$1" == "__action" ]]; then
       # the box is an fzf query seeded with the current name over an empty
       # candidate list: Enter prints the (edited) query, Esc cancels.
       new_base="$(fzf --print-query --query "$old_base" \
-        --prompt "Rename to: " \
+        --prompt "󰏫 Rename to: " \
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " 󰏫 rename $(location_label "$loc")/$old_base " \
+        --border-label " 󰏫 Rename $(location_label "$loc")/$old_base " \
         --border-label-pos center \
-        --header "Edit the name, then Enter (Esc to cancel)" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         < /dev/null)"
       rc=$?
       # 0 = match accepted, 1 = query accepted (no match); anything else (130
@@ -453,13 +451,13 @@ if [[ "$1" == "__action" ]]; then
       # the box is an fzf query over an empty candidate list: type the name,
       # Enter accepts, Esc cancels.
       name="$(fzf --print-query --query "" \
-        --prompt "New directory name: " \
+        --prompt "󰉖 New directory: " \
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " 󰉖 new directory in $(location_label "$loc") " \
+        --border-label " 󰉖 New directory in $(location_label "$loc") " \
         --border-label-pos center \
-        --header "Type the name, then Enter (Esc to cancel)" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
         < /dev/null)"
       rc=$?
       # 0 = match accepted, 1 = query accepted (no match); anything else (130
@@ -494,45 +492,33 @@ Browses the local filesystem and rclone remotes (S3, Azure Blob, GCS, ...) in a
 single pane and copies / moves files between any of them: local <-> remote,
 remote <-> remote and local <-> local.
 
-The top-level view lists your configured rclone remotes plus a "local/" entry
-that drops you into the local filesystem at the current working directory.
-Configure remotes first with `rclone config`.
-
 Keybindings:
-  enter     : enter the directory / remote, or open the file
-  esc       : go up one level (at the top-level view, quit)
-  tab       : select item and move down
-  shift-tab : select item and move up
-  alt-a     : select all
-  alt-x     : deselect all
-  alt-y     : copy full path(s) of the selection to the clipboard
-  alt-c     : mark the selection to be copied (paste with alt-p)
-  alt-m     : mark the selection to be moved (paste with alt-p)
-  alt-p     : paste the copied / moved selection into the current location
-  alt-r     : rename the item under the cursor (rclone moveto)
-  alt-k     : create a new directory in the current location (rclone mkdir)
-  alt-d     : delete the selection (rclone deletefile / purge, with confirm)
-  ctrl-r    : reload the list
-  ctrl-p    : toggle preview
-  ctrl-d    : half page down
-  ctrl-u    : half page up
-  ctrl-f    : preview half page down
-  ctrl-b    : preview half page up
-  home      : scroll preview to top
-  end       : scroll preview to bottom
-
-Selecting ".." moves to the parent directory; at a remote's root or the local
-filesystem root it returns to the top-level view. Press esc (or ctrl-c) to go
-up one level the same way; at the top-level view it exits fzfrclone.
+  enter  : enter directory / remote, or open file
+  alt-y  : copy full path(s) of selection to the clipboard
+  alt-c  : mark selection to be copied
+  alt-m  : mark selection to be moved
+  alt-p  : paste copied / moved selection into current location
+  alt-r  : rename item under the cursor
+  alt-k  : create new directory in current location
+  alt-d  : delete selection
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 
 Environment:
-  FZFRCLONE_RCLONE            rclone binary (default: rclone)
-  FZFRCLONE_MEDIA_OPENER      Command to open media files (default: open)
-  FZFRCLONE_TEXT_EDITOR       Editor for text / binary files, opened read-only (default: nvim)
-  FZFRCLONE_PREVIEW_COMMAND   Command used to preview files (default: bat)
-  FZFRCLONE_CLIPBOARD         Path of the copy / move clipboard file
-  FZFRCLONE_CAT_BYTES         Bytes of a text object shown in preview (default: 102400)
-  FZFRCLONE_PREVIEW_MAX_BYTES Skip content preview above this size (default: 10485760)
+  FZFRCLONE_RCLONE            : rclone binary (default: rclone)
+  FZFRCLONE_MEDIA_OPENER      : command to open media files (default: open)
+  FZFRCLONE_TEXT_EDITOR       : editor for text / binary files, opened read-only (default: nvim)
+  FZFRCLONE_PREVIEW_COMMAND   : command used to preview files (default: bat)
+  FZFRCLONE_CLIPBOARD         : path of the copy / move clipboard file
+  FZFRCLONE_CAT_BYTES         : bytes of a text object shown in preview (default: 102400)
+  FZFRCLONE_PREVIEW_MAX_BYTES : skip content preview above this size (default: 10485760)
 EOF
 }
 
@@ -569,7 +555,7 @@ while true; do
     --reverse \
     --height 100% \
     --info right \
-    --prompt "󰥨 Search: " \
+    --prompt "󰅟 Search: " \
     --pointer ">" \
     --marker "󰄲" \
     --border "rounded" \
@@ -577,6 +563,7 @@ while true; do
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
     --bind "home:preview-top" \
@@ -584,8 +571,6 @@ while true; do
     --bind "ctrl-p:toggle-preview" \
     --bind "tab:toggle+down" \
     --bind "shift-tab:toggle+up" \
-    --bind "alt-a:select-all" \
-    --bind "alt-x:deselect-all" \
     --bind "ctrl-r:reload($SCRIPT __list)" \
     --bind "alt-y:execute($ACTION yank {+})" \
     --bind "alt-c:execute($ACTION copy {+})+deselect-all" \

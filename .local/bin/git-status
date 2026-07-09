@@ -3,13 +3,6 @@
 # git-status - Fuzzy Finder for git (stage / unstage / commit)
 #
 # Usage: git-status
-#
-# Browse the working tree's changed files in fzf: stage / unstage them, inspect
-# their diff or blame in the preview, and commit straight from the picker. The
-# prompt toggles between an "Add" view (modified / deleted / untracked files)
-# and a "Reset" view (staged files); alt-s switches between them.
-#
-# Requires: git, fzf, bat, nvim (or the editor named by $EDITOR).
 
 # ---------- Main mode ----------
 
@@ -19,26 +12,28 @@ git-status - Fuzzy Finder for git (stage / unstage / commit)
 
 Usage: git-status
 
-Starts in the "Add" view listing the modified / deleted / untracked files;
-alt-s toggles to the "Reset" view listing the staged files. The selection is
-multi-capable (tab / shift-tab).
+Browse the working tree's changed files in fzf: stage / unstage them, inspect
+their diff or blame in the preview, and commit straight from the picker. The
+prompt toggles between an "add" view (modified / deleted / untracked files) and
+a "reset" view (staged files).
 
 Keybindings:
-  enter   : stage (Add view) or unstage (Reset view) the selection
-  alt-s   : toggle between the Add and Reset views
-  alt-p   : stage the selection interactively (git add --patch; Add view only)
-  alt-c   : commit the staged changes (git commit) and exit
-  alt-a   : amend the last commit (git commit --amend) and exit
-  alt-e   : open the selection in $EDITOR
-  alt-d   : show the diff in the preview
-  alt-b   : show the blame in the preview
-  ctrl-p  : toggle preview
-  ctrl-d  : half page down
-  ctrl-u  : half page up
-  ctrl-f  : preview half page down
-  ctrl-b  : preview half page up
-  home    : scroll preview to top
-  end     : scroll preview to bottom
+  enter  : stage (add view) or unstage (reset view) selection
+  alt-s  : toggle between add and reset views
+  alt-p  : stage selection interactively
+  alt-c  : commit staged changes (git commit)
+  alt-a  : amend staged changes to the last commit (git commit --amend)
+  alt-e  : open selection in $EDITOR
+  alt-d  : show diff in the preview
+  alt-b  : show blame in the preview
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
 EOF
 }
 
@@ -60,6 +55,12 @@ enter_cmd="($git_unstaged_files | grep {} && git add {+}) || $git_reset"
 mode_reset="change-prompt($prompt_reset)+reload($git_staged_files)+unbind(alt-p)"
 mode_add="change-prompt($prompt_add)+reload($git_unstaged_files)+rebind(alt-p)"
 
+# On-demand keybindings overlay: alt-h shows the usage() help in a pager, so the
+# picker view stays uncluttered. Exported so fzf's execute child shell can read
+# it.
+help_text="$(usage)"
+export help_text
+
 clear
 eval "$git_unstaged_files" | fzf \
   --ansi \
@@ -72,7 +73,7 @@ eval "$git_unstaged_files" | fzf \
   --pointer ">" \
   --marker "󰄲" \
   --border "rounded" \
-  --border-label " 󱉭 $(pwd)/ " \
+  --border-label "  $(pwd)/ " \
   --border-label-pos center \
   --bind "ctrl-d:half-page-down" \
   --bind "ctrl-u:half-page-up" \
@@ -92,5 +93,6 @@ eval "$git_unstaged_files" | fzf \
   --bind "alt-c:execute(git commit)+abort" \
   --bind "alt-a:execute(git commit --amend)+abort" \
   --bind "alt-e:execute(\${EDITOR:-vim} {+})" \
+  --bind "alt-h:execute(printf '%s\n' \"\$help_text\" | less -R)" \
   --preview-window "right:65%" \
   --preview "git diff --no-ext-diff -- {} 2>/dev/null | grep -q . && git diff --no-ext-diff --color -- {} || bat --style=numbers --color=always {}"
