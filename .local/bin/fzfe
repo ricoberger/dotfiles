@@ -284,6 +284,49 @@ if [[ "$1" == "__action" ]]; then
       }
       ;;
 
+    create)
+      # macOS ships bash 3.2, which lacks `read -i` for a prefilled prompt, so
+      # the box is an fzf query over an empty candidate list: type the name,
+      # Enter accepts, Esc cancels. A trailing "/" creates a directory.
+      new="$(fzf --print-query --query "" \
+        --prompt "󰈙 New file / directory: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " 󰈙 New file / directory in $(pwd)/ " \
+        --border-label-pos center \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
+        < /dev/null)"
+      rc=$?
+      # 0 = match accepted, 1 = query accepted (no match); anything else (130
+      # Esc, 2 error) means cancel.
+      [[ $rc -ne 0 && $rc -ne 1 ]] && exit 0
+      new="$(printf '%s\n' "$new" | head -1)"
+      # A trailing "/" creates a directory; otherwise a file. Strip it for the
+      # existence / creation checks.
+      target="${new%/}"
+      [[ -z "$target" ]] && exit 0
+      if [[ -e "$target" || -L "$target" ]]; then
+        echo "Target already exists: $target"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      if [[ "$new" == */ ]]; then
+        mkdir -p -- "$target" || {
+          echo "Create failed."
+          read -n 1 -s -r -p "Press any key to continue..."
+        }
+      else
+        # Create any parent directories for a name that includes a path.
+        dir="$(dirname -- "$target")"
+        [[ "$dir" != "." ]] && mkdir -p -- "$dir"
+        touch -- "$target" || {
+          echo "Create failed."
+          read -n 1 -s -r -p "Press any key to continue..."
+        }
+      fi
+      ;;
+
     *)
       echo "Unknown action: $action"
       exit 1
@@ -314,6 +357,7 @@ Keybindings:
   alt-c  : mark selection to be copied
   alt-m  : mark selection to be moved
   alt-p  : paste copied / moved selection into the current directory
+  alt-n  : create new file / directory
   alt-r  : rename item under the cursor
   alt-d  : delete selection
   alt-s  : toggle sort order
@@ -412,6 +456,7 @@ while true; do
     --bind "alt-c:execute($ACTION copy {+${name_field}..})+deselect-all" \
     --bind "alt-m:execute($ACTION move {+${name_field}..})+deselect-all" \
     --bind "alt-p:execute($ACTION paste)+reload($SCRIPT __list)" \
+    --bind "alt-n:execute($ACTION create)+reload($SCRIPT __list)" \
     --bind "alt-r:execute($ACTION rename {${name_field}..})+reload($SCRIPT __list)" \
     --bind "alt-d:execute($ACTION delete {+${name_field}..})+reload($SCRIPT __list)" \
     --bind "enter:accept" \
