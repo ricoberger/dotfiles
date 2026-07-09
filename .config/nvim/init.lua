@@ -893,11 +893,11 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
       vim.keymap.set(
         { "n", "x" },
-        "<leader>ghn",
+        "<leader>ghc",
         ":PRLSPCreateReviewComment<cr>",
         { silent = true }
       )
-      vim.keymap.set("n", "<leader>ghc", "<cmd>PRLSPReplyToReviewThread<cr>")
+      vim.keymap.set("n", "<leader>ghr", "<cmd>PRLSPReplyToReviewThread<cr>")
       vim.keymap.set("n", "<leader>ghs", "<cmd>PRLSPShowReviewThread<cr>")
       vim.keymap.set("n", "<leader>ghu", "<cmd>PRLSPRefreshReviewThreads<cr>")
     end

@@ -150,6 +150,8 @@ local function build_command(opts)
     parts[#parts + 1] = "--bind=ctrl-p:toggle-preview"
     parts[#parts + 1] = "--bind=ctrl-f:preview-half-page-down"
     parts[#parts + 1] = "--bind=ctrl-b:preview-half-page-up"
+    parts[#parts + 1] = "--bind=home:preview-top"
+    parts[#parts + 1] = "--bind=end:preview-bottom"
   end
   for _, extra in ipairs(opts.extra or {}) do
     parts[#parts + 1] = extra

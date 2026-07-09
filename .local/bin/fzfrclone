@@ -509,15 +509,17 @@ Keybindings:
   alt-c     : mark the selection to be copied (paste with alt-p)
   alt-m     : mark the selection to be moved (paste with alt-p)
   alt-p     : paste the copied / moved selection into the current location
-  alt-n     : rename the item under the cursor (rclone moveto)
+  alt-r     : rename the item under the cursor (rclone moveto)
   alt-k     : create a new directory in the current location (rclone mkdir)
   alt-d     : delete the selection (rclone deletefile / purge, with confirm)
-  alt-r     : reload the list
+  ctrl-r    : reload the list
   ctrl-p    : toggle preview
   ctrl-d    : half page down
   ctrl-u    : half page up
   ctrl-f    : preview half page down
   ctrl-b    : preview half page up
+  home      : scroll preview to top
+  end       : scroll preview to bottom
 
 Selecting ".." moves to the parent directory; at a remote's root or the local
 filesystem root it returns to the top-level view. Press esc (or ctrl-c) to go
@@ -577,17 +579,19 @@ while true; do
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
     --bind "ctrl-p:toggle-preview" \
     --bind "tab:toggle+down" \
     --bind "shift-tab:toggle+up" \
     --bind "alt-a:select-all" \
     --bind "alt-x:deselect-all" \
-    --bind "alt-r:reload($SCRIPT __list)" \
+    --bind "ctrl-r:reload($SCRIPT __list)" \
     --bind "alt-y:execute($ACTION yank {+})" \
     --bind "alt-c:execute($ACTION copy {+})+deselect-all" \
     --bind "alt-m:execute($ACTION move {+})+deselect-all" \
     --bind "alt-p:execute($ACTION paste)+reload($SCRIPT __list)" \
-    --bind "alt-n:execute($ACTION rename {})+reload($SCRIPT __list)" \
+    --bind "alt-r:execute($ACTION rename {})+reload($SCRIPT __list)" \
     --bind "alt-k:execute($ACTION mkdir)+reload($SCRIPT __list)" \
     --bind "alt-d:execute($ACTION delete {+})+reload($SCRIPT __list)" \
     --bind "enter:accept" \

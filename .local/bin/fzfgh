@@ -1675,10 +1675,12 @@ if [[ "$1" == "__diff" ]]; then
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
     --bind "ctrl-p:toggle-preview" \
     --bind "enter:ignore" \
-    --bind "alt-c:execute($SCRIPT __diff-action reply $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
-    --bind "alt-n:execute($SCRIPT __diff-action create $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
+    --bind "alt-r:execute($SCRIPT __diff-action reply $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
+    --bind "alt-c:execute($SCRIPT __diff-action create $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
     --bind "alt-x:execute($SCRIPT __diff-action resolve $cache $repo $number {1})+reload($SCRIPT __diff-rows $cache)+refresh-preview" \
     --bind "alt-o:execute(open https://github.com/$repo/pull/$number/files)" \
     --bind "alt-y:execute(printf '%s' {2} | pbcopy)" \
@@ -1722,7 +1724,7 @@ Pull request keybindings:
   alt-l   : add / remove a label
   alt-e   : edit the PR title / body (opens nvim)
   alt-d   : browse the PR diff hunk-by-hunk in fzf (preview shows the hunk and
-            its review threads with resolved state; alt-c reply, alt-n new
+            its review threads with resolved state; alt-r reply, alt-c new
             thread on a line or range (tab to mark lines; nvim opens pre-filled
             with a ```suggestion``` block), alt-x resolve/unresolve, alt-o web,
             alt-y yank path)
@@ -1737,12 +1739,14 @@ Pull request keybindings:
   alt-w   : toggle draft / ready for review
   alt-x   : close the PR (pick: close / and delete branch / with comment /
             with comment and delete branch)
-  alt-r   : reload the list
+  ctrl-r  : reload the list
   ctrl-p  : toggle preview
   ctrl-d  : half page down
   ctrl-u  : half page up
   ctrl-f  : preview half page down
   ctrl-b  : preview half page up
+  home    : scroll preview to top
+  end     : scroll preview to bottom
 
 The PR preview shows the details and description, the checks, and the comments.
 
@@ -1760,7 +1764,7 @@ Issue keybindings:
   alt-e   : edit the issue title / body (opens nvim)
   alt-c   : add a comment (opens nvim)
   alt-x   : close the issue (pick reason: completed / not planned / duplicate)
-  alt-r   : reload the list
+  ctrl-r  : reload the list
 
 The issue preview shows the details and description and the comments.
 
@@ -1771,7 +1775,7 @@ Notification keybindings:
   alt-e   : mark selected notifications as read
   alt-o   : open the notification in the web browser
   alt-y   : copy the notification url to the clipboard
-  alt-r   : reload the list
+  ctrl-r  : reload the list
   ctrl-p  : toggle preview
 
 The notification preview shows the PR / issue (with comments and checks) or
@@ -1825,8 +1829,10 @@ run_prs() {
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
     --bind "ctrl-p:toggle-preview" \
-    --bind "alt-r:reload($SCRIPT __list prs)" \
+    --bind "ctrl-r:reload($SCRIPT __list prs)" \
     --bind "enter:execute($ACTION pr-view {1} {2})" \
     --bind "alt-o:execute($ACTION pr-browse {1} {2})" \
     --bind "alt-y:execute($ACTION pr-yank {1} {2})" \
@@ -1884,8 +1890,10 @@ run_notifications() {
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
     --bind "ctrl-p:toggle-preview" \
-    --bind "alt-r:reload($SCRIPT __list notifications)" \
+    --bind "ctrl-r:reload($SCRIPT __list notifications)" \
     --bind "enter:execute($ACTION notif-open {1})" \
     --bind "alt-o:execute($ACTION notif-browse {1})" \
     --bind "alt-y:execute($ACTION notif-yank {1})" \
@@ -1928,8 +1936,10 @@ run_issues() {
     --bind "ctrl-u:half-page-up" \
     --bind "ctrl-f:preview-half-page-down" \
     --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
     --bind "ctrl-p:toggle-preview" \
-    --bind "alt-r:reload($SCRIPT __list issues)" \
+    --bind "ctrl-r:reload($SCRIPT __list issues)" \
     --bind "enter:execute($ACTION issue-view {1} {2})" \
     --bind "alt-o:execute($ACTION issue-browse {1} {2})" \
     --bind "alt-y:execute($ACTION issue-yank {1} {2})" \

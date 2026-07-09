@@ -7,7 +7,7 @@
 # Browse the working tree's changed files in fzf: stage / unstage them, inspect
 # their diff or blame in the preview, and commit straight from the picker. The
 # prompt toggles between an "Add" view (modified / deleted / untracked files)
-# and a "Reset" view (staged files); ctrl-s switches between them.
+# and a "Reset" view (staged files); alt-s switches between them.
 #
 # Requires: git, fzf, bat, nvim (or the editor named by $EDITOR).
 
@@ -20,12 +20,12 @@ git-status - Fuzzy Finder for git (stage / unstage / commit)
 Usage: git-status
 
 Starts in the "Add" view listing the modified / deleted / untracked files;
-ctrl-s toggles to the "Reset" view listing the staged files. The selection is
+alt-s toggles to the "Reset" view listing the staged files. The selection is
 multi-capable (tab / shift-tab).
 
 Keybindings:
   enter   : stage (Add view) or unstage (Reset view) the selection
-  ctrl-s  : toggle between the Add and Reset views
+  alt-s   : toggle between the Add and Reset views
   alt-p   : stage the selection interactively (git add --patch; Add view only)
   alt-c   : commit the staged changes (git commit) and exit
   alt-a   : amend the last commit (git commit --amend) and exit
@@ -37,6 +37,8 @@ Keybindings:
   ctrl-u  : half page up
   ctrl-f  : preview half page down
   ctrl-b  : preview half page up
+  home    : scroll preview to top
+  end     : scroll preview to bottom
 EOF
 }
 
@@ -76,8 +78,10 @@ eval "$git_unstaged_files" | fzf \
   --bind "ctrl-u:half-page-up" \
   --bind "ctrl-f:preview-half-page-down" \
   --bind "ctrl-b:preview-half-page-up" \
+  --bind "home:preview-top" \
+  --bind "end:preview-bottom" \
   --bind "ctrl-p:toggle-preview" \
-  --bind "ctrl-s:transform:[[ \$FZF_PROMPT =~ '$prompt_add' ]] && echo '$mode_reset' || echo '$mode_add'" \
+  --bind "alt-s:transform:[[ \$FZF_PROMPT =~ '$prompt_add' ]] && echo '$mode_reset' || echo '$mode_add'" \
   --bind "alt-d:change-preview(git diff --no-ext-diff -- {} 2>/dev/null | grep -q . && git diff --no-ext-diff --color -- {} || bat --style=numbers --color=always {})" \
   --bind "alt-b:change-preview(git blame --color-by-age {})" \
   --bind "enter:execute($enter_cmd)" \

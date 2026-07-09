@@ -213,12 +213,14 @@ Keybindings:
   alt-e    : edit the resource manifest (kubectl edit)
   alt-d    : delete the marked resources (or the one under the cursor);
              the confirmation offers a force option (--grace-period=0 --force)
-  alt-r    : reload the list
+  ctrl-r   : reload the list
   ctrl-p   : toggle preview
   ctrl-d   : half page down
   ctrl-u   : half page up
   ctrl-f   : preview half page down
   ctrl-b   : preview half page up
+  home     : scroll preview to top
+  end      : scroll preview to bottom
 
 Mark several resources with tab / shift-tab and press alt-d to delete them all
 at once. The list is automatically refreshed every 5 seconds; marks and the
@@ -337,8 +339,10 @@ fzf \
   --bind "ctrl-u:half-page-up" \
   --bind "ctrl-f:preview-half-page-down" \
   --bind "ctrl-b:preview-half-page-up" \
+  --bind "home:preview-top" \
+  --bind "end:preview-bottom" \
   --bind "ctrl-p:toggle-preview" \
-  --bind "alt-r:reload-sync($LIST_CMD_RUN)" \
+  --bind "ctrl-r:reload-sync($LIST_CMD_RUN)" \
   --bind "every($FZFK_REFRESH_INTERVAL):reload-sync($LIST_CMD_RUN)" \
   --bind "enter:execute($ACTION describe $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-p:execute($ACTION portforward $RESOURCE $NS_FIELD $NAME_FIELD)" \

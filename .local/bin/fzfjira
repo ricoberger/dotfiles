@@ -763,12 +763,14 @@ Keybindings:
   alt-l   : manage links (list / delete / create)
   alt-s   : show the work item's sub-tasks in a nested picker
   alt-o   : open the work item in the web browser
-  alt-r   : reload the list
+  ctrl-r  : reload the list
   ctrl-p  : toggle preview
   ctrl-d  : half page down
   ctrl-u  : half page up
   ctrl-f  : preview half page down
   ctrl-b  : preview half page up
+  home    : scroll preview to top
+  end     : scroll preview to bottom
 
 The preview shows the work item details, a flag indicator (if flagged), its
 parent (e.g. the Epic), its sub-tasks, its links, and its comment thread.
@@ -882,8 +884,10 @@ fzf \
   --bind "ctrl-u:half-page-up" \
   --bind "ctrl-f:preview-half-page-down" \
   --bind "ctrl-b:preview-half-page-up" \
+  --bind "home:preview-top" \
+  --bind "end:preview-bottom" \
   --bind "ctrl-p:toggle-preview" \
-  --bind "alt-r:reload($SCRIPT __list)" \
+  --bind "ctrl-r:reload($SCRIPT __list)" \
   --bind "enter:execute($ACTION view {1})" \
   --bind "alt-a:execute($ACTION assign {1})+reload($SCRIPT __list)" \
   --bind "alt-t:execute($ACTION transition {1})+reload($SCRIPT __list)" \
