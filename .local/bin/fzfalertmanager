@@ -1,0 +1,664 @@
+#!/usr/bin/env bash
+
+# fzfalertmanager - Fuzzy Finder for Alertmanager.app
+#
+# Usage: fzfalertmanager
+
+SCRIPT="$(realpath "$0")"
+
+# Base URL of the Alertmanager.app API (override via FZFALERTMANAGER_URL). The
+# app binds loopback-only on port 9093 by default.
+FZFALERTMANAGER_URL="${FZFALERTMANAGER_URL:-http://127.0.0.1:9093}"
+# Seconds between automatic refreshes of the alerts list (override via
+# FZFALERTMANAGER_REFRESH_INTERVAL).
+FZFALERTMANAGER_REFRESH_INTERVAL="${FZFALERTMANAGER_REFRESH_INTERVAL:-60}"
+
+# Cache of the raw alerts JSON for the currently browsed filter/alertmanager and
+# the per-fingerprint analysis-mode state file. Both are stable paths exported
+# to the fzf child preview/action processes. Set up in run_alerts.
+FZFALERTMANAGER_CACHE="${FZFALERTMANAGER_CACHE:-}"
+FZFALERTMANAGER_STATE="${FZFALERTMANAGER_STATE:-}"
+
+# Nerd font glyphs used in bash-side prompts / labels. Defined via byte escapes
+# so they do not depend on a bash that supports the \u / \U printf escapes.
+ICON_ALERT=$'\xef\x81\xb1'    # warning triangle
+ICON_FILTER=$'\xef\x82\xb0'   # funnel / filter
+ICON_AM=$'\xef\x83\xb3'       # bell (alertmanager)
+ICON_ANALYZE=$'\xef\x83\x90'  # magic wand (analyze)
+
+# ---------- Helpers ----------
+
+# GET a path from the API. Fails (non-zero, no output) on connection refused or
+# any non-2xx status.
+api_get() {
+  curl -fsS --max-time 5 "$FZFALERTMANAGER_URL$1"
+}
+
+# GET a JSON path and cache it atomically in $FZFALERTMANAGER_CACHE, echoing the
+# result. On a transient failure fall back to the existing cache (echoing
+# nothing when there is none yet) so a reload / auto-refresh blip does not blank
+# the list. Used by the list handlers that populate the cache.
+fetch_json_cached() {
+  local raw
+  raw="$(api_get "$1" 2>/dev/null)" || raw=""
+  if [[ -z "$raw" ]]; then
+    [[ -n "$FZFALERTMANAGER_CACHE" && -s "$FZFALERTMANAGER_CACHE" ]] &&
+      cat "$FZFALERTMANAGER_CACHE"
+    return 0
+  fi
+  if [[ -n "$FZFALERTMANAGER_CACHE" ]]; then
+    printf '%s' "$raw" > "$FZFALERTMANAGER_CACHE.tmp" 2>/dev/null &&
+      mv "$FZFALERTMANAGER_CACHE.tmp" "$FZFALERTMANAGER_CACHE"
+  fi
+  printf '%s' "$raw"
+}
+
+# Render markdown read from stdin with md, falling back to the raw markdown when
+# md is not installed. Unlike glow, md emits colour for a non-TTY stdout, so it
+# works directly in the fzf preview without forcing a profile or a tty.
+md_render() {
+  if command -v md >/dev/null 2>&1; then
+    MD_WORD_WRAP="${FZF_PREVIEW_COLUMNS:-80}" md
+  else
+    cat
+  fi
+}
+
+# Print a status message and wait for a keypress. Used by action handlers that
+# run on fzf's alternate screen so a transient message is seen before fzf
+# redraws the list.
+pause_msg() {
+  printf '%s\n' "$1"
+  read -n 1 -s -r -p "Press any key to continue..."
+}
+
+# Render a Markdown file (read from its path) through md_render. Used by both
+# the analyses subcommand and the alert analysis view so they render identically
+# from the file on disk - reflecting any edits made via the "open" action.
+render_markdown_file() {
+  if [[ -f "$1" ]]; then
+    md_render < "$1"
+  else
+    printf '# Analysis\n\nFile not found:\n\n    %s\n' "$1" | md_render
+  fi
+}
+
+# Echo the analysis file path for an alert when its analysis should currently be
+# shown - i.e. its fingerprint is marked in the state file and a finished
+# analysis exists. Returns non-zero (and echoes nothing) otherwise. Used by the
+# preview, the "open in nvim" and the "yank" actions so they always agree on
+# what is shown for the alert.
+analysis_filepath_if_shown() {
+  local amid="$1" fp="$2" resp fpath
+  [[ -n "$FZFALERTMANAGER_STATE" ]] || return 1
+  grep -qxF "$fp" "$FZFALERTMANAGER_STATE" 2>/dev/null || return 1
+  resp="$(api_get "/api/alertmanagers/$amid/alerts/$fp/analysis" 2>/dev/null)" || return 1
+  [[ -n "$resp" ]] || return 1
+  [[ "$(printf '%s' "$resp" | jq -r '.exists // false')" == "true" ]] || return 1
+  fpath="$(printf '%s' "$resp" | jq -r '.filePath // ""')"
+  [[ -n "$fpath" ]] || return 1
+  printf '%s' "$fpath"
+}
+
+# ---------- List: combined filters + alertmanagers ----------
+#
+# Emits TAB-separated rows: <type>\t<id>\t<name>\t<display>
+#   type    : "filter" | "alertmanager"
+#   id      : UUID used in the alerts endpoints
+#   name    : raw display name (used for the border label)
+#   display : coloured "icon name (count)" shown via --with-nth 4
+
+if [[ "$1" == "__list-sources" ]]; then
+  filters="$(api_get /api/filters 2>/dev/null)" || filters=""
+  ams="$(api_get /api/alertmanagers 2>/dev/null)" || ams=""
+
+  if [[ -z "$filters" && -z "$ams" ]]; then
+    echo "Could not reach the Alertmanager.app API at $FZFALERTMANAGER_URL" >&2
+    exit 1
+  fi
+
+  [[ -n "$filters" ]] && printf '%s' "$filters" | jq -r --arg icon "$ICON_FILTER" '
+    .[] | [
+      "filter",
+      .id,
+      .name,
+      ($icon + "  " + .name + "  \u001b[90m(" + (.alertCount|tostring) + ")\u001b[0m")
+    ] | @tsv'
+
+  [[ -n "$ams" ]] && printf '%s' "$ams" | jq -r --arg icon "$ICON_AM" '
+    .[]
+    | (if (.error // "") != "" then "  \u001b[31m!\u001b[0m" else "" end) as $err
+    | (if .isLoading then " \u001b[33m*\u001b[0m" else "" end) as $load
+    | [
+        "alertmanager",
+        .id,
+        .name,
+        ($icon + "  " + .name + "  \u001b[90m(" + (.alertCount|tostring) + ")\u001b[0m" + $err + $load)
+      ] | @tsv'
+  exit 0
+fi
+
+# ---------- List: alerts for one filter / alertmanager ----------
+#
+# Called as: fzfalertmanager __list-alerts <filter|alertmanager> <id>
+# Writes the raw alerts JSON to the cache (atomically) and emits TAB-separated
+# rows: <alertmanager-id>\t<fingerprint>\t<display>. The display is prefixed
+# with an analysis-state icon (green = a finished analysis exists,
+# yellow = running, gray = otherwise).
+
+if [[ "$1" == "__list-alerts" ]]; then
+  type="$2"
+  id="$3"
+
+  case "$type" in
+    filter) path="/api/filters/$id/alerts" ;;
+    alertmanager) path="/api/alertmanagers/$id/alerts" ;;
+    *) exit 0 ;;
+  esac
+
+  raw="$(fetch_json_cached "$path")"
+  [[ -z "$raw" ]] && exit 0
+
+  printf '%s' "$raw" | jq -r '
+    def ago($t):
+      (($t // "")
+        | if . == "" then null
+          else (sub("\\.[0-9]+"; "") | try fromdateiso8601 catch null) end) as $e
+      | if $e == null then "?"
+        else (now - $e) as $s
+          | if $s < 0 then "0s"
+            elif $s < 60 then "\($s|floor)s"
+            elif $s < 3600 then "\(($s/60)|floor)m"
+            elif $s < 86400 then "\(($s/3600)|floor)h"
+            else "\(($s/86400)|floor)d" end
+        end;
+    def rpad($s;$n): ($s + (" " * ([($n - ($s|length)), 0] | max)));
+    .[]
+    | .severity as $sev
+    | (if $sev == "critical" then "\u001b[35m"
+       elif $sev == "error" then "\u001b[31m"
+       elif $sev == "warning" then "\u001b[33m"
+       elif $sev == "info" then "\u001b[34m"
+       else "\u001b[90m" end) as $c
+    | ((.summary // "") | gsub("\\s+"; " ")) as $sum
+    | (.analysis // {}) as $an
+    | (if ($an.exists // false) then "\u001b[32m"
+       elif ($an.running // false) then "\u001b[33m"
+       else "\u001b[90m" end) as $ac
+    | ($ac + "\uf0d0\u001b[0m ") as $astate  # \uf0d0 = ICON_ANALYZE (keep in sync)
+    | [
+        .alertmanager.id,
+        .fingerprint,
+        ($astate + $c + rpad($sev; 9) + "\u001b[0m " + .alertName
+          + (if $sum != "" then "  \u001b[90m" + $sum + "\u001b[0m" else "" end)
+          + "  \u001b[90m" + ago(.raw.startsAt) + "  " + .alertmanager.name + "\u001b[0m")
+      ] | @tsv'
+  exit 0
+fi
+
+# ---------- List: analyses ----------
+#
+# Called as: fzfalertmanager __list-analyses
+# Writes the raw analyses JSON to the cache (atomically) and emits TAB-separated
+# rows: <filePath>\t<display>. The server order (newest-first) is preserved.
+
+if [[ "$1" == "__list-analyses" ]]; then
+  raw="$(fetch_json_cached /api/analyses)"
+  [[ -z "$raw" ]] && exit 0
+
+  printf '%s' "$raw" | jq -r '
+    def ago($t):
+      (($t // "")
+        | if . == "" then null
+          else (sub("\\.[0-9]+"; "") | try fromdateiso8601 catch null) end) as $e
+      | if $e == null then "?"
+        else (now - $e) as $s
+          | if $s < 0 then "0s"
+            elif $s < 60 then "\($s|floor)s"
+            elif $s < 3600 then "\(($s/60)|floor)m"
+            elif $s < 86400 then "\(($s/3600)|floor)h"
+            else "\(($s/86400)|floor)d" end
+        end;
+    .[]
+    | [
+        .filePath,
+        (.alertName + "  \u001b[90m" + ago(.startsAt) + "\u001b[0m")
+      ] | @tsv'
+  exit 0
+fi
+
+# ---------- Preview ----------
+#
+# Called from the fzf --preview binding as:
+#   fzfalertmanager __preview <alertmanager-id> <fingerprint>
+#
+# Default: renders the alert's Markdown from the cache. When the fingerprint is
+# marked in the state file a finished analysis exists for it, so the preview
+# shows that analysis instead; any other case falls back to the alert markdown.
+
+if [[ "$1" == "__preview" ]]; then
+  amid="$2"
+  fp="$3"
+
+  # When the alert's analysis is being shown, render it from the file on disk
+  # (same as the analyses subcommand). Otherwise show the alert markdown.
+  if analysis_path="$(analysis_filepath_if_shown "$amid" "$fp")"; then
+    render_markdown_file "$analysis_path"
+    exit 0
+  fi
+
+  jq -r --arg amid "$amid" --arg fp "$fp" \
+    '.[] | select(.alertmanager.id == $amid and .fingerprint == $fp) | .markdown // ""' \
+    "$FZFALERTMANAGER_CACHE" 2>/dev/null | md_render
+  exit 0
+fi
+
+# ---------- Preview: analysis ----------
+#
+# Called as: fzfalertmanager __preview-analysis <filePath>
+# Renders the analysis Markdown by reading the file at the given path.
+
+if [[ "$1" == "__preview-analysis" ]]; then
+  render_markdown_file "$2"
+  exit 0
+fi
+
+# ---------- Actions ----------
+#
+# Called from the fzf bindings as:
+#   fzfalertmanager __action open <key> <alertmanager-id> <fingerprint>
+#   fzfalertmanager __action view <alertmanager-id> <fingerprint>
+#   fzfalertmanager __action yank <alertmanager-id> <fingerprint>
+#   fzfalertmanager __action analyze <alertmanager-id> <fingerprint>
+#   fzfalertmanager __action analysis-open <filePath>
+#   fzfalertmanager __action analysis-yank <filePath>
+
+if [[ "$1" == "__action" ]]; then
+  shift
+  action="$1"
+  shift
+
+  case "$action" in
+    open)
+      key="$1"
+      amid="$2"
+      fp="$3"
+      [[ -z "$key" || -z "$fp" ]] && exit 0
+      url="$(jq -r --arg amid "$amid" --arg fp "$fp" --arg k "$key" \
+        '.[] | select(.alertmanager.id == $amid and .fingerprint == $fp) | .actions[$k] // ""' \
+        "$FZFALERTMANAGER_CACHE" 2>/dev/null)"
+      if [[ -z "$url" || "$url" == "null" ]]; then
+        pause_msg "No $key link for this alert."
+        exit 0
+      fi
+      open "$url"
+      ;;
+
+    view)
+      amid="$1"
+      fp="$2"
+      [[ -z "$amid" || -z "$fp" ]] && exit 0
+      # When the alert's analysis is being shown, open the real analysis file in
+      # nvim (editable) - identical to the analyses subcommand. Otherwise open
+      # the alert markdown read-only in nvim. The alert-markdown view file is
+      # uniquely named (and kept, not deleted) so several can be open at once;
+      # stale view files are pruned on the next open.
+      if analysis_path="$(analysis_filepath_if_shown "$amid" "$fp")"; then
+        if [[ -f "$analysis_path" ]]; then
+          nvim "$analysis_path"
+        else
+          pause_msg "Analysis file not found: $analysis_path"
+        fi
+        exit 0
+      fi
+      find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfalertmanager-view-*' -type f -mmin +60 -delete 2>/dev/null
+      out="${TMPDIR:-/tmp}/fzfalertmanager-view-${fp}-$$-${RANDOM}.md"
+      jq -r --arg amid "$amid" --arg fp "$fp" \
+        '.[] | select(.alertmanager.id == $amid and .fingerprint == $fp) | .markdown // ""' \
+        "$FZFALERTMANAGER_CACHE" > "$out" 2>/dev/null
+      nvim -R "$out"
+      ;;
+
+    yank)
+      amid="$1"
+      fp="$2"
+      [[ -z "$fp" ]] && exit 0
+      # When the alert's analysis is being shown, copy its file path (like the
+      # analyses subcommand); otherwise copy the alert source url.
+      if analysis_path="$(analysis_filepath_if_shown "$amid" "$fp")"; then
+        printf '%s' "$analysis_path" | pbcopy
+        exit 0
+      fi
+      url="$(jq -r --arg amid "$amid" --arg fp "$fp" \
+        '.[] | select(.alertmanager.id == $amid and .fingerprint == $fp) | .actions.source // ""' \
+        "$FZFALERTMANAGER_CACHE" 2>/dev/null)"
+      [[ -z "$url" || "$url" == "null" ]] && url="$fp"
+      printf '%s' "$url" | pbcopy
+      ;;
+
+    analyze)
+      amid="$1"
+      fp="$2"
+      [[ -z "$amid" || -z "$fp" ]] && exit 0
+      state="$FZFALERTMANAGER_STATE"
+
+      # The fingerprint is in the state file only while a finished analysis is
+      # being shown in the preview - pressing analyze again toggles back to the
+      # alert markdown.
+      if grep -qxF "$fp" "$state" 2>/dev/null; then
+        grep -vxF "$fp" "$state" > "$state.tmp" 2>/dev/null
+        mv "$state.tmp" "$state" 2>/dev/null
+        exit 0
+      fi
+
+      resp="$(api_get "/api/alertmanagers/$amid/alerts/$fp/analysis" 2>/dev/null)" || resp=""
+      if [[ -z "$resp" ]]; then
+        pause_msg "Could not reach the Alertmanager.app API."
+        exit 0
+      fi
+      available="$(printf '%s' "$resp" | jq -r '.available // false')"
+      exists="$(printf '%s' "$resp" | jq -r '.exists // false')"
+      running="$(printf '%s' "$resp" | jq -r '.running // false')"
+
+      if [[ "$available" != "true" ]]; then
+        pause_msg "No analyze command is configured in Alertmanager.app."
+      elif [[ "$exists" == "true" ]]; then
+        # A finished analysis exists - show it in the preview.
+        printf '%s\n' "$fp" >> "$state"
+      elif [[ "$running" == "true" ]]; then
+        # A run is in flight - keep the alert markdown in the preview, just
+        # report it. Re-run analyze once it finishes to view the result.
+        pause_msg "Analysis is already running for this alert."
+      else
+        confirm="$(printf '%s\n' "No" "Yes" | fzf \
+          --bind "ctrl-d:half-page-down" \
+          --bind "ctrl-u:half-page-up" \
+          --bind "alt-h:execute($SCRIPT --help | less -R)" \
+          --prompt "$ICON_ANALYZE Analyze this alert? " \
+          --height 100% \
+          --reverse \
+          --border rounded \
+          --border-label " $ICON_ANALYZE Analyze alert " \
+          --border-label-pos center)"
+        if [[ "$confirm" == "Yes" ]]; then
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST \
+            "$FZFALERTMANAGER_URL/api/alertmanagers/$amid/alerts/$fp/analyze" 2>/dev/null)"
+          case "$code" in
+            202) pause_msg "Analysis started. Re-run analyze once it has finished to view the result." ;;
+            409) pause_msg "Analysis is already running for this alert." ;;
+            *) pause_msg "Could not start the analysis (HTTP ${code:-error})." ;;
+          esac
+        fi
+      fi
+      ;;
+
+    analysis-open)
+      filePath="$1"
+      [[ -z "$filePath" ]] && exit 0
+      if [[ ! -f "$filePath" ]]; then
+        pause_msg "Analysis file not found: $filePath"
+        exit 0
+      fi
+      nvim "$filePath"
+      ;;
+
+    analysis-yank)
+      filePath="$1"
+      [[ -z "$filePath" ]] && exit 0
+      printf '%s' "$filePath" | pbcopy
+      ;;
+
+    *)
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- Main mode ----------
+
+usage() {
+  cat <<'EOF'
+fzfalertmanager - Fuzzy Finder for Alertmanager.app
+
+Usage:
+  fzfalertmanager            browse alerts by filter / alertmanager
+  fzfalertmanager analyses   browse the stored alert analyses
+
+Browse the alerts surfaced by the local Alertmanager.app HTTP API. The start
+screen lists the configured filters and alertmanagers together; selecting one
+lists its alerts with a Markdown preview and deep-link / analyze actions.
+
+Each alert row is prefixed with an analysis-state icon: green once a finished
+analysis exists, yellow while a run is in flight, and gray otherwise. It matches
+the icon shown in the analyses picker.
+
+Filters & Alertmanagers Keybindings:
+  enter  : list the alerts of the selected filter / alertmanager
+  ctrl-r : reload list
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  alt-h  : show help
+  esc    : quit
+
+Alert Keybindings:
+  enter  : open in nvim - the analysis file (editable) when the analysis is
+           displayed, otherwise the alert markdown (read-only)
+  alt-o  : open the alert source (generatorURL) in the web browser
+  alt-s  : open the "create silence" deep link in the web browser
+  alt-r  : open the runbook in the web browser
+  alt-d  : open the Grafana dashboard in the web browser
+  alt-p  : open the Grafana panel in the web browser
+  alt-a  : analyze the alert; if a finished analysis exists it is shown in the
+           preview (press alt-a again to switch back to the alert markdown);
+           otherwise you are asked to confirm before starting a run and a short
+           status message is shown - the alert markdown stays in the preview
+           while the run is in flight, re-run analyze once it has finished
+  alt-y  : copy to the clipboard - the analysis file path when the analysis is
+           displayed, otherwise the alert source url
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
+  esc    : back to the filters / alertmanagers list
+
+Analyses Keybindings (fzfalertmanager analyses):
+  enter  : open the analysis file in nvim (editable)
+  alt-y  : copy the analysis file path to the clipboard
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
+  esc    : quit
+
+Environment:
+  FZFALERTMANAGER_URL              : base URL of the Alertmanager.app API
+                                     (default: http://127.0.0.1:9093)
+  FZFALERTMANAGER_REFRESH_INTERVAL : seconds between automatic refreshes of the
+                                     alerts list (default: 60)
+EOF
+}
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ -n "$1" && "$1" != "analyses" ]]; then
+  echo "Unknown command: $1" >&2
+  echo "Usage: fzfalertmanager [analyses]" >&2
+  exit 1
+fi
+
+# List the alerts of one filter / alertmanager. Returns when the user leaves the
+# list (Esc), so the caller can loop back to the source picker.
+run_alerts() {
+  local type="$1" id="$2" name="$3"
+
+  FZFALERTMANAGER_CACHE="$(mktemp -t fzfalertmanager-cache)"
+  FZFALERTMANAGER_STATE="$(mktemp -t fzfalertmanager-state)"
+  : > "$FZFALERTMANAGER_STATE"
+  export FZFALERTMANAGER_CACHE FZFALERTMANAGER_STATE FZFALERTMANAGER_URL
+
+  local rows
+  rows="$("$SCRIPT" __list-alerts "$type" "$id")"
+  if [[ -z "$rows" ]]; then
+    rm -f "$FZFALERTMANAGER_CACHE" "$FZFALERTMANAGER_STATE"
+    pause_msg "No alerts for $name"
+    return 0
+  fi
+
+  local ACTION="$SCRIPT __action"
+  local LIST="$SCRIPT __list-alerts $type $id"
+
+  clear
+  printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 3 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --track \
+    --id-nth 2 \
+    --prompt "$ICON_ALERT Alerts: " \
+    --border rounded \
+    --border-label " $ICON_ALERT $name " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "ctrl-r:reload-sync($LIST)" \
+    --bind "every($FZFALERTMANAGER_REFRESH_INTERVAL):reload-sync($LIST)" \
+    --bind "enter:execute($ACTION view {1} {2})" \
+    --bind "alt-o:execute($ACTION open source {1} {2})" \
+    --bind "alt-s:execute($ACTION open silence {1} {2})" \
+    --bind "alt-r:execute($ACTION open runbook {1} {2})" \
+    --bind "alt-d:execute($ACTION open dashboard {1} {2})" \
+    --bind "alt-p:execute($ACTION open panel {1} {2})" \
+    --bind "alt-a:execute($ACTION analyze {1} {2})+refresh-preview" \
+    --bind "alt-y:execute($ACTION yank {1} {2})" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview {1} {2}"
+
+  rm -f "$FZFALERTMANAGER_CACHE" "$FZFALERTMANAGER_STATE"
+  return 0
+}
+
+# List the stored analyses. One-shot: returns when the user leaves the list.
+run_analyses() {
+  FZFALERTMANAGER_CACHE="$(mktemp -t fzfalertmanager-cache)"
+  export FZFALERTMANAGER_CACHE FZFALERTMANAGER_URL
+
+  local rows
+  rows="$("$SCRIPT" __list-analyses)"
+  if [[ -z "$rows" ]]; then
+    rm -f "$FZFALERTMANAGER_CACHE"
+    echo "No analyses found" >&2
+    exit 0
+  fi
+
+  local ACTION="$SCRIPT __action"
+
+  clear
+  printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 2 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_ANALYZE Analyses: " \
+    --border rounded \
+    --border-label " $ICON_ANALYZE Analyses " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "ctrl-r:reload($SCRIPT __list-analyses)" \
+    --bind "enter:execute($ACTION analysis-open {1})" \
+    --bind "alt-y:execute($ACTION analysis-yank {1})" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview-analysis {1}"
+
+  rm -f "$FZFALERTMANAGER_CACHE"
+}
+
+# Health check up front so an unreachable / disabled API fails with a clear
+# message instead of an empty picker.
+if ! api_get /healthz >/dev/null 2>&1; then
+  echo "Could not reach the Alertmanager.app API at $FZFALERTMANAGER_URL" >&2
+  echo "Enable it in the app under Settings -> API Server, and make sure the app is running." >&2
+  exit 1
+fi
+
+# Clean up the cache / analysis-state temp files if the script is interrupted
+# (the run_* functions remove them on a clean exit). These hold only the temp
+# files created by run_alerts / run_analyses, so reset any values inherited from
+# the environment first - otherwise the trap could remove a caller-provided file
+# (run_analyses never sets FZFALERTMANAGER_STATE).
+FZFALERTMANAGER_CACHE=""
+FZFALERTMANAGER_STATE=""
+trap 'rm -f "$FZFALERTMANAGER_CACHE" "$FZFALERTMANAGER_STATE" 2>/dev/null' EXIT
+
+# The "analyses" subcommand is a one-shot picker of the stored analyses.
+if [[ "$1" == "analyses" ]]; then
+  run_analyses
+  exit 0
+fi
+
+# Combined filters / alertmanagers picker. Selecting an entry drills into its
+# alerts; leaving that list returns here (loop) and Esc here quits.
+while true; do
+  rows="$("$SCRIPT" __list-sources)" || exit 1
+  if [[ -z "$rows" ]]; then
+    echo "No filters or alertmanagers are configured in Alertmanager.app." >&2
+    exit 1
+  fi
+
+  clear
+  sel="$(printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 4 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_ALERT Filter / Alertmanager: " \
+    --border rounded \
+    --border-label " $ICON_ALERT Filters & Alertmanagers " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-r:reload($SCRIPT __list-sources)")"
+
+  [[ -z "$sel" ]] && exit 0
+
+  sel_type="$(printf '%s' "$sel" | cut -f1)"
+  sel_id="$(printf '%s' "$sel" | cut -f2)"
+  sel_name="$(printf '%s' "$sel" | cut -f3)"
+  [[ -z "$sel_id" ]] && continue
+
+  run_alerts "$sel_type" "$sel_id" "$sel_name"
+done
