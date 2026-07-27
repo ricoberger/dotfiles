@@ -8,9 +8,9 @@ local state = {
 
 -- Catppuccin Macchiato colors for fzf, so it matches the terminal window.
 local FZF_COLORS = table.concat({
-  "--color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:#ed8796",
-  "fg:#cad3f5,header:#ed8796,info:#c6a0f6,pointer:#f4dbd6",
-  "marker:#f4dbd6,fg+:#cad3f5,prompt:#c6a0f6,hl+:#ed8796,border:#8aadf4",
+  "--color=bg+:#363a4f,bg:#24273a,spinner:#c6a0f6,hl:#ed8796",
+  "fg:#cad3f5,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6",
+  "marker:#f4dbd6,fg+:#cad3f5,prompt:#c6a0f6,hl+:#ed8796,border:#8aadf4,label:#6e738d",
 }, ",")
 
 -- Preview command for the file pickers. "{}" is the selected line, i.e. the
@@ -123,7 +123,6 @@ local function build_command(opts)
     "--ansi",
     "--layout=reverse",
     "--info=right",
-    "--pointer=" .. vim.fn.shellescape(">"),
     "--bind=ctrl-d:half-page-down",
     "--bind=ctrl-u:half-page-up",
     FZF_COLORS,
@@ -358,13 +357,13 @@ local function grep_on_select(dir)
 end
 
 -- Select handler for the git diff hunks picker. Candidates are
--- "file:line:hunk header" (no column).
+-- "file:line" (no column).
 local function hunk_on_select(dir)
   return function(key, selections)
     local specs = {}
     local items = {}
     for _, line in ipairs(selections) do
-      local file, lnum, text = line:match("^(.-):(%d+):(.*)$")
+      local file, lnum = line:match("^(.-):(%d+)$")
       if file then
         local path = join(dir, file)
         specs[#specs + 1] = { path = path, lnum = tonumber(lnum), col = 1 }
@@ -372,7 +371,6 @@ local function hunk_on_select(dir)
           filename = path,
           lnum = tonumber(lnum),
           col = 1,
-          text = text,
         }
       end
     end
@@ -425,11 +423,11 @@ local function cursor_word()
       vim.fn.getpos("."),
       { type = mode }
     )
-    -- Leave visual mode synchronously (the "x" flag) so the "<Esc>" is not
+    -- Leave visual mode synchronously (the "x" flag) so the "<esc>" is not
     -- queued into the typeahead, where it would later reach the fzf terminal
     -- and abort the picker.
     vim.api.nvim_feedkeys(
-      vim.api.nvim_replace_termcodes("<Esc>", true, false, true),
+      vim.api.nvim_replace_termcodes("<esc>", true, false, true),
       "nx",
       false
     )
@@ -481,28 +479,68 @@ end
 -- single quoted fzf "--bind". This lets "ctrl-x" delete a buffer and reload the
 -- list without leaving the picker.
 
--- Return the listed buffers as newline separated paths relative to the cwd.
+-- Return the listed buffers as newline separated "<bufnr>\t<display>" lines.
+-- The leading buffer number is hidden from the display (see "--with-nth" in
+-- "M.buffers") but kept so selections can be resolved to the exact buffer.
+-- Switching by buffer number (rather than editing the path) is what makes
+-- terminal buffers work: ":edit term://..." would start a new terminal job,
+-- while ":buffer N" reuses the live one, just like ":bnext".
 function _G.__picker_buffer_lines()
   local lines = {}
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buflisted then
       local name = vim.api.nvim_buf_get_name(b)
       if name ~= "" then
-        lines[#lines + 1] = vim.fn.fnamemodify(name, ":.")
+        -- Terminal buffers have a "term://..." name that is not a real path,
+        -- so it is shown verbatim; regular buffers are shown cwd relative.
+        local display = vim.bo[b].buftype == "terminal" and name
+          or vim.fn.fnamemodify(name, ":.")
+        lines[#lines + 1] = b .. "\t" .. display
       end
     end
   end
   return table.concat(lines, "\n")
 end
 
--- Delete the listed buffer whose cwd relative path matches "name".
-function _G.__picker_buffer_delete(name)
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.fn.fnamemodify(vim.api.nvim_buf_get_name(b), ":.") == name then
-      pcall(vim.api.nvim_buf_delete, b, {})
-    end
+-- Delete the buffer with the given buffer number ("bufnr" arrives as a string
+-- from the fzf "{1}" field placeholder).
+function _G.__picker_buffer_delete(bufnr)
+  bufnr = tonumber(bufnr)
+  if bufnr then
+    pcall(vim.api.nvim_buf_delete, bufnr, {})
   end
   return ""
+end
+
+-- Select handler for the buffers picker. Candidates are "<bufnr>\t<display>",
+-- so the buffer is switched to by number instead of re-editing its path.
+local function buffers_on_select(key, selections)
+  local bufs = {}
+  for _, line in ipairs(selections) do
+    local bufnr = tonumber(line:match("^(%d+)"))
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+      bufs[#bufs + 1] = bufnr
+    end
+  end
+  if key == "ctrl-q" then
+    local items = {}
+    for _, b in ipairs(bufs) do
+      items[#items + 1] = { bufnr = b, lnum = 1, col = 1 }
+    end
+    to_quickfix(items, "Buffers")
+    return
+  end
+  for _, b in ipairs(bufs) do
+    if key == "ctrl-s" then
+      vim.cmd("sbuffer " .. b)
+    elseif key == "ctrl-v" then
+      vim.cmd("vertical sbuffer " .. b)
+    elseif key == "ctrl-t" then
+      vim.cmd("tab sbuffer " .. b)
+    else
+      vim.cmd("buffer " .. b)
+    end
+  end
 end
 
 -- Pick from the listed buffers. "ctrl-x" deletes the buffer under the cursor
@@ -521,12 +559,16 @@ function M.buffers()
   -- "ctrl-x" deletes the buffer under the cursor and reloads the list.
   local remote = 'nvim --headless --server "$NVIM" --remote-expr'
   local list = remote .. ' "v:lua.__picker_buffer_lines()"'
-  local delete = remote .. ' "v:lua.__picker_buffer_delete({})" >/dev/null'
+  local delete = remote .. ' "v:lua.__picker_buffer_delete({1})" >/dev/null'
+  -- Preview the path field ("{2}"); the hidden buffer number is "{1}".
+  local preview = FILE_PREVIEW:gsub("{}", "{2}")
   local fzf = build_command({
     expect = EXPECT,
     prompt = s.prompt,
-    preview = FILE_PREVIEW,
+    delimiter = "\t",
+    preview = preview,
     extra = {
+      "--with-nth 2",
       ("--bind 'ctrl-x:execute-silent(%s)+reload(%s)'"):format(delete, list),
     },
   })
@@ -535,7 +577,7 @@ function M.buffers()
     fzf = fzf,
     cwd = dir,
     expect = EXPECT,
-    on_select = file_on_select(dir),
+    on_select = buffers_on_select,
   })
 end
 
@@ -739,14 +781,14 @@ function M.git_branches()
 end
 
 -- git diff: list every hunk of the unstaged working tree changes. Each row is
--- "file:line:hunk header" and pressing enter opens the file at the hunk.
+-- "file:line" and pressing enter opens the file at the hunk.
 function M.git_diff()
   local root = git_root()
   if not root then
     return
   end
   local s = styled("", "Git Diff")
-  -- Parse the unified diff into "file:line:context" rows, one per hunk. The
+  -- Parse the unified diff into "file:line" rows, one per hunk. The
   -- hunk header "@@ -a,b +c,d @@" reports "c" as the hunk start, which includes
   -- git's leading context lines, so jumping there lands a few lines before the
   -- change. Instead we walk the hunk body and emit the new-file line number of
@@ -758,12 +800,11 @@ infile && /^\+\+\+ /{ file=$0; sub(/^\+\+\+ /,"",file); sub(/^b\//,"",file); inf
 /^@@ /{
   if (file=="" || file=="/dev/null") { hunk=0; next }
   if (match($0,/\+[0-9]+/)) nl=substr($0,RSTART+1,RLENGTH-1);
-  ctx=$0; sub(/^@@[^@]*@@ ?/,"",ctx);
   hunk=1; printed=0; next
 }
 hunk {
   c=substr($0,1,1);
-  if (!printed && (c=="+" || c=="-")) { printf "%s:%s:%s\n", file, nl, ctx; printed=1 }
+  if (!printed && (c=="+" || c=="-")) { printf "%s:%s\n", file, nl; printed=1 }
   if (c==" " || c=="+") nl++
 }
 ']]

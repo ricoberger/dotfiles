@@ -340,12 +340,12 @@ local function attach(buf)
     vim.keymap.set(mode, lhs, rhs, { buffer = buf, silent = true })
   end
 
-  map("n", "<Tab>", function()
+  map("n", "<tab>", function()
     local lnum = vim.api.nvim_win_get_cursor(0)[1]
     toggle(buf, lnum)
     redisplay(buf)
   end)
-  map("x", "<Tab>", function()
+  map("x", "<tab>", function()
     local first = vim.fn.line("v")
     local last = vim.fn.line(".")
     if first > last then
@@ -355,23 +355,23 @@ local function attach(buf)
       toggle(buf, lnum)
     end
     vim.api.nvim_feedkeys(
-      vim.api.nvim_replace_termcodes("<Esc>", true, false, true),
+      vim.api.nvim_replace_termcodes("<esc>", true, false, true),
       "nx",
       false
     )
     redisplay(buf)
   end)
-  map("n", "<Esc>", function()
+  map("n", "<esc>", function()
     clear_marks()
     redisplay(buf)
   end)
-  map("n", "<C-s>", function()
+  map("n", "<c-s>", function()
     M.open("split")
   end)
-  map("n", "<C-v>", function()
+  map("n", "<c-v>", function()
     M.open("vsplit")
   end)
-  map("n", "<C-t>", function()
+  map("n", "<c-t>", function()
     M.open("tabedit")
   end)
   map("n", "d", M.delete)
@@ -379,7 +379,7 @@ local function attach(buf)
   map("n", "m", M.move)
   map("n", "c", M.copy)
   map("n", "n", M.create)
-  map("n", "<C-q>", M.list_marks)
+  map("n", "<c-q>", M.list_marks)
   map("n", "s", M.grep)
   map("n", "=", M.diff)
 end

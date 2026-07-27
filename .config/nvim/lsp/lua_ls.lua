@@ -13,7 +13,13 @@ return {
   single_file_support = true,
   settings = {
     Lua = {
-      workspace = { checkThirdParty = false },
+      runtime = { version = "LuaJIT" },
+      workspace = {
+        checkThirdParty = false,
+        -- Index the Neovim runtime so that annotations referencing built-in
+        -- types (e.g. "vim.lsp.Client", "lsp.HandlerContext") resolve.
+        library = { vim.env.VIMRUNTIME .. "/lua" },
+      },
       telemetry = { enable = false },
       diagnostics = { globals = { "vim" } },
       format = { enable = false },

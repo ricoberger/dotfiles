@@ -87,6 +87,9 @@ return {
     telemetry = {
       telemetryLevel = "off",
     },
+    nextEditSuggestions = {
+      enabled = true,
+    },
   },
   on_attach = function(client, bufnr)
     vim.api.nvim_buf_create_user_command(bufnr, "LspCopilotSignIn", function()

@@ -31,6 +31,11 @@ vim.g.loaded_vimballPlugin = 1
 vim.g.loaded_zip = 1
 vim.g.loaded_zipPlugin = 1
 
+vim.g.loaded_node_provider = 0
+vim.g.loaded_perl_provider = 0
+vim.g.loaded_python3_provider = 0
+vim.g.loaded_ruby_provider = 0
+
 -- We are using "Cascadia Code" as font in our terminal, so that we can enable
 -- nerd font support in Neovim.
 vim.g.have_nerd_font = true
@@ -121,14 +126,32 @@ require("vim._core.ui2").enable({
 })
 
 --------------------------------------------------------------------------------
--- FILE HANDLING
+-- FILETYPE HANDLING
 --------------------------------------------------------------------------------
 
--- Handle ".arb" files as ".json" files. ".arb" files are used in Flutter for
--- translations.
+-- Custom filetype detection so the correct LSP servers can attach.
 vim.filetype.add({
   extension = {
+    -- Flutter translations
     arb = "json",
+    -- gopls
+    tmpl = "gotmpl",
+    -- marksman--
+    mdx = "markdown.mdx",
+  },
+  pattern = {
+    -- docker_compose_language_service
+    ["compose.*%.ya?ml"] = "yaml.docker-compose",
+    ["docker%-compose.*%.ya?ml"] = "yaml.docker-compose",
+    -- helm_ls
+    [".*/templates/.*%.tpl"] = "helm",
+    [".*/templates/.*%.ya?ml"] = "helm",
+    [".*/templates/.*%.txt"] = "helm",
+    ["helmfile.*%.ya?ml"] = "helm",
+    ["helmfile.*%.ya?ml.gotmpl"] = "helm",
+    ["values.*%.yaml"] = "yaml.helm-values",
+    -- yamlls
+    ["%.gitlab%-ci%.ya?ml"] = "yaml.gitlab",
   },
 })
 
@@ -359,7 +382,7 @@ require("catppuccin").setup({
       PickerBorder = { bg = colors.base, fg = colors.blue },
 
       -- Explorer marks (see "lua/core/explorer.lua").
-      ExplorerMark = { fg = colors.mauve },
+      ExplorerMark = { fg = colors.rosewater },
       ExplorerMarkLine = { bg = colors.surface0 },
 
       -- Statusline (see "lua/core/statusline.lua").
@@ -696,7 +719,7 @@ vim.api.nvim_create_autocmd("FileType", {
   callback = function(event)
     local filetype = event.match
     local lang = vim.treesitter.language.get_lang(filetype)
-    if vim.treesitter.language.add(lang) then
+    if lang and vim.treesitter.language.add(lang) then
       if vim.treesitter.query.get(filetype, "indents") then
         vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
       end
@@ -712,38 +735,6 @@ vim.api.nvim_create_autocmd("FileType", {
 --------------------------------------------------------------------------------
 -- LSP
 --------------------------------------------------------------------------------
-
--- Handle "docker-compose.yaml" and "docker-compose.yml" files as
--- "yaml.docker-compose" files, so that they get the correct filetype and the
--- "docker_compose_language_service" LSP server can be used for them.
-vim.filetype.add({
-  pattern = {
-    ["compose.*%.ya?ml"] = "yaml.docker-compose",
-    ["docker%-compose.*%.ya?ml"] = "yaml.docker-compose",
-  },
-})
-
--- Install the "helm-ls" plugin, which is required for the Helm Language Server
--- (helm_ls) to work properly.
---
--- See: https://github.com/mrjosh/helm-ls/blob/master/README.md#neovim
-vim.pack.add({
-  {
-    src = "https://github.com/qvalentin/helm-ls.nvim",
-    name = "helm-ls",
-    version = "main",
-  },
-}, { confirm = false, load = true })
-
-require("helm-ls").setup({
-  conceal_templates = {
-    enabled = false,
-  },
-  indent_hints = {
-    enabled = false,
-    only_for_current_line = false,
-  },
-})
 
 -- Enable and configure the built-in LSP client.
 vim.lsp.enable({
@@ -859,6 +850,15 @@ vim.api.nvim_create_autocmd("LspAttach", {
             return "<c-right>"
           end
         end, { expr = true, replace_keycodes = true })
+
+        -- Cycle through the available inline completions with "Ctrl+Up" (next)
+        -- and "Ctrl+Down" (previous).
+        vim.keymap.set("i", "<c-up>", function()
+          vim.lsp.inline_completion.select({ count = 1 })
+        end)
+        vim.keymap.set("i", "<c-down>", function()
+          vim.lsp.inline_completion.select({ count = -1 })
+        end)
       end
 
       -- Add normal-mode keymappings for signature help.
@@ -955,6 +955,7 @@ vim.diagnostic.config({
           return icon
         end
       end
+      return ""
     end,
     format = function(diagnostic)
       -- Replace newline and tab characters with space for more compact
@@ -994,6 +995,10 @@ for _, type in ipairs({ "Error", "Warn", "Hint", "Info" }) do
 end
 
 vim.keymap.set("n", "<leader>d", function()
+  vim.diagnostic.setloclist()
+end, {})
+
+vim.keymap.set("n", "<leader>D", function()
   vim.diagnostic.setqflist()
 end, {})
 

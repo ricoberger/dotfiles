@@ -10,11 +10,6 @@
       "src": "https://github.com/lewis6991/gitsigns.nvim",
       "version": "'main'"
     },
-    "helm-ls": {
-      "rev": "20df43509b02a3ce3c6b3eee254d6e2bffa9a370",
-      "src": "https://github.com/qvalentin/helm-ls.nvim",
-      "version": "'main'"
-    },
     "multicursor": {
       "rev": "704b99f10a72cc05d370cfeb294ff83412a8ab55",
       "src": "https://github.com/jake-stewart/multicursor.nvim",

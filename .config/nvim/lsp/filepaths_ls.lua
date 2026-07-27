@@ -693,7 +693,7 @@ end
 
 ---@param dispatchers vim.lsp.rpc.Dispatchers?
 ---@param config vim.lsp.ClientConfig
----@return vim.lsp.rpc.PublicClient
+---@return vim.lsp.rpc.Client
 local function create_server(dispatchers, config)
   local closing = false
   local next_request_id = 0

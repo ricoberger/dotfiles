@@ -4,25 +4,6 @@ local M = {}
 -- the system clipboard, e.g. to paste it into an AI chat. Works in normal mode
 -- (using the cursor line) and visual mode (using the selected range).
 
--- Format the quickfix list as "relpath:lnum:col: text" lines.
-local function quickfix_lines()
-  local items = vim.fn.getqflist()
-  local lines = {}
-  for _, item in ipairs(items) do
-    local name = ""
-    if item.bufnr and item.bufnr > 0 then
-      name = vim.fn.fnamemodify(vim.fn.bufname(item.bufnr), ":.")
-    end
-    lines[#lines + 1] = ("%s:%d:%d: %s"):format(
-      name,
-      item.lnum,
-      item.col,
-      vim.trim(item.text)
-    )
-  end
-  return table.concat(lines, "\n")
-end
-
 -- The diagnostic under the cursor as "relpath:line: message", or "" if there is
 -- no diagnostic on the cursor line or the buffer has no file. When several
 -- diagnostics are on the line the one covering the cursor column is preferred.
@@ -49,6 +30,52 @@ local function diagnostic_line()
     chosen.lnum + 1,
     vim.trim(chosen.message)
   )
+end
+
+-- The web URL (e.g. GitHub) for the given line range of the current buffer on
+-- the current branch, or "" if the file is not inside a Git repository or has
+-- no path on disk. SSH/scp-style remotes are normalised to an https URL.
+local function git_url(sline, eline)
+  local abs = vim.fn.resolve(vim.fn.expand("%:p"))
+  if abs == "" then
+    return ""
+  end
+  local dir = vim.fn.fnamemodify(abs, ":h")
+
+  local function git(args)
+    local out =
+      vim.fn.system("git -C " .. vim.fn.shellescape(dir) .. " " .. args)
+    if vim.v.shell_error ~= 0 then
+      return ""
+    end
+    return vim.trim(out)
+  end
+
+  local root = vim.fn.resolve(git("rev-parse --show-toplevel"))
+  local remote = git("config --get remote.origin.url")
+  if root == "" or remote == "" then
+    return ""
+  end
+
+  remote = remote:gsub("%.git$", "")
+  remote = remote:gsub("^git@([^:]+):", "https://%1/")
+  remote = remote:gsub("^ssh://git@", "https://")
+
+  local branch = git("branch --show-current")
+  if branch == "" then
+    branch = git("rev-parse --short HEAD")
+  end
+  if branch == "" then
+    return ""
+  end
+
+  -- Path of the file relative to the repository root.
+  local relpath = abs:sub(#root + 2)
+  local url = ("%s/blob/%s/%s#L%d"):format(remote, branch, relpath, sline)
+  if eline ~= sline then
+    url = ("%s-L%d"):format(url, eline)
+  end
+  return url
 end
 
 -- Show the copy menu and write the chosen reference to the "+" register.
@@ -80,16 +107,11 @@ function M.menu()
   -- Ordered list of { label, value } pairs. "vim.ui.select" preserves this
   -- order, so entries appear as listed here rather than alphabetically.
   local entries = {
-    { "File", vim.fn.expand("%:t") },
-    { "File relative", abs ~= "" and (rel .. suffix) or "" },
-    { "File absolute", abs ~= "" and (abs .. suffix) or "" },
-    {
-      "Directory relative",
-      abs ~= "" and vim.fn.fnamemodify(abs, ":.:h") or "",
-    },
-    { "Directory absolute", abs ~= "" and vim.fn.expand("%:p:h") or "" },
+    { "Filename", vim.fn.expand("%:t") },
+    { "Relative Path", abs ~= "" and (rel .. suffix) or "" },
+    { "Absolute Path", abs ~= "" and (abs .. suffix) or "" },
+    { "Git Url", git_url(sline, eline) },
     { "Diagnostic", diagnostic_line() },
-    { "Quickfix list", quickfix_lines() },
   }
 
   local options = {}
