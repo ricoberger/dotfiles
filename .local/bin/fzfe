@@ -435,8 +435,6 @@ while true; do
     --info right \
     --nth "${name_field}.." \
     --prompt "󰥨 Search: " \
-    --pointer ">" \
-    --marker "󰄲" \
     --border "rounded" \
     --border-label " 󰥨 $(pwd)/ " \
     --border-label-pos center \

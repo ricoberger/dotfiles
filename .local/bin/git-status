@@ -70,8 +70,6 @@ eval "$git_unstaged_files" | fzf \
   --height 100% \
   --info right \
   --prompt "$prompt_add" \
-  --pointer ">" \
-  --marker "󰄲" \
   --border "rounded" \
   --border-label "  $(pwd)/ " \
   --border-label-pos center \

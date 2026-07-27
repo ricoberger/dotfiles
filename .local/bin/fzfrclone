@@ -556,8 +556,6 @@ while true; do
     --height 100% \
     --info right \
     --prompt "󰅟 Search: " \
-    --pointer ">" \
-    --marker "󰄲" \
     --border "rounded" \
     --border-label " 󰅟 $(location_label "$location") " \
     --border-label-pos center \

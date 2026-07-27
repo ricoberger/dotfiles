@@ -481,7 +481,6 @@ if [[ "$1" == "__browse" ]]; then
     --height 100% \
     --info right \
     --prompt "$ICON_VAULT $mount/${path:+$path/}: " \
-    --pointer ">" \
     --border "rounded" \
     --border-label " $ICON_VAULT $mount/$path (v$version) " \
     --border-label-pos center \
@@ -610,7 +609,6 @@ while true; do
     --height 100% \
     --info right \
     --prompt "$ICON_VAULT Mounts: " \
-    --pointer ">" \
     --border "rounded" \
     --border-label " $ICON_VAULT Mounts " \
     --border-label-pos center)"
