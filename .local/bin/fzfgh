@@ -39,7 +39,6 @@ FZFGH_ISSUE_DEFAULT_FILTERS=(
 ICON_PR=$'\xef\x90\x87'     # pull request
 ICON_ISSUE=$'\xef\x90\x9b'  # issue
 ICON_NOTIF=$'\xee\xa9\xb1'  # notification
-ICON_MARK=$'\xf3\xb0\x84\xb2'  # multi-select marker (matches fzfe)
 
 # ---------- Notifications source ----------
 #
@@ -887,12 +886,12 @@ if [[ "$1" == "__action" ]]; then
       owner="${repo%%/*}"
       name="${repo#*/}"
 
-      # Fetch the reviewer candidates in a single GraphQL query: the suggested
-      # reviewers (the "recommended reviewers" GitHub shows in the web UI, via
-      # git blame / involvement), the full list of assignable users, the PR
-      # author (excluded below) and the currently requested reviewers (tagged).
+      # Fetch the PR review context: the suggested reviewers (the "recommended
+      # reviewers" GitHub shows in the web UI, via git blame / involvement), the
+      # PR author (excluded below) and the currently requested reviewers
+      # (tagged). The full list of assignable users is fetched separately below.
       cand="$(gh api graphql \
-        -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){author{login} suggestedReviewers{isAuthor isCommenter reviewer{login name}} reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login}}}} } assignableUsers(first:100){nodes{login name}}}}' \
+        -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id author{login} suggestedReviewers{isAuthor isCommenter reviewer{id login name}} reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login}}}} }}}' \
         -F owner="$owner" -F name="$name" -F number="$number" 2>/dev/null)"
       if [[ -z "$cand" ]]; then
         echo "Could not fetch reviewer candidates for $repo#$number"
@@ -900,18 +899,41 @@ if [[ "$1" == "__action" ]]; then
         exit 0
       fi
 
-      # Rows: "<login>\t<display>". Suggested reviewers first (highlighted),
-      # then the remaining assignable users. The PR author is excluded; users
-      # with a pending request are tagged "(requested)". The display shows the
-      # login and, when set, the user's name (also searchable via --with-nth 2).
-      rows="$(printf '%s' "$cand" | jq -r '
+      # Fetch every assignable user (everyone who can be requested as a
+      # reviewer). assignableUsers is capped at 100 per page; paginate to
+      # collect the list, but stop after at most 5 pages (500 users) to bound
+      # the number of API calls.
+      assignable_pages=""
+      cursor=""
+      for _page in 1 2 3 4 5; do
+        gql_args=(-F owner="$owner" -F name="$name")
+        [[ -n "$cursor" ]] && gql_args+=(-F endCursor="$cursor")
+        assignable_page="$(gh api graphql \
+          -f query='query($owner:String!,$name:String!,$endCursor:String){repository(owner:$owner,name:$name){assignableUsers(first:100,after:$endCursor){nodes{id login name} pageInfo{hasNextPage endCursor}}}}' \
+          "${gql_args[@]}" 2>/dev/null)"
+        [[ -z "$assignable_page" ]] && break
+        assignable_pages="$assignable_pages$assignable_page"$'\n'
+        [[ "$(printf '%s' "$assignable_page" | jq -r '.data.repository.assignableUsers.pageInfo.hasNextPage')" != "true" ]] && break
+        cursor="$(printf '%s' "$assignable_page" | jq -r '.data.repository.assignableUsers.pageInfo.endCursor')"
+      done
+      assignable="$(printf '%s' "$assignable_pages" | jq -s -c '[ .[] | .data.repository.assignableUsers.nodes[]? ]')"
+      [[ -z "$assignable" ]] && assignable='[]'
+
+      # Rows: "<id>\t<display>". The hidden first field is the reviewer's
+      # node id (used for the requestReviews mutation below); GitHub's Copilot
+      # reviewer is a Bot whose id has a "BOT_" prefix, so we can't request it
+      # by login. Suggested reviewers first (highlighted), then the remaining
+      # assignable users. The PR author is excluded; users with a pending
+      # request are tagged "(requested)". The display shows the login and, when
+      # set, the user's name (also searchable via --with-nth 2).
+      rows="$(printf '%s' "$cand" | jq -r --argjson assignable "$assignable" '
         def color(c): {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c]//"37";
         .data.repository as $r
         | ($r.pullRequest.author.login // "") as $author
         | ([ $r.pullRequest.reviewRequests.nodes[]?
              | .requestedReviewer | select(.__typename == "User") | .login ]) as $requested
         | ([ $r.pullRequest.suggestedReviewers[]? | .reviewer.login ]) as $suggested
-        | ( [ $r.pullRequest.suggestedReviewers[]? | .reviewer ] + $r.assignableUsers.nodes )
+        | ( [ $r.pullRequest.suggestedReviewers[]? | .reviewer ] + $assignable )
           | map(select(.login != $author))
           | reduce .[] as $u ([]; if ((map(.login)) | index($u.login)) then . else . + [$u] end)
           | .[]
@@ -919,7 +941,7 @@ if [[ "$1" == "__action" ]]; then
         | ((.name // "") | gsub("[\t\n\r]"; " ")) as $name
         | ($suggested | index($login)) as $issug
         | ($requested | index($login)) as $isreq
-        | $login + "\t"
+        | .id + "\t"
           + (if $issug then "\u001b[" + color("mauve") + "m\uf4ff\u001b[0m " else "  " end)
           + "@" + $login
           + (if $name != "" then " \u001b[" + color("gray") + "m" + $name + "\u001b[0m" else "" end)
@@ -933,8 +955,8 @@ if [[ "$1" == "__action" ]]; then
         exit 0
       fi
 
-      # Multi-select the reviewers; the hidden first field is the login.
-      logins="$(printf '%s\n' "$rows" | fzf \
+      # Multi-select the reviewers; the hidden first field is the node id.
+      ids="$(printf '%s\n' "$rows" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
         --bind "alt-h:execute($SCRIPT --help | less -R)" \
@@ -947,16 +969,23 @@ if [[ "$1" == "__action" ]]; then
         --prompt "$ICON_PR Request review $repo#$number: " \
         --border-label " $ICON_PR Request review $repo#$number " \
         --border-label-pos center \
-        --marker "$ICON_MARK" \
         --border rounded \
         | cut -f1)"
-      [[ -z "$logins" ]] && exit 0
+      [[ -z "$ids" ]] && exit 0
 
-      # Join the selected logins into a comma-separated list.
-      reviewers="$(printf '%s' "$logins" | paste -sd, -)"
-      [[ -z "$reviewers" ]] && exit 0
+      # Split the selected node ids into user ids and bot ids (Copilot's
+      # reviewer is a Bot with a "BOT_" prefixed id) and request the reviews
+      # via GraphQL. gh's --add-reviewer resolves reviewers by login and can't
+      # request bot reviewers, so we call requestReviews with the node ids
+      # directly. union:true adds to the existing reviewers instead of
+      # replacing them.
+      pr_id="$(printf '%s' "$cand" | jq -r '.data.repository.pullRequest.id')"
+      user_ids="$(printf '%s\n' "$ids" | jq -R . \
+        | jq -s -c '[ .[] | select(length > 0 and (startswith("BOT_") | not)) ]')"
+      bot_ids="$(printf '%s\n' "$ids" | jq -R . \
+        | jq -s -c '[ .[] | select(length > 0 and startswith("BOT_")) ]')"
 
-      if ! gh pr edit "$number" --repo "$repo" --add-reviewer "$reviewers"; then
+      if ! gh api graphql -f query="mutation{requestReviews(input:{pullRequestId:\"$pr_id\",userIds:$user_ids,botIds:$bot_ids,union:true}){pullRequest{id}}}" >/dev/null; then
         read -n 1 -s -r -p "Press any key to continue..."
       fi
       ;;
@@ -1308,7 +1337,6 @@ if [[ "$1" == "__checks" ]]; then
     --height 100% \
     --info right \
     --prompt "$ICON_PR Checks $repo#$number: " \
-    --pointer ">" \
     --border rounded \
     --border-label " $ICON_PR Checks $repo#$number " \
     --border-label-pos center \
@@ -1696,7 +1724,6 @@ if [[ "$1" == "__diff" ]]; then
     --height 100% \
     --info right \
     --prompt "$ICON_PR Diff $repo#$number: " \
-    --pointer ">" \
     --border rounded \
     --border-label " $ICON_PR Diff $repo#$number " \
     --border-label-pos center \
@@ -1851,7 +1878,6 @@ run_prs() {
     --height 100% \
     --info right \
     --prompt "$ICON_PR Pull Requests: " \
-    --pointer ">" \
     --border rounded \
     --border-label " $ICON_PR ${query#__repo } " \
     --border-label-pos center \
@@ -1912,8 +1938,6 @@ run_notifications() {
     --height 100% \
     --info right \
     --prompt "$ICON_NOTIF Notifications: " \
-    --pointer ">" \
-    --marker "$ICON_MARK" \
     --border rounded \
     --border-label " $ICON_NOTIF Notifications " \
     --border-label-pos center \
@@ -1960,7 +1984,6 @@ run_issues() {
     --height 100% \
     --info right \
     --prompt "$ICON_ISSUE Issues: " \
-    --pointer ">" \
     --border rounded \
     --border-label " $ICON_ISSUE ${query#__repo } " \
     --border-label-pos center \
