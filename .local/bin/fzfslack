@@ -1,0 +1,1413 @@
+#!/usr/bin/env bash
+
+# fzfslack - Fuzzy Finder for Slack
+#
+# Usage: fzfslack [search [query]]
+
+SCRIPT="$(realpath "$0")"
+
+# ---------- Configuration ----------
+
+# Base URL of the workspace (https://<team>.slack.com) and the two browser
+# tokens. All three come from .zshsecrets and are inherited (exported) by the
+# fzf child preview / action processes.
+FZFSLACK_WORKSPACE_URL="${FZFSLACK_WORKSPACE_URL:-}"
+FZFSLACK_XOXC="${FZFSLACK_XOXC:-}"
+FZFSLACK_XOXD="${FZFSLACK_XOXD:-}"
+FZFSLACK_API_BASE="${FZFSLACK_WORKSPACE_URL%/}/api"
+
+# Seconds between automatic refreshes of the conversation list (override via
+# FZFSLACK_REFRESH_INTERVAL). Number of messages / replies / search results to
+# fetch and the number of messages shown in the conversation preview.
+FZFSLACK_REFRESH_INTERVAL="${FZFSLACK_REFRESH_INTERVAL:-60}"
+FZFSLACK_HISTORY_LIMIT="${FZFSLACK_HISTORY_LIMIT:-50}"
+FZFSLACK_PREVIEW_LIMIT="${FZFSLACK_PREVIEW_LIMIT:-15}"
+FZFSLACK_SEARCH_COUNT="${FZFSLACK_SEARCH_COUNT:-40}"
+
+# Per-run cache directory (raw JSON, user-name cache, team id). A stable path
+# exported to the fzf child processes. Set up in main().
+FZFSLACK_CACHE_DIR="${FZFSLACK_CACHE_DIR:-}"
+# Team id used for slack:// deep links. Exported once resolved.
+FZFSLACK_TEAM="${FZFSLACK_TEAM:-}"
+
+# Nerd font glyphs used in bash-side prompts / labels. Defined via byte escapes
+# so they do not depend on a bash that supports the \u / \U printf escapes.
+ICON_SLACK=$'\xef\x86\x98'    # slack
+ICON_CHANNEL='#'              # public channel
+ICON_PRIVATE=$'\xef\x80\xa3'  # lock (private channel)
+ICON_DM=$'\xef\x80\x87'       # user (direct message)
+ICON_GROUP=$'\xef\x83\x80'    # users (group DM)
+ICON_THREAD=$'\xef\x81\xb5'   # comment (thread)
+ICON_REACT=$'\xef\x80\x84'    # heart (reactions)
+ICON_UNREAD=$'\xe2\x97\x8f'   # bullet (unread)
+ICON_SEARCH=$'\xef\x80\x82'   # magnifier
+ICON_FILE=$'\xef\x83\x86'     # paperclip (files)
+ICON_AT=$'\xef\x87\xba'       # at-sign (mention)
+ICON_BELL=$'\xef\x83\xb3'     # bell (system / invite)
+ICON_ACTIVITY=$'\xf3\xb0\x9a\x88'  # pulse (activity)
+
+# ANSI colours (fzf --ansi interprets them; md ignores them in previews).
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_RED=$'\033[31m'
+C_GREEN=$'\033[32m'
+C_YELLOW=$'\033[33m'
+C_BLUE=$'\033[34m'
+C_MAGENTA=$'\033[35m'
+C_CYAN=$'\033[36m'
+
+# ---------- Local timezone offset (seconds) ----------
+# Used to render Slack ts (epoch seconds) as local wall-clock time via jq's
+# gmtime, which formats UTC. Adding the offset makes gmtime show local time.
+tz="$(date +%z)"
+tz_sign="${tz:0:1}"
+tz_off=$(( 10#${tz:1:2} * 3600 + 10#${tz:3:2} * 60 ))
+[[ "$tz_sign" == "-" ]] && tz_off=$(( -tz_off ))
+
+# ---------- jq helper library ----------
+# Shared jq definitions: humanise Slack message text (decode <...> entities,
+# resolve @user / #channel mentions via a supplied {id:name} map, translate
+# mrkdwn to Markdown) and format ts as local time. $map / $off / $now are passed
+# as jq --argjson globals and are therefore visible inside these defs.
+read -r -d '' JQLIB <<'JQEOF'
+def decode:
+  gsub("<@(?<id>[UW][A-Z0-9]+)\\|(?<l>[^>]*)>"; "@\(.l)")
+  | gsub("<#(?<id>[CG][A-Z0-9]+)\\|(?<l>[^>]*)>"; "#\(.l)")
+  | gsub("<!subteam\\^(?<id>[A-Z0-9]+)\\|(?<l>[^>]*)>"; "\(.l)")
+  | gsub("<!(?<s>here|channel|everyone)>"; "@\(.s)")
+  | gsub("<!date\\^(?<e>[0-9]+)\\^(?<f>[^>|]*)(\\|(?<fb>[^>]*))?>"; "\(.f)")
+  | gsub("<(?<u>mailto:[^|>]+)\\|(?<l>[^>]*)>"; "\(.l)")
+  | gsub("<(?<u>https?://[^|>]+)\\|(?<l>[^>]*)>"; "[\(.l)](\(.u))")
+  | gsub("<(?<u>https?://[^>]+)>"; "\(.u)")
+  | . as $t
+  | reduce ($map | to_entries[]) as $e ($t; gsub("<@" + ($e.key) + ">"; "@" + ($e.value)))
+  | gsub("<@(?<id>[UW][A-Z0-9]+)>"; "@\(.id)")
+  | gsub("<#(?<id>[CG][A-Z0-9]+)>"; "#channel")
+  | gsub("&lt;"; "<") | gsub("&gt;"; ">") | gsub("&amp;"; "&");
+def mrkdwn:
+  gsub("\\*(?<x>[^*\n]+)\\*"; "**\(.x)**")
+  | gsub("(?<b>^|[^`_\\w])_(?<x>[^_\n]+)_(?<a>[^`_\\w]|$)"; "\(.b)*\(.x)*\(.a)");
+def listify:
+  # Slack uses literal bullet glyphs (•, ▪, ◦) with a single newline between
+  # items, which CommonMark neither treats as a list nor keeps on separate
+  # lines. Turn them into Markdown list markers (◦ -> nested) so they render as
+  # a real list.
+  gsub("(?<pre>^|\n)(?<sp>[ ]*)[•▪][ ]?"; "\(.pre)\(.sp)- ")
+  | gsub("(?<pre>^|\n)(?<sp>[ ]*)◦[ ]?"; "\(.pre)\(.sp)  - ");
+def render_body:
+  # Split on ``` fences: even segments are outside code (translate mrkdwn),
+  # odd segments are code (emit as a self-closed fenced block on its own lines).
+  # This renders Slack code blocks correctly and stops an unbalanced / inline
+  # fence from leaking into the following messages.
+  ([splits("```")]) as $p
+  | reduce range(0; ($p | length)) as $i ("";
+      if ($i % 2) == 0
+      then . + ($p[$i] | listify | mrkdwn)
+      else . + "\n\n```\n" + ($p[$i] | gsub("^\n+"; "") | gsub("\n+$"; "")) + "\n```\n\n"
+      end)
+  | gsub("\n{3,}"; "\n\n");
+def strip_links:
+  gsub("\\[(?<l>[^\\]]*)\\]\\((?<u>[^)]*)\\)"; "\(.l)");
+def oneline:
+  gsub("```"; " ") | gsub("[\r\n]+"; " ") | gsub("  +"; " ");
+def local_ts(t):
+  ((t | tonumber) + $off);
+def fmt_short(t):
+  local_ts(t) as $lt
+  | (($now + $off)) as $ln
+  | (if (($lt / 86400) | floor) == (($ln / 86400) | floor)
+     then ($lt | gmtime | strftime("%H:%M"))
+     else ($lt | gmtime | strftime("%b %e")) end);
+def fmt_full(t):
+  local_ts(t) | gmtime | strftime("%Y-%m-%d %H:%M");
+def author($m):
+  ($map[($m.user // "")] // $m.username // $m.bot_profile.name // "unknown");
+def reaction_total($m):
+  (($m.reactions // []) | map(.count) | add) // 0;
+def rt_inline:
+  if .type == "text" then (.text // "")
+  elif .type == "link" then (if (.text // "") != "" then "<" + (.url // "") + "|" + .text + ">" else (.url // "") end)
+  elif .type == "emoji" then (":" + (.name // "") + ":")
+  elif .type == "user" then ("<@" + (.user_id // "") + ">")
+  elif .type == "channel" then ("<#" + (.channel_id // "") + ">")
+  elif (.elements // null) != null then ((.elements | map(rt_inline)) | join(""))
+  else (.text // "") end;
+def richtext:
+  (.elements // []) | map(
+    if .type == "rich_text_section" then ((.elements // []) | map(rt_inline) | join(""))
+    elif .type == "rich_text_list" then ((.elements // []) | map("- " + ((.elements // []) | map(rt_inline) | join(""))) | join("\n"))
+    elif .type == "rich_text_quote" then ("> " + ((.elements // []) | map(rt_inline) | join("")))
+    elif .type == "rich_text_preformatted" then ("```\n" + ((.elements // []) | map(rt_inline) | join("")) + "\n```")
+    else ((.elements // []) | map(rt_inline) | join("")) end
+  ) | join("\n");
+def blocktext:
+  [ .blocks[]?
+    | if .type == "header" then (.text.text // "")
+      elif .type == "section" then
+        ((.text.text // "")
+         + (if (.fields // []) | length > 0 then "\n\n" + ((.fields | map(.text // "")) | join("\n\n")) else "" end))
+      elif .type == "context" then
+        (((.elements // []) | map(.text // .alt_text // "") | map(select(. != "")) | join("\n")) | gsub("\n"; "\n\n"))
+      elif .type == "rich_text" then richtext
+      elif .type == "actions" then
+        ((.elements // []) | map(
+           ((.text.text // .text // "button")) as $lbl
+           | if (.url // "") != "" then "[" + $lbl + "](" + .url + ")" else "[" + $lbl + "]" end)
+         | join("   "))
+      elif .type == "divider" then "---"
+      else "" end ]
+  | map(select(. != "")) | join("\n\n");
+def allfiles:
+  ((.files // [])
+   + [ .blocks[]?
+       | select(.type == "image" and ((.image_url // "") != "" or (.slack_file.id // "") != ""))
+       | (.image_url // "") as $u
+       | (if ($u | ascii_downcase | test("\\.jpe?g([?].*)?$")) then "jpg"
+          elif ($u | ascii_downcase | test("\\.gif([?].*)?$")) then "gif"
+          elif ($u | ascii_downcase | test("\\.webp([?].*)?$")) then "webp"
+          elif ($u | ascii_downcase | test("\\.mp4([?].*)?$")) then "mp4"
+          else "png" end) as $ext
+       | (.alt_text // "image") as $alt
+       | { id: (.slack_file.id // .file_id // ""),
+           name: (if ($alt | test("\\.[a-zA-Z0-9]{2,5}$")) then $alt else ($alt + "." + $ext) end),
+           title: $alt,
+           pretty_type: "image",
+           filetype: $ext,
+           mimetype: ("image/" + $ext),
+           size: (.image_bytes // 0),
+           url_private: $u,
+           permalink: "",
+           mode: "hosted",
+           is_external: false } ]);
+def msgtext:
+  ([.blocks[]? | select(.type == "section" or .type == "header" or .type == "context" or .type == "actions")] | length) as $nblk
+  | if $nblk > 0 then blocktext
+    elif (.text // "") != "" then .text
+    else
+      (((.attachments // [])
+        | map(. as $a
+            | ([$a.pretext, $a.title, $a.text] | map(. // "") | map(select(. != "")) | join("\n")) as $j
+            | (if $j != "" then $j else ($a.fallback // "") end))
+        | map(select(. != "")) | join("\n\n")) as $att
+       | if $att != "" then $att
+         else (((allfiles) | map(($i_file + " " + (.name // .title // "file"))) | join("\n")) as $f
+               | if $f != "" then $f else "" end)
+         end)
+    end;
+JQEOF
+
+# ---------- Helpers ----------
+
+# Call a Slack Web API method. Extra args are forwarded to curl (typically
+# --data-urlencode "key=value"). Auth is the xoxc token as the "token" form
+# field and the xoxd cookie. Prints the raw JSON body.
+api() {
+  local method="$1"
+  shift
+  curl -s --max-time 15 "$FZFSLACK_API_BASE/$method" \
+    -H "Cookie: d=$FZFSLACK_XOXD" \
+    --data-urlencode "token=$FZFSLACK_XOXC" \
+    "$@"
+}
+
+# Render markdown read from stdin with md, falling back to the raw markdown when
+# md is not installed. md emits colour for a non-TTY stdout, so it works in the
+# fzf preview without forcing a profile or a tty. When FZFSLACK_RAW is set the
+# raw Markdown is emitted unchanged (used by the "view in nvim" action).
+md_render() {
+  if [[ -n "$FZFSLACK_RAW" ]]; then
+    cat
+  elif command -v md >/dev/null 2>&1; then
+    MD_WORD_WRAP="${FZF_PREVIEW_COLUMNS:-80}" md
+  else
+    cat
+  fi
+}
+
+# Print a status message and wait for a keypress. Used by action handlers that
+# run on fzf's alternate screen so a transient message is seen before fzf
+# redraws the list.
+pause_msg() {
+  printf '%s\n' "$1"
+  read -n 1 -s -r -p "Press any key to continue..."
+  echo
+}
+
+# Resolve a user id to a display name (display_name, else real_name, else the
+# handle). Cached under $FZFSLACK_CACHE_DIR/users/<id> so repeated lookups in
+# previews / rows do not re-hit the API.
+resolve_user() {
+  local id="$1" f name
+  [[ -z "$id" ]] && { printf 'unknown'; return; }
+  f="$FZFSLACK_CACHE_DIR/users/$id"
+  if [[ -f "$f" ]]; then
+    cat "$f"
+    return
+  fi
+  name="$(api users.info --data-urlencode "user=$id" | jq -r '
+    if .ok then
+      (.user.profile.display_name // "") as $d
+      | (if $d == "" then (.user.profile.real_name // .user.real_name // .user.name // "") else $d end)
+    else "" end')"
+  [[ -z "$name" ]] && name="$id"
+  mkdir -p "$FZFSLACK_CACHE_DIR/users"
+  printf '%s' "$name" > "$f"
+  printf '%s' "$name"
+}
+
+# Build a compact {id:name} JSON map for the newline-separated user ids on
+# stdin, resolving each (cached). Echoed to stdout for use as a jq --argjson.
+build_user_map() {
+  local id nm map='{}'
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    nm="$(resolve_user "$id")"
+    map="$(jq -c --arg id "$id" --arg nm "$nm" '. + {($id): $nm}' <<<"$map")"
+  done
+  printf '%s' "$map"
+}
+
+# Resolve a conversation id to a display label ("#name" for channels, "@user"
+# for DMs). Cached under $FZFSLACK_CACHE_DIR/chan/<id>. Used by the activity list
+# to name each item's location without a per-item message fetch.
+resolve_channel() {
+  local id="$1" f label info
+  [[ -z "$id" ]] && { printf 'unknown'; return; }
+  f="$FZFSLACK_CACHE_DIR/chan/$id"
+  if [[ -f "$f" ]]; then
+    cat "$f"
+    return
+  fi
+  info="$(api conversations.info --data-urlencode "channel=$id")"
+  if [[ "$(jq -r '.ok' <<<"$info" 2>/dev/null)" == "true" ]]; then
+    if [[ "$(jq -r '.channel.is_im // false' <<<"$info")" == "true" ]]; then
+      label="@$(resolve_user "$(jq -r '.channel.user // ""' <<<"$info")")"
+    elif [[ "$(jq -r '.channel.is_mpim // false' <<<"$info")" == "true" ]]; then
+      label="$(jq -r '.channel.name // "group" | ltrimstr("mpdm-") | sub("-1$"; "") | gsub("--"; ", ")' <<<"$info")"
+    else
+      label="#$(jq -r '.channel.name // ""' <<<"$info")"
+    fi
+  fi
+  [[ -z "$label" || "$label" == "#" || "$label" == "@" ]] && label="$id"
+  mkdir -p "$FZFSLACK_CACHE_DIR/chan"
+  printf '%s' "$label" > "$f"
+  printf '%s' "$label"
+}
+
+# Build a compact {id:label} JSON map for the newline-separated conversation ids
+# on stdin (cached). Echoed to stdout for use as a jq --argjson.
+build_channel_map() {
+  local id lbl map='{}'
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    lbl="$(resolve_channel "$id")"
+    map="$(jq -c --arg id "$id" --arg lbl "$lbl" '. + {($id): $lbl}' <<<"$map")"
+  done
+  printf '%s' "$map"
+}
+
+# Common jq --arg/--argjson bundle passed to the row / preview builders so the
+# JQLIB defs and the programs can reference colours, icons and the time context.
+jq_args() {
+  jq \
+    --argjson off "$tz_off" \
+    --argjson now "$(date +%s)" \
+    --arg reset "$C_RESET" --arg dim "$C_DIM" --arg bold "$C_BOLD" \
+    --arg red "$C_RED" --arg green "$C_GREEN" --arg yellow "$C_YELLOW" \
+    --arg blue "$C_BLUE" --arg magenta "$C_MAGENTA" --arg cyan "$C_CYAN" \
+    --arg i_thread "$ICON_THREAD" --arg i_react "$ICON_REACT" \
+    --arg i_unread "$ICON_UNREAD" --arg i_file "$ICON_FILE" \
+    --arg i_at "$ICON_AT" --arg i_bell "$ICON_BELL" \
+    "$@"
+}
+
+# last_read ts for a conversation, read from the cached client.counts response
+# ($FZFSLACK_CACHE_DIR/counts.json). Prints 0 when unknown.
+conv_last_read() {
+  local id="$1" f="$FZFSLACK_CACHE_DIR/counts.json"
+  [[ -f "$f" ]] || { printf '0'; return; }
+  jq -r --arg id "$id" '
+    ((.channels // []) + (.ims // []) + (.mpims // []))
+    | map(select(.id == $id)) | (.[0].last_read // "0")' "$f" 2>/dev/null
+}
+
+# ---------- Sub-command: __list-conversations ----------
+# Emits TAB-separated rows: <type>\t<id>\t<name>\t<display>
+#   type    : channel | private | im | mpim
+#   id      : conversation id (used by history / actions)
+#   name    : plain title (used for the border label)
+#   display : coloured "icon title  badges" shown via --with-nth 4
+if [[ "$1" == "__list-conversations" ]]; then
+  # The set of conversations to show is the active sidebar reported by
+  # client.counts (channels, group DMs, DMs I actually track), each carrying
+  # latest ts / unread / mention state.
+  counts="$(api client.counts 2>/dev/null)"
+  [[ "$(jq -r '.ok' <<<"$counts" 2>/dev/null)" == "true" ]] || counts='{}'
+  [[ -n "$FZFSLACK_CACHE_DIR" ]] && printf '%s' "$counts" > "$FZFSLACK_CACHE_DIR/counts.json"
+
+  # Names / types come from the conversations the user is a member of. Using
+  # users.conversations (not conversations.list) avoids enumerating every public
+  # channel in the workspace. Paginated, with a small backoff on rate limiting.
+  lookup='{}'
+  cursor=""
+  tries=0
+  while :; do
+    page="$(api users.conversations \
+      --data-urlencode "types=public_channel,private_channel,mpim,im" \
+      --data-urlencode "exclude_archived=true" \
+      --data-urlencode "limit=200" \
+      --data-urlencode "cursor=$cursor")"
+    # Retry transient empties / rate limits so a partial list does not silently
+    # drop conversations (the DMs are only returned on later pages).
+    if [[ -z "$page" || "$(jq -r '.error // ""' <<<"$page" 2>/dev/null)" == "ratelimited" ]]; then
+      if [[ $tries -lt 8 ]]; then
+        tries=$((tries + 1))
+        sleep 3
+        continue
+      fi
+    fi
+    [[ "$(jq -r '.ok' <<<"$page" 2>/dev/null)" == "true" ]] || break
+    lookup="$(jq -c --argjson acc "$lookup" '
+      $acc + (reduce (.channels // [])[] as $c ({};
+        . + {($c.id): {name: ($c.name // ""), user: ($c.user // ""),
+                       is_im: ($c.is_im // false), is_mpim: ($c.is_mpim // false),
+                       is_private: ($c.is_private // false)}}))' <<<"$page")"
+    [[ -n "$lookup" ]] || lookup='{}'
+    cursor="$(jq -r '.response_metadata.next_cursor // ""' <<<"$page")"
+    [[ -z "$cursor" ]] && break
+  done
+
+  # Tag each sidebar entry with its type (from which counts array it came).
+  set="$(jq -c '
+    ((.channels // []) | map(. + {t: "channel"}))
+    + ((.ims // []) | map(. + {t: "im"}))
+    + ((.mpims // []) | map(. + {t: "mpim"}))' <<<"$counts")"
+  [[ -n "$set" ]] || set='[]'
+
+  # Fill in any sidebar ids missing from the lookup via conversations.info
+  # (e.g. a DM whose page was not reached). Skipped on a bad / rate-limited
+  # response so an empty body is never fed to --argjson.
+  for id in $(jq -r --argjson lk "$lookup" '.[] | select((.id | in($lk)) | not) | .id' <<<"$set"); do
+    info="$(api conversations.info --data-urlencode "channel=$id")"
+    [[ "$(jq -r '.ok' <<<"$info" 2>/dev/null)" == "true" ]] || continue
+    lookup="$(jq -cn --argjson acc "$lookup" --arg id "$id" --argjson info "$info" '
+      ($info.channel // {}) as $c
+      | $acc + {$id: {name: ($c.name // ""), user: ($c.user // ""),
+          is_im: ($c.is_im // false), is_mpim: ($c.is_mpim // false),
+          is_private: ($c.is_private // false)}}')"
+    [[ -n "$lookup" ]] || lookup='{}'
+  done
+
+  # DM titles need the other user's name; resolve the im "user" ids up front.
+  ids="$(jq -r --argjson lk "$lookup" '.[] | select(.t == "im") | ($lk[.id].user // empty)' <<<"$set" | sort -u)"
+  map="$(printf '%s\n' "$ids" | build_user_map)"
+  [[ -n "$map" ]] || map='{}'
+  [[ -n "$lookup" ]] || lookup='{}'
+
+  # Persist channel metadata (id -> {name,...}) for #channel decoding.
+  [[ -n "$FZFSLACK_CACHE_DIR" ]] && printf '%s' "$lookup" > "$FZFSLACK_CACHE_DIR/channels.json"
+
+  jq_args -r \
+    --argjson lookup "$lookup" \
+    --argjson map "$map" \
+    --arg i_channel "$ICON_CHANNEL" --arg i_private "$ICON_PRIVATE" \
+    --arg i_dm "$ICON_DM" --arg i_group "$ICON_GROUP" \
+    "$JQLIB"'
+    map(
+        . as $c
+        | ($lookup[$c.id] // {}) as $lk
+        | $c.t as $type
+        | (if $type == "im" then ($map[($lk.user // "")] // "direct message")
+           elif $type == "mpim" then (($lk.name // "") | ltrimstr("mpdm-") | sub("-1$"; "") | gsub("--"; ", "))
+           else (($lk.name // "") | if . == "" then $c.id else . end) end) as $title
+        | (if $type == "im" then $i_dm
+           elif $type == "mpim" then $i_group
+           elif ($lk.is_private // false) then $i_private
+           else $i_channel end) as $icon
+        | (($c.latest // "0") | tonumber) as $latest
+        | ($c.has_unreads // false) as $unread
+        | (($c.mention_count // 0)) as $mentions
+        | {type: $type, id: $c.id, title: $title, icon: $icon,
+           latest: $latest, unread: $unread, mentions: $mentions}
+      )
+    | sort_by(-.latest)
+    | .[]
+    | (if .unread then ($red + $i_unread + $reset + " ") else "  " end) as $mark
+    | (if .mentions > 0 then ("  " + $yellow + "@" + (.mentions | tostring) + $reset) else "" end) as $mbadge
+    | (if .unread then $bold else "" end) as $emph
+    | [ .type, .id, .title,
+        ($mark + $emph + .icon + " " + .title + $reset + $mbadge) ]
+    | @tsv' <<<"$set"
+  exit 0
+fi
+
+# ---------- Sub-command: __preview-conversation ----------
+# Renders the most recent messages of a conversation as Markdown (chronological).
+if [[ "$1" == "__preview-conversation" ]]; then
+  channel="$2"
+  hist="$(api conversations.history \
+    --data-urlencode "channel=$channel" \
+    --data-urlencode "limit=$FZFSLACK_PREVIEW_LIMIT")"
+  if [[ "$(jq -r '.ok' <<<"$hist")" != "true" ]]; then
+    printf '# Preview unavailable\n\n%s\n' "$(jq -r '.error // "error"' <<<"$hist")" | md_render
+    exit 0
+  fi
+  ids="$( { jq -r '.messages[]?.user // empty' <<<"$hist"; jq -r '.messages[]? | ((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$hist"; } | sort -u)"
+  map="$(printf '%s\n' "$ids" | build_user_map)"
+  jq_args -r --argjson map "$map" "$JQLIB"'
+    [.messages[] | select(.subtype == null or .subtype == "thread_broadcast" or (msgtext) != "")]
+    | map(
+        "# " + author(.) + " · " + fmt_full(.ts) + "\n\n"
+        + ((msgtext) | decode | render_body)
+        + (if ((.text // "") != "" or ((.attachments // []) | length) > 0 or ([.blocks[]? | select(.type == "section" or .type == "header" or .type == "context" or .type == "actions")] | length) > 0) then ((allfiles) | if length > 0 then "\n\n" + (map($i_file + " " + (.name // .title // "file")) | join("\n")) else "" end) else "" end)
+        + ((.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)
+        + (if (.reply_count // 0) > 0 then "\n\n> " + ((.reply_count | tostring)) + " replies" else "" end)
+      )
+    | join("\n\n---\n\n")' <<<"$hist" | md_render
+  exit 0
+fi
+
+# ---------- Sub-command: __list-messages ----------
+# Emits TAB-separated rows: <ts>\t<channel>\t<thread_root>\t<display>
+# thread_root is thread_ts when set, else ts (used to open the thread view).
+# Caches the raw history JSON so the message preview needs no extra API call.
+if [[ "$1" == "__list-messages" ]]; then
+  channel="$2"
+  hist="$(api conversations.history \
+    --data-urlencode "channel=$channel" \
+    --data-urlencode "limit=$FZFSLACK_HISTORY_LIMIT")"
+  if [[ "$(jq -r '.ok' <<<"$hist")" != "true" ]]; then
+    echo "Could not load messages: $(jq -r '.error // "error"' <<<"$hist")" >&2
+    exit 1
+  fi
+  [[ -n "$FZFSLACK_CACHE_DIR" ]] && printf '%s' "$hist" > "$FZFSLACK_CACHE_DIR/history-$channel.json"
+  last_read="$(conv_last_read "$channel")"
+  [[ -n "$last_read" ]] || last_read=0
+  ids="$(jq -r '.messages[]?.user // empty' <<<"$hist" | sort -u)"
+  map="$(printf '%s\n' "$ids" | build_user_map)"
+  jq_args -r \
+    --argjson map "$map" \
+    --arg ch "$channel" \
+    --arg last_read "$last_read" \
+    "$JQLIB"'
+    .messages[]
+    | . as $m
+    | (if (.thread_ts // "") == "" then .ts else .thread_ts end) as $root
+    | (if ((.ts | tonumber) > ($last_read | tonumber)) then ($red + $i_unread + $reset) else " " end) as $mark
+    | (($m | msgtext) | decode | strip_links | oneline) as $txt
+    | (if (.reply_count // 0) > 0 then ($blue + $i_thread + " " + ((.reply_count) | tostring) + $reset) else "" end) as $thr
+    | reaction_total($m) as $rc
+    | (if $rc > 0 then ($magenta + $i_react + " " + ($rc | tostring) + $reset) else "" end) as $rct
+    | ([$thr, $rct] | map(select(. != "")) | join(" ")) as $badges
+    | [ .ts, $ch, $root,
+        ($mark + " " + $dim + fmt_full(.ts) + $reset + " · " + $cyan + author($m) + $reset
+         + (if $badges != "" then " · " + $badges else "" end) + " · " + $txt) ]
+    | @tsv' <<<"$hist"
+  exit 0
+fi
+
+# ---------- Sub-command: __preview-message ----------
+# Renders the highlighted message. When the message is a thread it fetches and
+# renders the whole thread (parent + replies) inline; otherwise it renders the
+# single message from the cached history JSON.
+if [[ "$1" == "__preview-message" ]]; then
+  channel="$2"
+  ts="$3"
+  cache="$FZFSLACK_CACHE_DIR/history-$channel.json"
+  [[ -f "$cache" ]] || { echo "No message data." | md_render; exit 0; }
+  msg="$(jq -c --arg ts "$ts" '.messages[] | select(.ts == $ts)' "$cache")"
+  [[ -z "$msg" ]] && { echo "Message not found." | md_render; exit 0; }
+  reply_count="$(jq -r '.reply_count // 0' <<<"$msg")"
+  root="$(jq -r '.thread_ts // .ts' <<<"$msg")"
+
+  thread=""
+  if [[ "$reply_count" =~ ^[0-9]+$ && "$reply_count" -gt 0 ]]; then
+    resp="$(api conversations.replies \
+      --data-urlencode "channel=$channel" \
+      --data-urlencode "ts=$root" \
+      --data-urlencode "limit=200")"
+    [[ "$(jq -r '.ok' <<<"$resp" 2>/dev/null)" == "true" ]] && thread="$resp"
+  fi
+
+  if [[ -n "$thread" ]]; then
+    # Render the whole thread (parent first, replies oldest-first).
+    ids="$( { jq -r '.messages[]?.user // empty' <<<"$thread"; jq -r '.messages[]? | ((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$thread"; } | sort -u)"
+    map="$(printf '%s\n' "$ids" | build_user_map)"
+    jq_args -r --argjson map "$map" "$JQLIB"'
+      [.messages[]]
+      | map(
+          "# " + author(.) + " · " + fmt_full(.ts) + "\n\n"
+          + ((msgtext) | decode | render_body)
+          + (if ((.text // "") != "" or ((.attachments // []) | length) > 0 or ([.blocks[]? | select(.type == "section" or .type == "header" or .type == "context" or .type == "actions")] | length) > 0) then ((allfiles) | if length > 0 then "\n\n" + (map($i_file + " " + (.name // .title // "file")) | join("\n")) else "" end) else "" end)
+          + ((.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)
+        )
+      | join("\n\n---\n\n")' <<<"$thread" | md_render
+    exit 0
+  fi
+
+  ids="$( { jq -r '.user // empty' <<<"$msg"; jq -r '((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$msg"; } | sort -u)"
+  map="$(printf '%s\n' "$ids" | sort -u | build_user_map)"
+  jq_args -r --argjson map "$map" "$JQLIB"'
+    . as $m
+    | "# " + author($m) + " · " + fmt_full(.ts) + "\n\n"
+    + ((msgtext) | decode | render_body)
+    + (if (($m.text // "") != "" or (($m.attachments // []) | length) > 0 or ([$m.blocks[]? | select(.type == "section" or .type == "header" or .type == "context" or .type == "actions")] | length) > 0) then (($m | allfiles) | if length > 0 then "\n\n" + (map($i_file + " " + (.name // .title // "file")) | join("\n")) else "" end) else "" end)
+    + (($m.reactions // []) | if length > 0 then "\n\n---\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)' \
+    <<<"$msg" | md_render
+  exit 0
+fi
+
+# ---------- Sub-command: __list-search ----------
+# Emits TAB-separated rows: <channel>\t<ts>\t<thread_root>\t<permalink>\t<display>
+if [[ "$1" == "__list-search" ]]; then
+  query="${2:-$FZFSLACK_SEARCH_QUERY}"
+  res="$(api search.messages \
+    --data-urlencode "query=$query" \
+    --data-urlencode "count=$FZFSLACK_SEARCH_COUNT" \
+    --data-urlencode "sort=timestamp")"
+  if [[ "$(jq -r '.ok' <<<"$res")" != "true" ]]; then
+    echo "Search failed: $(jq -r '.error // "error"' <<<"$res")" >&2
+    exit 1
+  fi
+  [[ -n "$FZFSLACK_CACHE_DIR" ]] && printf '%s' "$res" > "$FZFSLACK_CACHE_DIR/search.json"
+  ids="$(jq -r '.messages.matches[]?.user // empty' <<<"$res" | sort -u)"
+  map="$(printf '%s\n' "$ids" | build_user_map)"
+  jq_args -r --argjson map "$map" "$JQLIB"'
+    .messages.matches[]?
+    | . as $m
+    | (.channel.id // "") as $ch
+    | (if (.thread_ts // "") == "" then .ts else .thread_ts end) as $root
+    | ("#" + (.channel.name // "?")) as $cname
+    | (($m | msgtext) | decode | strip_links | oneline) as $txt
+    | [ $ch, .ts, $root, (.permalink // ""),
+        ($dim + fmt_full(.ts) + $reset + " · " + $green + $cname + $reset + " · " + $cyan + author($m) + $reset + " · " + $txt) ]
+    | @tsv' <<<"$res"
+  exit 0
+fi
+
+# ---------- Sub-command: __preview-search ----------
+if [[ "$1" == "__preview-search" ]]; then
+  channel="$2"
+  ts="$3"
+  # Prefer the cached search result (correct even for thread replies, which are
+  # not in conversations.history); fall back to fetching the single message.
+  cache="$FZFSLACK_CACHE_DIR/search.json"
+  msg=""
+  [[ -f "$cache" ]] && msg="$(jq -c --arg ts "$ts" '.messages.matches[]? | select(.ts == $ts)' "$cache")"
+  if [[ -z "$msg" ]]; then
+    hist="$(api conversations.history \
+      --data-urlencode "channel=$channel" \
+      --data-urlencode "latest=$ts" \
+      --data-urlencode "inclusive=true" \
+      --data-urlencode "limit=1")"
+    msg="$(jq -c '.messages[0] // empty' <<<"$hist")"
+  fi
+  [[ -z "$msg" ]] && { echo "Message not available." | md_render; exit 0; }
+  ids="$( { jq -r '.user // empty' <<<"$msg"; jq -r '((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$msg"; } | sort -u)"
+  map="$(printf '%s\n' "$ids" | sort -u | build_user_map)"
+  jq_args -r --argjson map "$map" "$JQLIB"'
+    . as $m
+    | "# " + author($m) + " · " + fmt_full(.ts) + "\n\n"
+    + ((msgtext) | decode | render_body)' <<<"$msg" | md_render
+  exit 0
+fi
+
+# ---------- Sub-command: __list-activity ----------
+# The Slack "Activity" feed: mentions, reactions, thread replies, DMs, invites.
+# Emits TAB-separated rows:
+#   <feed_ts>\t<channel>\t<ts>\t<thread_ts>\t<type>\t<display>\t<key>
+# The raw feed is cached so the preview can look items up without re-fetching.
+FZFSLACK_ACTIVITY_TYPES="thread_v2,dm,generic_system_alert,message_reaction,internal_channel_invite,list_record_edited,bot_dm_bundle,at_user,at_user_group,at_channel,at_everyone,keyword,list_record_assigned,list_user_mentioned,external_channel_invite,shared_workspace_invite,external_dm_invite"
+
+if [[ "$1" == "__list-activity" ]]; then
+  mode="${2:-${FZFSLACK_ACTIVITY_MODE:-chrono_reads_and_unreads}}"
+  raw="$(api activity.feed \
+    --data-urlencode "limit=50" \
+    --data-urlencode "types=$FZFSLACK_ACTIVITY_TYPES" \
+    --data-urlencode "mode=$mode")"
+  if [[ "$(jq -r '.ok' <<<"$raw" 2>/dev/null)" != "true" ]]; then
+    echo "Could not load activity: $(jq -r '.error // "error"' <<<"$raw" 2>/dev/null)" >&2
+    exit 1
+  fi
+  [[ -n "$FZFSLACK_CACHE_DIR" ]] && printf '%s' "$raw" > "$FZFSLACK_CACHE_DIR/activity.json"
+
+  # Normalise each item to a flat record (location channel, referenced ts,
+  # thread_ts, actor, reaction) independent of the per-type payload shape.
+  norm="$(jq -c '
+    [ .items[]?
+      | . as $it | .item as $i | ($i.type) as $t
+      | (if $t == "thread_v2" then $i.bundle_info.payload.thread_entry
+         elif $t == "dm" then $i.bundle_info.payload.dm_entry.latest_message
+         elif $t == "bot_dm_bundle" then $i.bundle_info.payload.message
+         else null end) as $b
+      | (if $t == "thread_v2" then $b.channel_id
+         elif ($t == "dm" or $t == "bot_dm_bundle") then $b.channel
+         else $i.message.channel end) as $ch
+      | (if $t == "thread_v2" then ($b.latest_ts // $b.thread_ts)
+         elif ($t == "dm" or $t == "bot_dm_bundle") then $b.ts
+         else $i.message.ts end) as $ts
+      | (if $t == "thread_v2" then $b.thread_ts else "" end) as $tts
+      | (if $t == "message_reaction" then $i.reaction.user else $i.message.author_user_id end) as $actor
+      | { feed_ts: ($it.feed_ts | tostring), unread: ($it.is_unread == true),
+          type: $t, channel: ($ch // ""), ts: ($ts // ""), thread_ts: ($tts // ""),
+          actor: ($actor // ""), reaction: ($i.reaction.name // ""),
+          unread_count: ($b.unread_msg_count // 0), key: ($it.key // "") } ]' <<<"$raw")"
+
+  chans="$(jq -r '.[].channel // empty' <<<"$norm" | sort -u)"
+  users="$(jq -r '.[].actor // empty' <<<"$norm" | sort -u)"
+  cmap="$(printf '%s\n' "$chans" | build_channel_map)"
+  umap="$(printf '%s\n' "$users" | build_user_map)"
+
+  jq_args -r \
+    --argjson cmap "$cmap" \
+    --argjson umap "$umap" \
+    "$JQLIB"'
+    def loc: ($cmap[.channel] // (if .channel == "" then "?" else .channel end));
+    def actorname: ($umap[.actor] // "someone");
+    def rname: (.reaction | gsub("::skin-tone-[0-9]"; ""));
+    .[]
+    | . as $a
+    | (if .type == "message_reaction" then [$i_react, "reaction", ":" + rname + ": from " + actorname]
+       elif .type == "thread_v2" then [$i_thread, "thread", (if .unread_count > 0 then ((.unread_count | tostring) + " new " + (if .unread_count == 1 then "reply" else "replies" end)) else "new activity" end)]
+       elif (.type == "dm" or .type == "bot_dm_bundle") then [$i_bell, "message", "new message"]
+       elif .type == "at_user" then [$i_at, "mention", actorname + " mentioned you"]
+       elif .type == "at_channel" then [$i_at, "mention", "@channel from " + actorname]
+       elif .type == "at_everyone" then [$i_at, "mention", "@everyone from " + actorname]
+       elif .type == "at_user_group" then [$i_at, "mention", actorname + " mentioned a group"]
+       elif .type == "keyword" then [$i_at, "keyword", "keyword from " + actorname]
+       else [$i_bell, (.type | gsub("_"; " ")), "activity"] end) as $d
+    | (if .unread then ($red + $i_unread + $reset) else " " end) as $mark
+    | [ .feed_ts, .channel, .ts, .thread_ts, .type,
+        ($mark + " " + $dim + fmt_full(.feed_ts) + $reset
+         + " · " + $yellow + $d[0] + " " + $d[1] + $reset
+         + " · " + $green + loc + $reset
+         + " · " + $d[2]),
+        .key ]
+    | @tsv' <<<"$norm"
+  exit 0
+fi
+
+# ---------- Sub-command: __preview-activity ----------
+# $2=channel $3=ts $4=thread_ts $5=type. Renders the referenced message (the
+# thread for thread_v2), or a text summary for items with no message.
+# conversations.replies is used to fetch by ts because it returns the exact
+# message whether it is a top-level message or a thread reply (which are absent
+# from conversations.history).
+if [[ "$1" == "__preview-activity" ]]; then
+  channel="$2"
+  ts="$3"
+  thread_ts="$4"
+  type="$5"
+  if [[ -z "$channel" || "$channel" == "?" || -z "$ts" ]]; then
+    printf '# %s\n\nNo message to preview for this item.\n' "$type" | md_render
+    exit 0
+  fi
+
+  if [[ "$type" == "thread_v2" && -n "$thread_ts" ]]; then
+    resp="$(api conversations.replies \
+      --data-urlencode "channel=$channel" \
+      --data-urlencode "ts=$thread_ts" \
+      --data-urlencode "limit=200")"
+    if [[ "$(jq -r '.ok' <<<"$resp" 2>/dev/null)" != "true" ]]; then
+      printf '# thread\n\nThread not available.\n' | md_render
+      exit 0
+    fi
+    ids="$( { jq -r '.messages[]?.user // empty' <<<"$resp"; jq -r '.messages[]? | ((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$resp"; } | sort -u)"
+    map="$(printf '%s\n' "$ids" | build_user_map)"
+    jq_args -r --argjson map "$map" "$JQLIB"'
+      [.messages[]]
+      | map(
+          "# " + author(.) + " · " + fmt_full(.ts) + "\n\n"
+          + ((msgtext) | decode | render_body)
+          + ((.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)
+        )
+      | join("\n\n---\n\n")' <<<"$resp" | md_render
+    exit 0
+  fi
+
+  # Single referenced message (may be a top-level message or a thread reply).
+  resp="$(api conversations.replies \
+    --data-urlencode "channel=$channel" \
+    --data-urlencode "ts=$ts" \
+    --data-urlencode "limit=1")"
+  msg="$(jq -c --arg ts "$ts" 'first(.messages[]? | select(.ts == $ts)) // (.messages[0] // empty)' <<<"$resp")"
+  [[ -z "$msg" ]] && { printf '# %s\n\nMessage not available.\n' "$type" | md_render; exit 0; }
+  ids="$( { jq -r '.user // empty' <<<"$msg"; jq -r '((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$msg"; } | sort -u)"
+  map="$(printf '%s\n' "$ids" | sort -u | build_user_map)"
+  jq_args -r --argjson map "$map" "$JQLIB"'
+    . as $m
+    | "# " + author($m) + " · " + fmt_full(.ts) + "\n\n"
+    + ((msgtext) | decode | render_body)
+    + (($m.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)' <<<"$msg" | md_render
+  exit 0
+fi
+
+# ---------- Compose helper ----------
+# Open $EDITOR on a temp file, confirm via an fzf picker (with the rendered
+# message shown in the preview), then POST via chat.postMessage. When thread_ts
+# is non-empty the message is posted as a threaded reply.
+compose_and_send() {
+  local channel="$1" thread_ts="$2" label="$3" f body resp choice preview_cmd
+  f="$(mktemp)"
+  "${EDITOR:-nvim}" "$f"
+  if [[ ! -s "$f" ]]; then
+    rm -f "$f"
+    pause_msg "Aborted (empty message)."
+    return
+  fi
+  body="$(cat "$f")"
+  # Preview renders the composed message; the temp file is kept until after the
+  # confirmation so the preview can read it.
+  if command -v md >/dev/null 2>&1; then
+    preview_cmd="MD_WORD_WRAP=\${FZF_PREVIEW_COLUMNS:-80} md < $f"
+  else
+    preview_cmd="cat $f"
+  fi
+  clear
+  choice="$(printf '%s\n' "Cancel" "Send" | fzf \
+    --ansi \
+    --reverse \
+    --height 100% \
+    --info hidden \
+    --prompt "$label " \
+    --border rounded \
+    --border-label " Send message? " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --preview "$preview_cmd" \
+    --preview-window "right:65%")"
+  rm -f "$f"
+  if [[ "$choice" != "Send" ]]; then
+    pause_msg "Cancelled."
+    return
+  fi
+  # Post the message as a Slack "markdown" block so standard Markdown
+  # (**bold**, _italic_, ~~strike~~, `code`, ``` blocks, [label](url), - lists,
+  # > quotes) is formatted by Slack, which also derives a clean text fallback.
+  local blocks
+  blocks="$(jq -cn --arg t "$body" '[{type: "markdown", text: $t}]')"
+  local args=(--data-urlencode "channel=$channel" --data-urlencode "blocks=$blocks")
+  [[ -n "$thread_ts" ]] && args+=(--data-urlencode "thread_ts=$thread_ts")
+  resp="$(api chat.postMessage "${args[@]}")"
+  if [[ "$(jq -r '.ok' <<<"$resp")" == "true" ]]; then
+    pause_msg "Sent."
+  else
+    pause_msg "Error: $(jq -r '.error // "unknown"' <<<"$resp")"
+  fi
+}
+
+# Write the raw (un-rendered) Markdown produced by a preview sub-command to a
+# temp file and open it read-only in nvim (falling back to the pager). Old view
+# files are pruned after an hour; the file is kept so several can be open at
+# once. $@ is the preview sub-command and its args, e.g. __preview-message CH TS.
+view_in_nvim() {
+  local out
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfslack-view-*' -type f -mmin +60 -delete 2>/dev/null
+  out="${TMPDIR:-/tmp}/fzfslack-view-$$-${RANDOM}.md"
+  FZFSLACK_RAW=1 "$SCRIPT" "$@" > "$out" 2>/dev/null
+  if command -v nvim >/dev/null 2>&1; then
+    nvim -R "$out"
+  else
+    "${PAGER:-less}" "$out"
+  fi
+}
+
+# Collect every file attached to the highlighted message's thread (parent +
+# replies), or just the single message when it is not a thread. Emits a JSON
+# array of file objects augmented with the uploader name and a coloured display
+# string used by the file picker.
+gather_thread_files() {
+  local channel="$1" root="$2" ts="$3" repl msgs ids map cache
+  repl="$(api conversations.replies \
+    --data-urlencode "channel=$channel" \
+    --data-urlencode "ts=$root" \
+    --data-urlencode "limit=200")"
+  if [[ "$(jq -r '.ok' <<<"$repl" 2>/dev/null)" == "true" && "$(jq '.messages | length' <<<"$repl" 2>/dev/null)" != "0" ]]; then
+    msgs="$repl"
+  else
+    cache="$FZFSLACK_CACHE_DIR/history-$channel.json"
+    msgs="$(jq -c --arg ts "$ts" '{messages: [.messages[]? | select(.ts == $ts)]}' "$cache" 2>/dev/null)"
+    [[ -z "$msgs" ]] && msgs='{"messages":[]}'
+  fi
+  ids="$(jq -r '.messages[]?.user // empty' <<<"$msgs" 2>/dev/null | sort -u)"
+  map="$(printf '%s\n' "$ids" | build_user_map)"
+  jq_args -c --argjson map "$map" "$JQLIB"'
+    def humansize(n):
+      if n >= 1048576 then (((n * 10 / 1048576) | floor) / 10 | tostring) + " MB"
+      elif n >= 1024 then ((n / 1024) | floor | tostring) + " KB"
+      else (n | tostring) + " B" end;
+    [ .messages[]? as $m
+      | ($m | allfiles)[]
+      | { id: (.id // ""),
+          name: (.name // .title // "file"),
+          pretty: (.pretty_type // .filetype // .mimetype // "file"),
+          size: (.size // 0),
+          url_private: (.url_private // ""),
+          permalink: (.permalink // ""),
+          mode: (.mode // ""),
+          is_external: (.is_external // false),
+          author: author($m) } ]
+    | map(. + {display: (
+        $cyan + .name + $reset
+        + " · " + $dim + .pretty + " · " + humansize(.size) + $reset
+        + " · " + $green + .author + $reset)})' <<<"$msgs"
+}
+
+# Open one file object. Hosted files are downloaded (Bearer token + d cookie) to
+# a pruned temp dir and opened with the default macOS app; external files and
+# Slack docs open their Slack permalink in the browser; deleted files report as
+# unavailable.
+open_one_file() {
+  local file="$1" id name url permalink mode is_ext dir safe out
+  id="$(jq -r '.id' <<<"$file")"
+  name="$(jq -r '.name' <<<"$file")"
+  url="$(jq -r '.url_private' <<<"$file")"
+  permalink="$(jq -r '.permalink' <<<"$file")"
+  mode="$(jq -r '.mode' <<<"$file")"
+  is_ext="$(jq -r '.is_external' <<<"$file")"
+
+  if [[ "$mode" == "tombstone" ]]; then
+    pause_msg "File unavailable (deleted)."
+    return
+  fi
+  case "$mode" in
+    external | post | docs | canvas | space | quip)
+      is_ext=true
+      ;;
+  esac
+  if [[ "$is_ext" == "true" ]]; then
+    if [[ -n "$permalink" && "$permalink" != "null" ]]; then
+      open "$permalink"
+    else
+      pause_msg "No link available for this file."
+    fi
+    return
+  fi
+  if [[ -z "$url" || "$url" == "null" ]]; then
+    if [[ -n "$permalink" && "$permalink" != "null" ]]; then
+      open "$permalink"
+    else
+      pause_msg "File is not downloadable."
+    fi
+    return
+  fi
+
+  dir="${TMPDIR:-/tmp}/fzfslack-files"
+  mkdir -p "$dir"
+  find "$dir" -maxdepth 1 -type f -mmin +60 -delete 2>/dev/null
+  safe="${name//\//_}"
+  out="$dir/${id}_${safe}"
+  if [[ ! -s "$out" ]]; then
+    printf 'Downloading %s ...\n' "$name"
+    if ! curl -s -f -L --max-time 120 -o "$out" \
+      -H "Cookie: d=$FZFSLACK_XOXD" \
+      -H "Authorization: Bearer $FZFSLACK_XOXC" \
+      "$url"; then
+      rm -f "$out"
+      pause_msg "Download failed: $name"
+      return
+    fi
+  fi
+  open "$out"
+}
+
+# alt-f handler: gather the thread's files and open one. No files -> message;
+# one file -> open directly; several -> a single-select picker.
+open_files() {
+  local channel="$1" root="$2" ts="$3" files n rows sel idx
+  files="$(gather_thread_files "$channel" "$root" "$ts")"
+  n="$(jq 'length' <<<"$files" 2>/dev/null)"
+  if [[ -z "$n" || "$n" == "0" ]]; then
+    pause_msg "No files in this thread."
+    return
+  fi
+  if [[ "$n" == "1" ]]; then
+    open_one_file "$(jq -c '.[0]' <<<"$files")"
+    return
+  fi
+  rows="$(jq -r 'to_entries[] | "\(.key)\t\(.value.display)"' <<<"$files")"
+  clear
+  sel="$(printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 2 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_FILE Files: " \
+    --border rounded \
+    --border-label " $ICON_FILE Files " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)")"
+  [[ -z "$sel" ]] && return
+  idx="$(printf '%s' "$sel" | cut -f1)"
+  open_one_file "$(jq -c --argjson i "$idx" '.[$i]' <<<"$files")"
+}
+
+# ---------- Sub-command: __action ----------
+# Dispatches the alt-* actions. Runs on fzf's alternate screen.
+if [[ "$1" == "__action" ]]; then
+  verb="$2"
+  case "$verb" in
+    open-conv)
+      channel="$3"
+      if [[ -n "$FZFSLACK_TEAM" ]]; then
+        open "slack://channel?team=$FZFSLACK_TEAM&id=$channel"
+      else
+        open "$FZFSLACK_WORKSPACE_URL"
+      fi
+      ;;
+    open-msg)
+      channel="$3"
+      ts="$4"
+      link="$(api chat.getPermalink \
+        --data-urlencode "channel=$channel" \
+        --data-urlencode "message_ts=$ts" | jq -r '.permalink // ""')"
+      if [[ -n "$link" ]]; then
+        open "$link"
+      else
+        pause_msg "Could not resolve permalink."
+      fi
+      ;;
+    view)
+      # Message/thread from the messages list (reads the history cache).
+      view_in_nvim __preview-message "$3" "$4"
+      ;;
+    open-files)
+      # $3=channel $4=thread-root $5=message-ts
+      open_files "$3" "$4" "$5"
+      ;;
+    view-search)
+      # A search result (fetches the message directly, no history cache).
+      view_in_nvim __preview-search "$3" "$4"
+      ;;
+    view-activity)
+      # An activity item: $3=channel $4=ts $5=thread_ts $6=type.
+      view_in_nvim __preview-activity "$3" "$4" "$5" "$6"
+      ;;
+    mark-activity)
+      # Mark one activity feed item read: $3=type $4=feed_ts $5=key $6=ts.
+      # activity.markRead requires all four; ts must be a real message ts.
+      type="$3"
+      feed_ts="$4"
+      key="$5"
+      ts="$6"
+      if [[ -z "$ts" || "$ts" != *.* ]]; then
+        pause_msg "Cannot mark this item read (no message timestamp)."
+        exit 0
+      fi
+      resp="$(api activity.markRead \
+        --data-urlencode "type=$type" \
+        --data-urlencode "feed_ts=$feed_ts" \
+        --data-urlencode "key=$key" \
+        --data-urlencode "ts=$ts")"
+      [[ "$(jq -r '.ok' <<<"$resp" 2>/dev/null)" == "true" ]] ||
+        pause_msg "Mark read failed: $(jq -r '.error // "unknown"' <<<"$resp" 2>/dev/null)"
+      ;;
+    yank)
+      channel="$3"
+      ts="$4"
+      link="$(api chat.getPermalink \
+        --data-urlencode "channel=$channel" \
+        --data-urlencode "message_ts=$ts" | jq -r '.permalink // ""')"
+      if [[ -n "$link" ]]; then
+        printf '%s' "$link" | pbcopy
+      else
+        pause_msg "Could not resolve permalink."
+      fi
+      ;;
+    mark)
+      channel="$3"
+      ts="$4"
+      # conversations.mark requires a real message ts (fractional). When called
+      # from the conversation list no message ts is available, so fall back to
+      # the conversation's latest ts from the cached counts.
+      if [[ -z "$ts" || "$ts" != *.* ]]; then
+        ts="$(jq -r --arg c "$channel" '
+          ((.channels // []) + (.ims // []) + (.mpims // []))
+          | map(select(.id == $c)) | (.[0].latest // "")' \
+          "$FZFSLACK_CACHE_DIR/counts.json" 2>/dev/null)"
+      fi
+      if [[ -n "$ts" && "$ts" == *.* ]]; then
+        api conversations.mark \
+          --data-urlencode "channel=$channel" \
+          --data-urlencode "ts=$ts" >/dev/null
+      fi
+      # Refresh the cached counts so unread badges / marks update on reload.
+      api client.counts > "$FZFSLACK_CACHE_DIR/counts.json" 2>/dev/null
+      ;;
+    write)
+      channel="$3"
+      name="${4:-${FZFSLACK_CONV_NAME:-this conversation}}"
+      compose_and_send "$channel" "" "New message to $name:"
+      ;;
+    reply)
+      channel="$3"
+      root="$4"
+      compose_and_send "$channel" "$root" "Reply in thread:"
+      ;;
+  esac
+  exit 0
+fi
+
+# ---------- usage / help ----------
+usage() {
+  cat <<EOF
+fzfslack - Fuzzy Finder for Slack
+
+Usage:
+  fzfslack                 browse conversations, messages and threads
+  fzfslack search [query]  search messages across the workspace
+  fzfslack activity        browse your activity feed (mentions, reactions, ...)
+
+The search query accepts Slack's search modifiers, e.g. from:@user, in:#channel,
+before:YYYY-MM-DD, after:YYYY-MM-DD, has:link, has::emoji: - combine them freely
+(e.g. from:@rico in:#random has:link deploy).
+
+Browses your Slack workspace through the Web API using the browser session
+tokens FZFSLACK_XOXC / FZFSLACK_XOXD. The start screen lists the conversations
+you are a member of (channels, group DMs, DMs) sorted by recent activity with
+unread ($ICON_UNREAD) and mention (@N) badges. Selecting a conversation lists
+its messages (newest first); selecting a message opens its thread.
+
+Conversation Keybindings:
+  enter  : list messages of the selected conversation
+  alt-n  : write a new message to the conversation
+  alt-o  : open conversation in the Slack app
+  alt-m  : mark conversation as read
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
+  esc    : quit
+
+Message Keybindings:
+  enter  : open message / thread read-only in nvim
+  alt-r  : reply in the selected message's thread
+  alt-n  : write a new message to the conversation
+  alt-o  : open message in the Slack app
+  alt-y  : copy message permalink to the clipboard
+  alt-m  : mark conversation as read
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
+  esc    : back to conversation list
+
+Search Keybindings (fzfslack search):
+  enter  : open the selected result read-only in nvim
+  alt-o  : open the message in the Slack app
+  alt-y  : copy the message permalink to the clipboard
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
+  esc    : quit
+
+Activity Keybindings (fzfslack activity):
+  enter  : open the referenced message / thread read-only in nvim
+  alt-o  : open the message in the Slack app
+  alt-y  : copy the message permalink to the clipboard
+  alt-m  : mark the selected activity as read
+  alt-u  : toggle showing only unread activity
+  ctrl-r : reload list
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
+  esc    : quit
+
+Environment:
+  FZFSLACK_WORKSPACE_URL    : https://<team>.slack.com (required)
+  FZFSLACK_XOXC / XOXD      : browser session tokens (required)
+  FZFSLACK_REFRESH_INTERVAL : conversation-list auto-refresh seconds (60)
+  FZFSLACK_HISTORY_LIMIT    : messages fetched per conversation (50)
+  FZFSLACK_PREVIEW_LIMIT    : messages shown in the conversation preview (15)
+  FZFSLACK_SEARCH_COUNT     : search results fetched (40)
+EOF
+}
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+# ---------- Preconditions ----------
+for cmd in curl jq fzf; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "fzfslack: required command not found: $cmd" >&2
+    exit 1
+  fi
+done
+if [[ -z "$FZFSLACK_WORKSPACE_URL" || -z "$FZFSLACK_XOXC" || -z "$FZFSLACK_XOXD" ]]; then
+  echo "fzfslack: FZFSLACK_WORKSPACE_URL, FZFSLACK_XOXC and FZFSLACK_XOXD must be set (see .zshsecrets)." >&2
+  exit 1
+fi
+
+# Verify auth up front and capture the team id for slack:// deep links.
+auth="$(api auth.test 2>/dev/null)"
+if [[ "$(jq -r '.ok' <<<"$auth" 2>/dev/null)" != "true" ]]; then
+  echo "fzfslack: authentication failed against $FZFSLACK_API_BASE." >&2
+  echo "Check FZFSLACK_XOXC / FZFSLACK_XOXD (browser tokens expire) and FZFSLACK_WORKSPACE_URL." >&2
+  [[ -n "$auth" ]] && echo "API error: $(jq -r '.error // "unknown"' <<<"$auth" 2>/dev/null)" >&2
+  exit 1
+fi
+FZFSLACK_TEAM="$(jq -r '.team_id // ""' <<<"$auth")"
+
+# Per-run cache dir shared with the fzf child processes.
+FZFSLACK_CACHE_DIR="$(mktemp -d -t fzfslack)"
+mkdir -p "$FZFSLACK_CACHE_DIR/users"
+export FZFSLACK_WORKSPACE_URL FZFSLACK_XOXC FZFSLACK_XOXD FZFSLACK_API_BASE
+export FZFSLACK_CACHE_DIR FZFSLACK_TEAM
+export FZFSLACK_REFRESH_INTERVAL FZFSLACK_HISTORY_LIMIT FZFSLACK_PREVIEW_LIMIT FZFSLACK_SEARCH_COUNT
+trap 'rm -rf "$FZFSLACK_CACHE_DIR" 2>/dev/null' EXIT
+
+# ---------- Runners ----------
+
+# Messages (L1): list the messages of a conversation. The preview renders the
+# full thread of the highlighted message, so there is no separate thread view.
+# Returns on Esc.
+run_messages() {
+  local channel="$1" name="$2" rows action list preview
+  rows="$("$SCRIPT" __list-messages "$channel")"
+  if [[ -z "$rows" ]]; then
+    pause_msg "No messages in $name."
+    return
+  fi
+  action="$SCRIPT __action"
+  list="$SCRIPT __list-messages $channel"
+  preview="$SCRIPT __preview-message $channel {1}"
+  export FZFSLACK_CONV_NAME="$name"
+  clear
+  printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 4 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --track \
+    --id-nth 1 \
+    --prompt "$ICON_SLACK Messages: " \
+    --border rounded \
+    --border-label " $ICON_SLACK $name " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-r:reload($list)" \
+    --bind "enter:execute($action view $channel {1})" \
+    --bind "alt-n:execute($action write $channel)+reload($list)" \
+    --bind "alt-r:execute($action reply $channel {3})+reload($list)" \
+    --bind "alt-o:execute($action open-msg $channel {1})" \
+    --bind "alt-y:execute($action yank $channel {1})" \
+    --bind "alt-f:execute($action open-files $channel {3} {1})" \
+    --bind "alt-m:execute($action mark $channel {1})+reload($list)" \
+    --preview-window "right:65%" \
+    --preview "$preview"
+}
+
+# Search (top-level subcommand): run a query and browse results. Enter opens the
+# selected message in the Slack app; the preview shows the message.
+run_search() {
+  local query="$1" rows action
+  if [[ -z "$query" ]]; then
+    printf 'Search Slack: '
+    IFS= read -r query
+  fi
+  [[ -z "$query" ]] && exit 0
+  action="$SCRIPT __action"
+  export FZFSLACK_SEARCH_QUERY="$query"
+  rows="$("$SCRIPT" __list-search "$query")"
+  if [[ -z "$rows" ]]; then
+    pause_msg "No results for: $query"
+    exit 0
+  fi
+  clear
+  printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 5 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_SEARCH $query: " \
+    --border rounded \
+    --border-label " $ICON_SEARCH Search: $query " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "enter:execute($action view-search {1} {2})" \
+    --bind "alt-o:execute($action open-msg {1} {2})" \
+    --bind "alt-y:execute($action yank {1} {2})" \
+    --bind "ctrl-r:reload($SCRIPT __list-search)" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview-search {1} {2}"
+}
+
+# Activity (top-level subcommand): the Slack Activity feed. Enter opens the
+# referenced message / thread read-only in nvim; the preview shows it. alt-u
+# toggles unread-only (fzf aborts via --expect and the loop flips the mode).
+run_activity() {
+  local mode="chrono_reads_and_unreads" action rows prompt sel key
+  action="$SCRIPT __action"
+  while true; do
+    export FZFSLACK_ACTIVITY_MODE="$mode"
+    rows="$("$SCRIPT" __list-activity "$mode")"
+    if [[ -z "$rows" ]]; then
+      if [[ "$mode" == "priority_unreads_v1" ]]; then
+        pause_msg "No unread activity."
+        mode="chrono_reads_and_unreads"
+        continue
+      fi
+      pause_msg "No activity."
+      exit 0
+    fi
+    if [[ "$mode" == "priority_unreads_v1" ]]; then
+      prompt="$ICON_ACTIVITY Activity (unread): "
+    else
+      prompt="$ICON_ACTIVITY Activity: "
+    fi
+    clear
+    sel="$(printf '%s\n' "$rows" | fzf \
+      --ansi \
+      --delimiter $'\t' \
+      --with-nth 6 \
+      --reverse \
+      --height 100% \
+      --info right \
+      --track \
+      --id-nth 1 \
+      --prompt "$prompt" \
+      --border rounded \
+      --border-label " $ICON_ACTIVITY Activity " \
+      --border-label-pos center \
+      --bind "ctrl-d:half-page-down" \
+      --bind "ctrl-u:half-page-up" \
+      --bind "ctrl-f:preview-half-page-down" \
+      --bind "ctrl-b:preview-half-page-up" \
+      --bind "home:preview-top" \
+      --bind "end:preview-bottom" \
+      --bind "ctrl-p:toggle-preview" \
+      --bind "alt-h:execute($SCRIPT --help | less -R)" \
+      --bind "enter:execute($action view-activity {2} {3} {4} {5})" \
+      --bind "alt-o:execute($action open-msg {2} {3})" \
+      --bind "alt-y:execute($action yank {2} {3})" \
+      --bind "alt-m:execute($action mark-activity {5} {1} {7} {3})+reload($SCRIPT __list-activity $mode)" \
+      --bind "ctrl-r:reload($SCRIPT __list-activity $mode)" \
+      --expect "alt-u" \
+      --preview-window "right:65%" \
+      --preview "$SCRIPT __preview-activity {2} {3} {4} {5}")"
+    key="$(printf '%s\n' "$sel" | sed -n '1p')"
+    if [[ "$key" == "alt-u" ]]; then
+      if [[ "$mode" == "priority_unreads_v1" ]]; then
+        mode="chrono_reads_and_unreads"
+      else
+        mode="priority_unreads_v1"
+      fi
+      continue
+    fi
+    return
+  done
+}
+
+# ---------- Entry point ----------
+if [[ "$1" == "search" ]]; then
+  shift
+  run_search "$*"
+  exit 0
+fi
+if [[ "$1" == "activity" ]]; then
+  run_activity
+  exit 0
+fi
+if [[ -n "$1" ]]; then
+  echo "Unknown command: $1" >&2
+  echo "Usage: fzfslack [search [query] | activity]" >&2
+  exit 1
+fi
+
+# Conversations (L0): the start screen. Selecting one drills into its messages;
+# leaving that list returns here (loop). Esc here quits.
+while true; do
+  rows="$("$SCRIPT" __list-conversations)"
+  if [[ -z "$rows" ]]; then
+    echo "No conversations found (or the API is unreachable)." >&2
+    exit 1
+  fi
+  clear
+  sel="$(printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 4 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --track \
+    --id-nth 2 \
+    --prompt "$ICON_SLACK Conversations: " \
+    --border rounded \
+    --border-label " $ICON_SLACK Slack " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-r:reload($SCRIPT __list-conversations)" \
+    --bind "every($FZFSLACK_REFRESH_INTERVAL):reload($SCRIPT __list-conversations)" \
+    --bind "alt-n:execute($SCRIPT __action write {2} {3})" \
+    --bind "alt-o:execute($SCRIPT __action open-conv {2})" \
+    --bind "alt-m:execute($SCRIPT __action mark {2})+reload($SCRIPT __list-conversations)" \
+    --expect "enter" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview-conversation {2}")"
+
+  key="$(printf '%s\n' "$sel" | sed -n '1p')"
+  row="$(printf '%s\n' "$sel" | sed -n '2p')"
+  [[ -z "$row" ]] && exit 0
+  sel_id="$(printf '%s' "$row" | cut -f2)"
+  sel_name="$(printf '%s' "$row" | cut -f3)"
+  [[ -z "$sel_id" ]] && continue
+  run_messages "$sel_id" "$sel_name"
+done
