@@ -120,6 +120,145 @@ fzfjira_jira_put() {
   return 1
 }
 
+# ---------- Shared rendering helpers ----------
+#
+# The preview and the `view` action share one Markdown document, assembled by
+# emit_markdown. ADF fields (description, comment bodies) are converted to
+# Markdown text with `MD_ADF=true MD_RAW=true md`; the metadata, comment
+# headers, sub-tasks and links are assembled as Markdown directly. The joined
+# document is then either rendered to ANSI with md (preview) or opened raw in
+# nvim (view), so the two stay in sync.
+
+# Render Markdown read from stdin to ANSI with md, colouring even for a non-TTY
+# stdout and wrapping to the preview width. Falls back to the raw Markdown when
+# md is not installed.
+md_render() {
+  if command -v md >/dev/null 2>&1; then
+    MD_WORD_WRAP="${FZF_PREVIEW_COLUMNS:-80}" md
+  else
+    cat
+  fi
+}
+
+# Convert a Jira ADF document (JSON on stdin) to Markdown text via md's raw mode
+# (ADF conversion without ANSI rendering). Falls back to a short note when md is
+# not installed, since raw ADF JSON is not human readable.
+adf_to_md() {
+  if command -v md >/dev/null 2>&1; then
+    MD_ADF=true MD_RAW=true md
+  else
+    echo "_(install md to render this content)_"
+  fi
+}
+
+# Assemble the whole work item as a single Markdown document (text): a metadata
+# block, the description, the comment thread, sub-tasks and links. Takes the
+# work item JSON (from `workitem view --fields "*all" --json`) as $1. ADF fields
+# are converted with adf_to_md; everything else is emitted as Markdown directly.
+emit_markdown() {
+  local wi="$1"
+  local desc cshown ctotal i nsub nlink
+
+  # ----- Metadata -----
+  printf '%s' "$wi" | jq -r --arg ff "$FZFJIRA_FLAG_FIELD" '
+    def fmtdate: if . == null or . == "" then "" else (.[0:16] | gsub("T"; " ")) end;
+    .key as $key
+    | .fields as $f
+    | [ "# " + $key + "  " + (($f.summary // "-") | gsub("[\t\n\r]"; " ")),
+        "",
+        "- **Key:** `" + $key + "`",
+        "- **Status:** " + ($f.status.name // "-"),
+        (if ($f.issuetype.name // "") != "" then "- **Type:** " + $f.issuetype.name else empty end),
+        (if ($f.priority.name // "") != "" then "- **Priority:** " + $f.priority.name else empty end),
+        (if ($f.assignee.displayName // "") != "" then "- **Assignee:** " + $f.assignee.displayName else empty end),
+        (if ($f.reporter.displayName // "") != "" then "- **Reporter:** " + $f.reporter.displayName else empty end),
+        (if (($f.labels // []) | length) > 0 then "- **Labels:** " + ($f.labels | map("`" + . + "`") | join(" ")) else empty end),
+        (($f.parent // null) as $p
+         | if $p == null then empty
+           else "- **" + (if ($p.fields.issuetype.name // "") == "Epic" then "Epic" else "Parent" end)
+                + ":** `" + ($p.key // "-") + "` \u00b7 " + (($p.fields.summary // "-") | gsub("[\t\n\r]"; " "))
+           end),
+        (($f[$ff] // []) as $fl
+         | if ($fl | length) == 0 then empty
+           else "- **Flagged:** " + ($fl | map(.value) | join(", "))
+           end),
+        (if ($f.created // "") != "" then "- **Created:** " + ($f.created | fmtdate) else empty end),
+        (if ($f.updated // "") != "" then "- **Updated:** " + ($f.updated | fmtdate) else empty end),
+        "",
+        "---"
+      ]
+    | join("\n")
+  '
+  echo
+
+  # ----- Description (ADF) -----
+  desc="$(printf '%s' "$wi" | jq -c 'if (.fields.description | type) == "object" then .fields.description else empty end')"
+  if [[ -n "$desc" ]]; then
+    printf '%s' "$desc" | adf_to_md
+    echo
+  else
+    echo "_No description provided._"
+  fi
+  echo
+
+  # ----- Comments (ADF bodies, oldest -> newest) -----
+  ctotal="$(printf '%s' "$wi" | jq -r '.fields.comment.total // ((.fields.comment.comments // []) | length)')"
+  cshown="$(printf '%s' "$wi" | jq -r '(.fields.comment.comments // []) | length')"
+  if [[ "$cshown" -gt 0 ]]; then
+    if [[ "$cshown" -lt "$ctotal" ]]; then
+      echo "# Comments (showing $cshown of $ctotal)"
+    else
+      echo "# Comments ($ctotal)"
+    fi
+    echo
+    i=0
+    while [[ "$i" -lt "$cshown" ]]; do
+      printf '%s' "$wi" | jq -r --argjson i "$i" '
+        def fmtdate: if . == null or . == "" then "" else (.[0:16] | gsub("T"; " ")) end;
+        .fields.comment.comments[$i]
+        | "**" + (.author.displayName // "?") + "** \u00b7 " + ((.created // "") | fmtdate)
+      '
+      echo
+      printf '%s' "$wi" | jq -c --argjson i "$i" '.fields.comment.comments[$i].body' | adf_to_md
+      echo
+      echo
+      i=$((i + 1))
+    done
+  fi
+
+  # ----- Sub-tasks -----
+  nsub="$(printf '%s' "$wi" | jq -r '(.fields.subtasks // []) | length')"
+  if [[ "$nsub" -gt 0 ]]; then
+    printf '%s' "$wi" | jq -r '
+      (.fields.subtasks // []) as $subs
+      | [ "# Sub-tasks (" + ($subs | length | tostring) + ")", "" ]
+        + [ $subs[]
+            | "- `" + (.key // "-") + "` \u00b7 " + (.fields.status.name // "-")
+              + " \u00b7 " + ((.fields.summary // "-") | gsub("[\t\n\r]"; " ")) ]
+      | join("\n")
+    '
+    echo
+  fi
+
+  # ----- Links -----
+  nlink="$(printf '%s' "$wi" | jq -r '[(.fields.issuelinks // [])[] | select(.outwardIssue or .inwardIssue)] | length')"
+  if [[ "$nlink" -gt 0 ]]; then
+    printf '%s' "$wi" | jq -r '
+      [ (.fields.issuelinks // [])[] | select(.outwardIssue or .inwardIssue) ] as $links
+      | [ "# Links (" + ($links | length | tostring) + ")", "" ]
+        + [ $links[]
+            | (if .outwardIssue
+               then {dir: (.type.outward // .type.name), iss: .outwardIssue}
+               else {dir: (.type.inward // .type.name), iss: .inwardIssue} end) as $l
+            | "- " + ($l.dir // "-") + " \u00b7 `" + ($l.iss.key // "-") + "` \u00b7 "
+              + ($l.iss.fields.status.name // "-") + " \u00b7 "
+              + (($l.iss.fields.summary // "-") | gsub("[\t\n\r]"; " ")) ]
+      | join("\n")
+    '
+    echo
+  fi
+}
+
 # ---------- List mode ----------
 #
 # Called for the initial feed and on every reload. Reads the JQL from the
@@ -165,126 +304,22 @@ fi
 
 # ---------- Preview mode ----------
 #
-# Renders the work item details followed by its comment thread. Called from
-# the fzf --preview binding as: fzfjira __preview <key>
+# Assembles the work item as one Markdown document (emit_markdown) and renders
+# it to ANSI with md. A single `--fields "*all" --json` call feeds every block
+# (description, comments, parent, sub-tasks, links and the flag field). Called
+# from the fzf --preview binding as: fzfjira __preview <key>
 
 if [[ "$1" == "__preview" ]]; then
   key="$2"
   [[ -z "$key" ]] && exit 0
 
-  acli jira workitem view "$key" --fields "*all"
-
-  flagged="$(acli jira workitem view "$key" --fields "$FZFJIRA_FLAG_FIELD" --json 2>/dev/null)"
-  if [[ -n "$flagged" ]]; then
-    printf '%s' "$flagged" | jq -r --arg ff "$FZFJIRA_FLAG_FIELD" '
-      (.fields[$ff] // []) as $f
-      | if ($f | length) == 0 then empty
-        else "", "\u001b[31m󰈻 Flagged (\($f | map(.value) | join(", ")))\u001b[0m"
-        end
-    '
+  wi="$(acli jira workitem view "$key" --fields "*all" --json 2>/dev/null)"
+  if [[ -z "$wi" ]]; then
+    echo "Could not load $key."
+    exit 0
   fi
 
-  parent="$(acli jira workitem view "$key" --fields parent --json 2>/dev/null)"
-  if [[ -n "$parent" ]]; then
-    printf '%s' "$parent" | jq -r '
-      def pad(s; n): (s + (" " * 60))[0:n];
-      def color(c):
-        {
-          green: "32",
-          yellow: "33",
-          "blue-gray": "34",
-          brown: "33",
-          "medium-gray": "37",
-          "warm-red": "31"
-        }[c] // "37";
-      (.fields.parent // empty) as $p
-      | if ($p | not) then empty
-        else
-          ($p.fields.issuetype.name // "Parent") as $t
-          | ($p.fields.status.statusCategory.colorName // "medium-gray") as $c
-          | "",
-            "─── \($t) ───",
-            "",
-            "  " + pad(($p.key // "-"); 12) + " "
-              + "\u001b[" + color($c) + "m" + pad(($p.fields.status.name // "-"); 14) + "\u001b[0m" + " "
-              + (($p.fields.summary // "-") | gsub("[\t\n\r]"; " "))
-        end
-    '
-  fi
-
-  subtasks="$(acli jira workitem view "$key" --fields subtasks --json 2>/dev/null)"
-  if [[ -n "$subtasks" ]]; then
-    printf '%s' "$subtasks" | jq -r '
-      def pad(s; n): (s + (" " * 60))[0:n];
-      def color(c):
-        {
-          green: "32",
-          yellow: "33",
-          "blue-gray": "34",
-          brown: "33",
-          "medium-gray": "37",
-          "warm-red": "31"
-        }[c] // "37";
-      (.fields.subtasks // []) as $subs
-      | if ($subs | length) == 0 then empty
-        else
-          "",
-          "─── Sub-tasks (\($subs | length)) ───",
-          "",
-          ($subs[]
-            | (.fields.status.statusCategory.colorName // "medium-gray") as $c
-            | "  " + pad((.key // "-"); 12) + " "
-              + "\u001b[" + color($c) + "m" + pad((.fields.status.name // "-"); 14) + "\u001b[0m" + " "
-              + ((.fields.summary // "-") | gsub("[\t\n\r]"; " "))
-          )
-        end
-    '
-  fi
-
-  links="$(acli jira workitem view "$key" --fields issuelinks --json 2>/dev/null)"
-  if [[ -n "$links" ]]; then
-    echo
-    printf '%s' "$links" | jq -r '
-      def pad(s; n): (s + (" " * 60))[0:n];
-      def color(c):
-        {
-          green: "32",
-          yellow: "33",
-          "blue-gray": "34",
-          brown: "33",
-          "medium-gray": "37",
-          "warm-red": "31"
-        }[c] // "37";
-      (.fields.issuelinks // []) as $links
-      | "─── Links (\($links | length)) ───",
-        "",
-        ($links[]
-          | select(.outwardIssue or .inwardIssue)
-          | (if .outwardIssue
-             then {dir: (.type.outward // .type.name), iss: .outwardIssue}
-             else {dir: (.type.inward // .type.name), iss: .inwardIssue} end) as $l
-          | ($l.iss.fields.status.statusCategory.colorName // "medium-gray") as $c
-          | "  " + pad(($l.dir // "-"); 16) + " "
-            + pad(($l.iss.key // "-"); 12) + " "
-            + "\u001b[" + color($c) + "m" + pad(($l.iss.fields.status.name // "-"); 14) + "\u001b[0m" + " "
-            + (($l.iss.fields.summary // "-") | gsub("[\t\n\r]"; " "))
-        )
-    '
-  fi
-
-  comments="$(acli jira workitem comment list --key "$key" --json 2>/dev/null)"
-  if [[ -n "$comments" ]]; then
-    echo
-    printf '%s' "$comments" | jq -r '
-      "─── Comments (\(.total // 0)) ───",
-      "",
-      (.comments[]?
-        | "▌ \(.author)",
-          ((.body // "") | gsub("\r"; "") | split("\n")[] | "  " + .),
-          ""
-      )
-    '
-  fi
+  emit_markdown "$wi" | md_render
   exit 0
 fi
 
@@ -304,7 +339,20 @@ if [[ "$1" == "__action" ]]; then
 
   case "$action" in
     view)
-      acli jira workitem view "$key" --fields "*all" | nvim -R -
+      # Open the same Markdown document the preview is built from (metadata,
+      # description, comments, sub-tasks, links) in nvim as a read-only .md
+      # buffer, so ADF fields render as Markdown instead of acli's plain dump.
+      wi="$(acli jira workitem view "$key" --fields "*all" --json 2>/dev/null)"
+      if [[ -z "$wi" ]]; then
+        echo "Could not load $key."
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      tmpdir="$(mktemp -d)"
+      md_file="$tmpdir/$key.md"
+      emit_markdown "$wi" > "$md_file"
+      nvim -R "$md_file"
+      rm -rf "$tmpdir"
       ;;
 
     web)
@@ -493,7 +541,14 @@ if [[ "$1" == "__action" ]]; then
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
         --bind "alt-h:execute($SCRIPT --help | less -R)" \
+        --bind "ctrl-f:preview-half-page-down" \
+        --bind "ctrl-b:preview-half-page-up" \
+        --bind "home:preview-top" \
+        --bind "end:preview-bottom" \
+        --bind "ctrl-p:toggle-preview" \
         --ansi \
+        --preview-window "right:65%" \
+        --preview "$SCRIPT __preview {1}" \
         --prompt "󰜢 Epic $key: " \
         --border rounded \
         --border-label " 󰜢 Epic $key " \
@@ -634,13 +689,21 @@ if [[ "$1" == "__action" ]]; then
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
         --bind "alt-h:execute($SCRIPT --help | less -R)" \
+        --bind "ctrl-f:preview-half-page-down" \
+        --bind "ctrl-b:preview-half-page-up" \
+        --bind "home:preview-top" \
+        --bind "end:preview-bottom" \
+        --bind "ctrl-p:toggle-preview" \
         --ansi \
         --delimiter $'\t' \
         --with-nth 3 \
+        --preview-window "right:65%" \
+        --preview "$SCRIPT __preview {2}" \
         --prompt "󰌹 Links $key: " \
         --border rounded \
         --border-label " 󰌹 Links $key " \
         --border-label-pos center \
+        --header "RELATION         KEY          STATUS         SUMMARY" \
         --height 100% \
         --reverse \
         --expect=alt-n,alt-d)"
@@ -680,8 +743,15 @@ if [[ "$1" == "__action" ]]; then
             --bind "ctrl-d:half-page-down" \
             --bind "ctrl-u:half-page-up" \
             --bind "alt-h:execute($SCRIPT --help | less -R)" \
+            --bind "ctrl-f:preview-half-page-down" \
+            --bind "ctrl-b:preview-half-page-up" \
+            --bind "home:preview-top" \
+            --bind "end:preview-bottom" \
+            --bind "ctrl-p:toggle-preview" \
             --ansi \
             --print-query \
+            --preview-window "right:65%" \
+            --preview "$SCRIPT __preview {1}" \
             --prompt "󰌹 Link $key: " \
             --border rounded \
             --border-label " 󰌹 Link $key " \
@@ -894,7 +964,6 @@ fzf \
   --info right \
   --header "KEY          STATUS         SUMMARY" \
   --prompt "󰌪 Search: " \
-  --pointer ">" \
   --border "rounded" \
   --border-label " 󰌪 $FZFJIRA_JQL " \
   --border-label-pos center \
