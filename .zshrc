@@ -104,7 +104,7 @@ setopt interactive_comments
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
-zstyle ':fzf-tab:*' fzf-flags --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6
+zstyle ':fzf-tab:*' fzf-flags --bind ctrl-p:toggle-preview --bind ctrl-d:half-page-down --bind ctrl-u:half-page-up --bind ctrl-f:preview-half-page-down --bind ctrl-b:preview-half-page-up --bind home:preview-top --bind end:preview-bottom --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6
 
 
 
