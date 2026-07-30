@@ -379,6 +379,24 @@ FZFGH_DIFF_MAP_JQ='
 '
 
 
+# Shared jq function definitions that turn GitHub reaction data into a compact
+# emoji string (e.g. "👍 3   ❤️ 1"). Prepended to the jq programs in the preview
+# builders. reactions_emoji consumes the gh / GraphQL "reactionGroups" array
+# ([{content, users:{totalCount}}]); rest_reactions_emoji consumes the REST
+# "reactions" object ({"+1":n, heart:n, ...}). Both emit "" when there are none.
+FZFGH_REACTIONS_JQ='
+  def reactions_emoji:
+    ({"THUMBS_UP":"👍","THUMBS_DOWN":"👎","LAUGH":"😄","HOORAY":"🎉","CONFUSED":"😕","HEART":"❤️","ROCKET":"🚀","EYES":"👀"}) as $m
+    | (. // [])
+    | map(select((.users.totalCount // 0) > 0) | (($m[.content] // "\u2022") + " " + (.users.totalCount|tostring)))
+    | if length > 0 then join("   ") else "" end;
+  def rest_reactions_emoji:
+    . as $r
+    | [["+1","👍"],["-1","👎"],["laugh","😄"],["hooray","🎉"],["confused","😕"],["heart","❤️"],["rocket","🚀"],["eyes","👀"]]
+    | map(($r[.[0]] // 0) as $n | select($n > 0) | (.[1] + " " + ($n|tostring)))
+    | if length > 0 then join("   ") else "" end;
+'
+
 # Render the full preview for a pull request as markdown (details, description,
 # reviews, comments and a checks table), piped through md. "gh ... view" is
 # queried as JSON so the markdown can be assembled with jq.
@@ -387,8 +405,8 @@ build_pr_preview() {
   local number="$2"
   {
     gh pr view "$number" --repo "$repo" \
-      --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,reviewDecision,reviewRequests,body,reviews,comments \
-      2>/dev/null | jq -r '
+      --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
+      2>/dev/null | jq -r "$FZFGH_REACTIONS_JQ"'
       [
         "# " + (.title // "-"),
         "",
@@ -407,17 +425,20 @@ build_pr_preview() {
                          else "@" + (.login // "?") end)
                    | join(" "))
            else empty end),
-        (if (.labels|length) > 0 then "- **Labels:** " + (.labels|map("`"+.name+"`")|join(" ")) else empty end)
+        (if (.labels|length) > 0 then "- **Labels:** " + (.labels|map("`"+.name+"`")|join(" ")) else empty end),
+        ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "- **Reactions:** " + $r else empty end)
       ]
       + ["", "---", ""]
       + (((.body // "") | gsub("\r";"")) as $b | if ($b|test("\\S")) then [$b] else ["_No description provided._"] end)
       + (if (.reviews|length) > 0
            then ["", "# Reviews", ""] + [ .reviews[] | select((.state//"") != "PENDING")
-                  | "**@" + (.author.login//"?") + "** \u2014 " + (.state//"") + "\n\n" + ((.body//"")|gsub("\r";"")) + "\n" ]
+                  | "**@" + (.author.login//"?") + "** \u2014 " + (.state//"") + "\n\n" + ((.body//"")|gsub("\r";""))
+                    + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n" ]
            else [] end)
       + (if (.comments|length) > 0
            then ["", "# Comments", ""] + [ .comments[]
-                  | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";"")) + "\n" ]
+                  | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";""))
+                    + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n" ]
            else [] end)
       | join("\n")
     '
@@ -427,7 +448,7 @@ build_pr_preview() {
     local rc
     rc="$(gh api --paginate "repos/$repo/pulls/$number/comments" 2>/dev/null)"
     if [[ -n "$rc" && "$rc" != "[]" ]]; then
-      printf '%s' "$rc" | jq -r '
+      printf '%s' "$rc" | jq -r "$FZFGH_REACTIONS_JQ"'
         ["", "# Review comments", ""]
         + [ .[]
             | "**@" + (.user.login // "?") + "** \u00b7 `" + (.path // "?")
@@ -437,7 +458,8 @@ build_pr_preview() {
               + (if (.diff_hunk // "") != ""
                  then "```diff\n" + (.diff_hunk | gsub("\r"; "")) + "\n```\n\n"
                  else "" end)
-              + ((.body // "") | gsub("\r"; "")) + "\n" ]
+              + ((.body // "") | gsub("\r"; ""))
+              + ((.reactions | rest_reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n" ]
         | join("\n")
       '
     fi
@@ -472,8 +494,8 @@ build_issue_preview() {
   local repo="$1"
   local number="$2"
   gh issue view "$number" --repo "$repo" \
-    --json number,title,state,author,assignees,labels,createdAt,body,comments \
-    2>/dev/null | jq -r '
+    --json number,title,state,author,assignees,labels,createdAt,body,comments,reactionGroups \
+    2>/dev/null | jq -r "$FZFGH_REACTIONS_JQ"'
     [
       "# " + (.title // "-"),
       "",
@@ -482,13 +504,15 @@ build_issue_preview() {
       "- **Author:** @" + (.author.login // "?"),
       (if (.assignees|length) > 0 then "- **Assignees:** " + (.assignees|map("@"+.login)|join(" ")) else empty end),
       "- **Created:** " + (.createdAt // ""),
-      (if (.labels|length) > 0 then "- **Labels:** " + (.labels|map("`"+.name+"`")|join(" ")) else empty end)
+      (if (.labels|length) > 0 then "- **Labels:** " + (.labels|map("`"+.name+"`")|join(" ")) else empty end),
+      ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "- **Reactions:** " + $r else empty end)
     ]
     + ["", "---", ""]
     + (((.body // "") | gsub("\r";"")) as $b | if ($b|test("\\S")) then [$b] else ["_No description provided._"] end)
     + (if (.comments|length) > 0
          then ["", "# Comments", ""] + [ .comments[]
-                | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";"")) + "\n" ]
+                | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";""))
+                  + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n" ]
          else [] end)
     | join("\n")
   '
