@@ -522,6 +522,43 @@ render_issue_preview() {
   build_issue_preview "$1" "$2" | md_render
 }
 
+# Render the full preview for a single commit as markdown (details, commit
+# message and the per-file diff). Used by the commits sub-picker for the fzf
+# preview and the read-only nvim view.
+build_commit_preview() {
+  local repo="$1"
+  local sha="$2"
+  gh api "repos/$repo/commits/$sha" 2>/dev/null | jq -r '
+    def fmtfile(f):
+      [ "",
+        "## `" + (f.filename // "?") + "`  (+" + ((f.additions // 0)|tostring) + " / \u2212" + ((f.deletions // 0)|tostring) + ")",
+        "" ]
+      + (if (f.patch // "") == ""
+         then ["_Binary or no textual diff available._"]
+         else ["```diff", (f.patch | gsub("\r"; "")), "```"] end);
+    ((.commit.message // "") | gsub("\r"; "") | split("\n")) as $msg
+    | ($msg[0] // "-") as $subject
+    | (if ($msg|length) > 1 then ($msg[1:] | join("\n") | sub("^\\n+"; "")) else "" end) as $body
+    | [
+        "# " + $subject,
+        "",
+        "- **Sha:** `" + .sha + "`",
+        "- **Author:** " + (if .author.login then "@" + .author.login else (.commit.author.name // "?") end)
+          + " \u00b7 " + (.commit.author.date // ""),
+        (if (.commit.committer.date // "") != "" and (.commit.committer.date != .commit.author.date)
+           then "- **Committed:** " + .commit.committer.date else empty end),
+        "- **Changes:** " + ((.files // [])|length|tostring) + " file(s), +"
+          + ((.stats.additions // 0)|tostring) + " / \u2212" + ((.stats.deletions // 0)|tostring)
+      ]
+      + (if ($body|test("\\S")) then ["", "---", "", $body] else [] end)
+      + ["", "# Files"]
+      + (if ((.files // [])|length) > 0
+           then ([ .files[] | fmtfile(.) ] | add)
+           else ["", "_No file changes._"] end)
+    | join("\n")
+  '
+}
+
 if [[ "$1" == "__preview" ]]; then
   what="$2"
 
@@ -801,6 +838,13 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
       "$SCRIPT" __checks "$repo" "$number"
+      ;;
+
+    pr-commits)
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      "$SCRIPT" __commits "$repo" "$number"
       ;;
 
     pr-assign)
@@ -1373,6 +1417,102 @@ if [[ "$1" == "__checks" ]]; then
   exit 0
 fi
 
+# ---------- Commits sub-picker ----------
+#
+# Nested picker over the commits of a pull request. Called as:
+#   fzfgh __commits <repo> <number>
+# The preview and its own bindings call back into:
+#   fzfgh __commits-preview <repo> <sha>
+#   fzfgh __commits-action <view|browse|yank> <repo> <number> <sha>
+
+if [[ "$1" == "__commits-preview" ]]; then
+  repo="$2"
+  sha="$3"
+  [[ -z "$repo" || -z "$sha" ]] && exit 0
+  build_commit_preview "$repo" "$sha" | md_render
+  exit 0
+fi
+
+if [[ "$1" == "__commits-action" ]]; then
+  shift
+  a="$1"
+  repo="$2"
+  number="$3"
+  sha="$4"
+  [[ -z "$repo" || -z "$number" || -z "$sha" ]] && exit 0
+
+  case "$a" in
+    view)
+      # Open the commit details and diff read-only in nvim. The file is
+      # uniquely named and kept (not deleted) so several can be open at once;
+      # it shares the pruning of the other view files.
+      find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fzfgh-view-*' -type f -mmin +60 -delete 2>/dev/null
+      out="${TMPDIR:-/tmp}/fzfgh-view-${repo//\//-}-commit${sha:0:12}-$$-${RANDOM}.md"
+      build_commit_preview "$repo" "$sha" > "$out" 2>/dev/null
+      nvim -R "$out"
+      ;;
+
+    browse)
+      open "https://github.com/$repo/pull/$number/commits/$sha"
+      ;;
+
+    yank)
+      printf '%s' "$sha" | pbcopy
+      ;;
+  esac
+  exit 0
+fi
+
+if [[ "$1" == "__commits" ]]; then
+  repo="$2"
+  number="$3"
+  [[ -z "$repo" || -z "$number" ]] && exit 0
+
+  # Commits in PR order (oldest first), matching the commits tab on GitHub.
+  rows="$(gh pr view "$number" --repo "$repo" --json commits 2>/dev/null | jq -r '
+    .commits // [] | .[]
+    | .oid + "\t"
+      + "\u001b[33m" + (.oid[0:7]) + "\u001b[0m "
+      + ((.messageHeadline // "-") | gsub("[\r\n]"; " "))
+      + "  \u001b[90m" + ((.authors // []) | map(.login // .name // "?") | unique | join(", "))
+      + " \u00b7 " + ((.committedDate // "")[0:10]) + "\u001b[0m"
+  ')"
+
+  if [[ -z "$rows" ]]; then
+    echo "No commits found for $repo#$number"
+    read -n 1 -s -r -p "Press any key to continue..."
+    exit 0
+  fi
+
+  COMMITS_ACTION="$SCRIPT __commits-action"
+
+  printf '%s\n' "$rows" | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 2 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --prompt "$ICON_PR Commits $repo#$number: " \
+    --border rounded \
+    --border-label " $ICON_PR Commits $repo#$number " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "enter:execute($COMMITS_ACTION view $repo $number {1})" \
+    --bind "alt-o:execute($COMMITS_ACTION browse $repo $number {1})" \
+    --bind "alt-y:execute($COMMITS_ACTION yank $repo $number {1})" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __commits-preview $repo {1}"
+  exit 0
+fi
+
 # ---------- Diff (hunk) browser ----------
 #
 # A nested picker over the hunks of a pull request. Called as:
@@ -1788,8 +1928,9 @@ Usage:
 Browse GitHub notifications, pull requests and issues. Mark notifications as
 read or done. Open, edit, assign, label, merge, review, comment, and close pull
 requests. Browse pull request diffs hunk-by-hunk, view and reply to review
-threads, and create new comments on a line or range. Open, edit, assign, label,
-comment, and close issues.
+threads, and create new comments on a line or range. Browse the commits of a
+pull request with per-commit diffs. Open, edit, assign, label, comment, and
+close issues.
 
 Notification Keybindings:
   enter  : open notification
@@ -1821,6 +1962,9 @@ Pull Request Keybindings:
            comment and delete branch)
   alt-k  : show checks; enter - view job summary and logs; alt-r - rerun failed
            job; alt-o - open check in the web browser
+  alt-s  : show commits; enter - view commit details and diff in nvim;
+           alt-o - open commit in the web browser; alt-y - copy commit sha to
+           the clipboard
   alt-w  : toggle draft / ready for review
   alt-v  : review pull request (approve / comment / request changes)
   alt-q  : request a review (suggested + assignable reviewers)
@@ -1927,6 +2071,7 @@ run_prs() {
     --bind "alt-c:execute($ACTION pr-comment {1} {2})+refresh-preview" \
     --bind "alt-a:execute($ACTION pr-assign {1} {2})+refresh-preview" \
     --bind "alt-k:execute($ACTION pr-checks {1} {2})" \
+    --bind "alt-s:execute($ACTION pr-commits {1} {2})" \
     --bind "alt-w:execute($ACTION pr-toggle-draft {1} {2} {3})+reload($SCRIPT __list prs)" \
     --bind "alt-x:execute($ACTION pr-close {1} {2})+reload($SCRIPT __list prs)" \
     --preview-window "right:65%" \
