@@ -1066,6 +1066,9 @@ Usage:
   fzfslack                 browse conversations, messages and threads
   fzfslack search [query]  search messages across the workspace
   fzfslack activity        browse your activity feed (mentions, reactions, ...)
+  fzfslack tokens [file]   extract FZFSLACK_XOXC / FZFSLACK_XOXD from a copied
+                           "Copy as cURL" Slack request (file, stdin, or a temp
+                           file opened in \$EDITOR) and print them as exports
 
 The search query accepts Slack's search modifiers, e.g. from:@user, in:#channel,
 before:YYYY-MM-DD, after:YYYY-MM-DD, has:link, has::emoji: - combine them freely
@@ -1099,6 +1102,7 @@ Message Keybindings:
   alt-n  : write a new message to the conversation
   alt-o  : open message in the Slack app
   alt-y  : copy message permalink to the clipboard
+  alt-f  : open a file attached to the message / thread
   alt-m  : mark conversation as read
   ctrl-r : reload list
   ctrl-p : toggle preview
@@ -1155,6 +1159,60 @@ EOF
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
   usage
+  exit 0
+fi
+
+# ---------- Sub-command: tokens ----------
+# Extract the browser session tokens (xoxc / xoxd) from a copied "Copy as cURL"
+# Slack API request and print them as ready-to-source export statements. The
+# curl command is read from a file argument, from stdin, or - interactively -
+# from a temp file opened in $EDITOR where the user pastes the command. This
+# runs before the preconditions below so it works without FZFSLACK_XOXC /
+# FZFSLACK_XOXD being set.
+if [[ "$1" == "tokens" ]]; then
+  shift
+  input=""
+  if [[ -n "$1" && "$1" != "-" ]]; then
+    if [[ -f "$1" ]]; then
+      input="$(cat "$1")"
+    else
+      echo "fzfslack: file not found: $1" >&2
+      exit 1
+    fi
+  elif [[ ! -t 0 ]]; then
+    input="$(cat)"
+  else
+    tf="$(mktemp)"
+    trap 'rm -f "$tf" 2>/dev/null' EXIT
+    printf '%s\n' \
+      "# Paste the Slack \"Copy as cURL\" command below, then save and quit." \
+      "# Lines starting with # are ignored." \
+      "" >"$tf"
+    "${EDITOR:-nvim}" "$tf"
+    input="$(grep -v '^#' "$tf")"
+    rm -f "$tf"
+    trap - EXIT
+    if [[ -z "${input//[[:space:]]/}" ]]; then
+      echo "fzfslack: aborted (no curl command provided)." >&2
+      exit 1
+    fi
+  fi
+
+  # xoxc lives in the "token" form field of --data-raw (alphanumerics + dashes);
+  # xoxd is the URL-encoded "d" cookie value in the Cookie header (everything up
+  # to the next "; ", so keep it exactly as-is).
+  xoxc="$(grep -oE "xoxc-[A-Za-z0-9-]+" <<<"$input" | head -n1)"
+  xoxd="$(grep -oE "xoxd-[^;'\"[:space:]]+" <<<"$input" | head -n1)"
+
+  if [[ -z "$xoxc" || -z "$xoxd" ]]; then
+    echo "fzfslack: could not extract tokens from the curl command." >&2
+    [[ -z "$xoxc" ]] && echo "  missing xoxc token (\"token\" form field in --data-raw)" >&2
+    [[ -z "$xoxd" ]] && echo "  missing xoxd token (\"d\" cookie in the Cookie header)" >&2
+    exit 1
+  fi
+
+  printf 'export FZFSLACK_XOXD="%s"\n' "$xoxd"
+  printf 'export FZFSLACK_XOXC="%s"\n' "$xoxc"
   exit 0
 fi
 
@@ -1360,7 +1418,7 @@ if [[ "$1" == "activity" ]]; then
 fi
 if [[ -n "$1" ]]; then
   echo "Unknown command: $1" >&2
-  echo "Usage: fzfslack [search [query] | activity]" >&2
+  echo "Usage: fzfslack [search [query] | activity | tokens [file]]" >&2
   exit 1
 fi
 
