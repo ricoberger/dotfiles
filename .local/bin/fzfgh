@@ -1191,9 +1191,15 @@ if [[ "$1" == "__action" ]]; then
       repo="$1"
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
-      # Pick the close reason. Selecting an entry doubles as the confirmation;
-      # escape aborts.
-      choice="$(printf '%s\n' "Close as completed" "Close as not planned" "Close as duplicate" | fzf \
+      # Pick the close reason (optionally leaving a closing comment). Selecting
+      # an entry doubles as the confirmation; escape aborts.
+      choice="$(printf '%s\n' \
+        "Close as completed" \
+        "Close as not planned" \
+        "Close as duplicate" \
+        "Close as completed with comment" \
+        "Close as not planned with comment" \
+        "Close as duplicate with comment" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
         --bind "alt-h:execute($SCRIPT --help | less -R)" \
@@ -1205,11 +1211,30 @@ if [[ "$1" == "__action" ]]; then
         --border rounded)"
       [[ -z "$choice" ]] && exit 0
       case "$choice" in
-        "Close as completed") reason="completed" ;;
-        "Close as not planned") reason="not planned" ;;
-        "Close as duplicate") reason="duplicate" ;;
+        "Close as completed"*) reason="completed" ;;
+        "Close as not planned"*) reason="not planned" ;;
+        "Close as duplicate"*) reason="duplicate" ;;
       esac
-      if ! gh issue close "$number" --repo "$repo" --reason "$reason"; then
+
+      close_args=(--repo "$repo" --reason "$reason")
+
+      # The "with comment" variants open nvim to write the closing comment. An
+      # empty comment aborts the close.
+      if [[ "$choice" == *"with comment" ]]; then
+        dir="$(mktemp -d)"
+        tmp="$dir/comment.md"
+        nvim "$tmp"
+        if [[ ! -s "$tmp" ]]; then
+          rm -rf "$dir"
+          echo "A comment is required to close $repo#$number"
+          read -n 1 -s -r -p "Press any key to continue..."
+          exit 0
+        fi
+        close_args+=(--comment "$(cat "$tmp")")
+        rm -rf "$dir"
+      fi
+
+      if ! gh issue close "$number" "${close_args[@]}"; then
         read -n 1 -s -r -p "Press any key to continue..."
       fi
       ;;
@@ -1993,7 +2018,8 @@ Issue Keybindings:
   alt-a  : assign issue to me
   alt-e  : edit issue title / body
   alt-c  : add a comment
-  alt-x  : close the issue (completed / not planned / duplicate)
+  alt-x  : close the issue (completed / not planned / duplicate, optionally
+           with a comment)
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
