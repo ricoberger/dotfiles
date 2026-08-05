@@ -24,9 +24,15 @@ FZFSLACK_HISTORY_LIMIT="${FZFSLACK_HISTORY_LIMIT:-50}"
 FZFSLACK_PREVIEW_LIMIT="${FZFSLACK_PREVIEW_LIMIT:-15}"
 FZFSLACK_SEARCH_COUNT="${FZFSLACK_SEARCH_COUNT:-40}"
 
-# Per-run cache directory (raw JSON, user-name cache, team id). A stable path
+# Per-run cache directory (raw JSON, rendered previews). A stable path
 # exported to the fzf child processes. Set up in main().
 FZFSLACK_CACHE_DIR="${FZFSLACK_CACHE_DIR:-}"
+# Persistent cache directory (user / channel display names), shared across runs
+# so names do not have to be re-resolved on every start. Entries are pruned
+# after 7 days in main() so renames eventually propagate.
+FZFSLACK_PERSIST_DIR="${FZFSLACK_PERSIST_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/fzfslack}"
+# Seconds a rendered preview is reused before its data is fetched again.
+FZFSLACK_PREVIEW_TTL="${FZFSLACK_PREVIEW_TTL:-30}"
 # Team id used for slack:// deep links. Exported once resolved.
 FZFSLACK_TEAM="${FZFSLACK_TEAM:-}"
 
@@ -205,7 +211,7 @@ JQEOF
 api() {
   local method="$1"
   shift
-  curl -s --max-time 15 "$FZFSLACK_API_BASE/$method" \
+  curl -s --compressed --max-time 15 "$FZFSLACK_API_BASE/$method" \
     -H "Cookie: d=$FZFSLACK_XOXD" \
     --data-urlencode "token=$FZFSLACK_XOXC" \
     "$@"
@@ -225,6 +231,20 @@ md_render() {
   fi
 }
 
+# True when a cached preview file exists, is younger than FZFSLACK_PREVIEW_TTL
+# seconds and is not older than an optional source file ($2) whose refresh must
+# invalidate it. Previews are cached per run (raw Markdown, pre-render, so a
+# terminal resize re-wraps correctly) to keep cursor moves from re-hitting the
+# API for rows that were already previewed.
+preview_fresh() {
+  local f="$1" src="$2" m now
+  [[ -f "$f" ]] || return 1
+  [[ -n "$src" && "$src" -nt "$f" ]] && return 1
+  m="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)" || return 1
+  now="$(date +%s)"
+  (( now - m < FZFSLACK_PREVIEW_TTL ))
+}
+
 # Print a status message and wait for a keypress. Used by action handlers that
 # run on fzf's alternate screen so a transient message is seen before fzf
 # redraws the list.
@@ -234,13 +254,19 @@ pause_msg() {
   echo
 }
 
+# Directory of the persistent name caches for the current team (user / channel
+# display names survive across runs; ids are unique per team).
+persist_dir() {
+  printf '%s/%s' "$FZFSLACK_PERSIST_DIR" "${FZFSLACK_TEAM:-default}"
+}
+
 # Resolve a user id to a display name (display_name, else real_name, else the
-# handle). Cached under $FZFSLACK_CACHE_DIR/users/<id> so repeated lookups in
-# previews / rows do not re-hit the API.
+# handle). Cached persistently under $(persist_dir)/users/<id> so names survive
+# across runs and repeated lookups in previews / rows do not re-hit the API.
 resolve_user() {
   local id="$1" f name
   [[ -z "$id" ]] && { printf 'unknown'; return; }
-  f="$FZFSLACK_CACHE_DIR/users/$id"
+  f="$(persist_dir)/users/$id"
   if [[ -f "$f" ]]; then
     cat "$f"
     return
@@ -251,30 +277,40 @@ resolve_user() {
       | (if $d == "" then (.user.profile.real_name // .user.real_name // .user.name // "") else $d end)
     else "" end')"
   [[ -z "$name" ]] && name="$id"
-  mkdir -p "$FZFSLACK_CACHE_DIR/users"
+  mkdir -p "$(persist_dir)/users"
   printf '%s' "$name" > "$f"
   printf '%s' "$name"
 }
 
 # Build a compact {id:name} JSON map for the newline-separated user ids on
-# stdin, resolving each (cached). Echoed to stdout for use as a jq --argjson.
+# stdin. Ids missing from the persistent cache are resolved in parallel (8-way)
+# and the map is assembled from the cache files in a single jq pass. Echoed to
+# stdout for use as a jq --argjson.
 build_user_map() {
-  local id nm map='{}'
+  local ids id dir missing
+  dir="$(persist_dir)/users"
+  ids="$(grep -v '^$' | sort -u)"
+  [[ -z "$ids" ]] && { printf '{}'; return; }
+  mkdir -p "$dir"
+  missing="$(while IFS= read -r id; do
+    [[ -f "$dir/$id" ]] || printf '%s\n' "$id"
+  done <<<"$ids")"
+  [[ -n "$missing" ]] &&
+    printf '%s\n' "$missing" | xargs -n 1 -P 8 "$SCRIPT" __resolve-user >/dev/null 2>&1
   while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
-    nm="$(resolve_user "$id")"
-    map="$(jq -c --arg id "$id" --arg nm "$nm" '. + {($id): $nm}' <<<"$map")"
-  done
-  printf '%s' "$map"
+    printf '%s\t%s\n' "$id" "$(cat "$dir/$id" 2>/dev/null || printf '%s' "$id")"
+  done <<<"$ids" |
+    jq -R -s -c '[split("\n")[] | select(. != "") | split("\t")
+      | {(.[0]): ((.[1:] | join("\t")) | if . == "" then "unknown" else . end)}] | add // {}'
 }
 
 # Resolve a conversation id to a display label ("#name" for channels, "@user"
-# for DMs). Cached under $FZFSLACK_CACHE_DIR/chan/<id>. Used by the activity list
-# to name each item's location without a per-item message fetch.
+# for DMs). Cached persistently under $(persist_dir)/chan/<id>. Used by the
+# activity list to name each item's location without a per-item message fetch.
 resolve_channel() {
   local id="$1" f label info
   [[ -z "$id" ]] && { printf 'unknown'; return; }
-  f="$FZFSLACK_CACHE_DIR/chan/$id"
+  f="$(persist_dir)/chan/$id"
   if [[ -f "$f" ]]; then
     cat "$f"
     return
@@ -290,21 +326,30 @@ resolve_channel() {
     fi
   fi
   [[ -z "$label" || "$label" == "#" || "$label" == "@" ]] && label="$id"
-  mkdir -p "$FZFSLACK_CACHE_DIR/chan"
+  mkdir -p "$(persist_dir)/chan"
   printf '%s' "$label" > "$f"
   printf '%s' "$label"
 }
 
 # Build a compact {id:label} JSON map for the newline-separated conversation ids
-# on stdin (cached). Echoed to stdout for use as a jq --argjson.
+# on stdin (persistently cached, missing ids resolved in parallel). Echoed to
+# stdout for use as a jq --argjson.
 build_channel_map() {
-  local id lbl map='{}'
+  local ids id dir missing
+  dir="$(persist_dir)/chan"
+  ids="$(grep -v '^$' | sort -u)"
+  [[ -z "$ids" ]] && { printf '{}'; return; }
+  mkdir -p "$dir"
+  missing="$(while IFS= read -r id; do
+    [[ -f "$dir/$id" ]] || printf '%s\n' "$id"
+  done <<<"$ids")"
+  [[ -n "$missing" ]] &&
+    printf '%s\n' "$missing" | xargs -n 1 -P 8 "$SCRIPT" __resolve-channel >/dev/null 2>&1
   while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
-    lbl="$(resolve_channel "$id")"
-    map="$(jq -c --arg id "$id" --arg lbl "$lbl" '. + {($id): $lbl}' <<<"$map")"
-  done
-  printf '%s' "$map"
+    printf '%s\t%s\n' "$id" "$(cat "$dir/$id" 2>/dev/null || printf '%s' "$id")"
+  done <<<"$ids" |
+    jq -R -s -c '[split("\n")[] | select(. != "") | split("\t")
+      | {(.[0]): ((.[1:] | join("\t")) | if . == "" then "unknown" else . end)}] | add // {}'
 }
 
 # Common jq --arg/--argjson bundle passed to the row / preview builders so the
@@ -331,6 +376,18 @@ conv_last_read() {
     ((.channels // []) + (.ims // []) + (.mpims // []))
     | map(select(.id == $id)) | (.[0].last_read // "0")' "$f" 2>/dev/null
 }
+
+# ---------- Sub-commands: __resolve-user / __resolve-channel ----------
+# Resolve a single id into the persistent name cache. Used by build_user_map /
+# build_channel_map as xargs -P targets to fan the API lookups out in parallel.
+if [[ "$1" == "__resolve-user" ]]; then
+  resolve_user "$2"
+  exit 0
+fi
+if [[ "$1" == "__resolve-channel" ]]; then
+  resolve_channel "$2"
+  exit 0
+fi
 
 # ---------- Sub-command: __list-conversations ----------
 # Emits TAB-separated rows: <type>\t<id>\t<name>\t<display>
@@ -444,8 +501,15 @@ fi
 
 # ---------- Sub-command: __preview-conversation ----------
 # Renders the most recent messages of a conversation as Markdown (chronological).
+# The raw Markdown is cached for FZFSLACK_PREVIEW_TTL seconds so moving the
+# cursor back over a row does not re-hit the API.
 if [[ "$1" == "__preview-conversation" ]]; then
   channel="$2"
+  pf="${FZFSLACK_CACHE_DIR:+$FZFSLACK_CACHE_DIR/preview-conv-$channel.md}"
+  if [[ -n "$pf" ]] && preview_fresh "$pf" ""; then
+    md_render < "$pf"
+    exit 0
+  fi
   hist="$(api conversations.history \
     --data-urlencode "channel=$channel" \
     --data-urlencode "limit=$FZFSLACK_PREVIEW_LIMIT")"
@@ -455,7 +519,7 @@ if [[ "$1" == "__preview-conversation" ]]; then
   fi
   ids="$( { jq -r '.messages[]?.user // empty' <<<"$hist"; jq -r '.messages[]? | ((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$hist"; } | sort -u)"
   map="$(printf '%s\n' "$ids" | build_user_map)"
-  jq_args -r --argjson map "$map" "$JQLIB"'
+  out="$(jq_args -r --argjson map "$map" "$JQLIB"'
     [.messages[] | select(.subtype == null or .subtype == "thread_broadcast" or (msgtext) != "")]
     | map(
         "# " + author(.) + " · " + fmt_full(.ts) + "\n\n"
@@ -464,7 +528,9 @@ if [[ "$1" == "__preview-conversation" ]]; then
         + ((.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)
         + (if (.reply_count // 0) > 0 then "\n\n> " + ((.reply_count | tostring)) + " replies" else "" end)
       )
-    | join("\n\n---\n\n")' <<<"$hist" | md_render
+    | join("\n\n---\n\n")' <<<"$hist")"
+  [[ -n "$pf" ]] && printf '%s' "$out" > "$pf"
+  printf '%s' "$out" | md_render
   exit 0
 fi
 
@@ -516,6 +582,13 @@ if [[ "$1" == "__preview-message" ]]; then
   ts="$3"
   cache="$FZFSLACK_CACHE_DIR/history-$channel.json"
   [[ -f "$cache" ]] || { echo "No message data." | md_render; exit 0; }
+  # Serve the cached rendering while fresh; a list reload rewrites the history
+  # cache and thereby invalidates it.
+  pf="$FZFSLACK_CACHE_DIR/preview-msg-$channel-$ts.md"
+  if preview_fresh "$pf" "$cache"; then
+    md_render < "$pf"
+    exit 0
+  fi
   msg="$(jq -c --arg ts "$ts" '.messages[] | select(.ts == $ts)' "$cache")"
   [[ -z "$msg" ]] && { echo "Message not found." | md_render; exit 0; }
   reply_count="$(jq -r '.reply_count // 0' <<<"$msg")"
@@ -534,7 +607,7 @@ if [[ "$1" == "__preview-message" ]]; then
     # Render the whole thread (parent first, replies oldest-first).
     ids="$( { jq -r '.messages[]?.user // empty' <<<"$thread"; jq -r '.messages[]? | ((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$thread"; } | sort -u)"
     map="$(printf '%s\n' "$ids" | build_user_map)"
-    jq_args -r --argjson map "$map" "$JQLIB"'
+    out="$(jq_args -r --argjson map "$map" "$JQLIB"'
       [.messages[]]
       | map(
           "# " + author(.) + " · " + fmt_full(.ts) + "\n\n"
@@ -542,19 +615,23 @@ if [[ "$1" == "__preview-message" ]]; then
           + (if ((.text // "") != "" or ((.attachments // []) | length) > 0 or ([.blocks[]? | select(.type == "section" or .type == "header" or .type == "context" or .type == "actions")] | length) > 0) then ((allfiles) | if length > 0 then "\n\n" + (map($i_file + " " + (.name // .title // "file")) | join("\n")) else "" end) else "" end)
           + ((.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)
         )
-      | join("\n\n---\n\n")' <<<"$thread" | md_render
+      | join("\n\n---\n\n")' <<<"$thread")"
+    printf '%s' "$out" > "$pf"
+    printf '%s' "$out" | md_render
     exit 0
   fi
 
   ids="$( { jq -r '.user // empty' <<<"$msg"; jq -r '((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$msg"; } | sort -u)"
   map="$(printf '%s\n' "$ids" | sort -u | build_user_map)"
-  jq_args -r --argjson map "$map" "$JQLIB"'
+  out="$(jq_args -r --argjson map "$map" "$JQLIB"'
     . as $m
     | "# " + author($m) + " · " + fmt_full(.ts) + "\n\n"
     + ((msgtext) | decode | render_body)
     + (if (($m.text // "") != "" or (($m.attachments // []) | length) > 0 or ([$m.blocks[]? | select(.type == "section" or .type == "header" or .type == "context" or .type == "actions")] | length) > 0) then (($m | allfiles) | if length > 0 then "\n\n" + (map($i_file + " " + (.name // .title // "file")) | join("\n")) else "" end) else "" end)
     + (($m.reactions // []) | if length > 0 then "\n\n---\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)' \
-    <<<"$msg" | md_render
+    <<<"$msg")"
+  printf '%s' "$out" > "$pf"
+  printf '%s' "$out" | md_render
   exit 0
 fi
 
@@ -593,6 +670,11 @@ if [[ "$1" == "__preview-search" ]]; then
   # Prefer the cached search result (correct even for thread replies, which are
   # not in conversations.history); fall back to fetching the single message.
   cache="$FZFSLACK_CACHE_DIR/search.json"
+  pf="${FZFSLACK_CACHE_DIR:+$FZFSLACK_CACHE_DIR/preview-search-$channel-$ts.md}"
+  if [[ -n "$pf" ]] && preview_fresh "$pf" "$cache"; then
+    md_render < "$pf"
+    exit 0
+  fi
   msg=""
   [[ -f "$cache" ]] && msg="$(jq -c --arg ts "$ts" '.messages.matches[]? | select(.ts == $ts)' "$cache")"
   if [[ -z "$msg" ]]; then
@@ -606,10 +688,12 @@ if [[ "$1" == "__preview-search" ]]; then
   [[ -z "$msg" ]] && { echo "Message not available." | md_render; exit 0; }
   ids="$( { jq -r '.user // empty' <<<"$msg"; jq -r '((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$msg"; } | sort -u)"
   map="$(printf '%s\n' "$ids" | sort -u | build_user_map)"
-  jq_args -r --argjson map "$map" "$JQLIB"'
+  out="$(jq_args -r --argjson map "$map" "$JQLIB"'
     . as $m
     | "# " + author($m) + " · " + fmt_full(.ts) + "\n\n"
-    + ((msgtext) | decode | render_body)' <<<"$msg" | md_render
+    + ((msgtext) | decode | render_body)' <<<"$msg")"
+  [[ -n "$pf" ]] && printf '%s' "$out" > "$pf"
+  printf '%s' "$out" | md_render
   exit 0
 fi
 
@@ -703,6 +787,13 @@ if [[ "$1" == "__preview-activity" ]]; then
     printf '# %s\n\nNo message to preview for this item.\n' "$type" | md_render
     exit 0
   fi
+  # Serve the cached rendering while fresh; a feed reload rewrites activity.json
+  # and thereby invalidates it.
+  pf="${FZFSLACK_CACHE_DIR:+$FZFSLACK_CACHE_DIR/preview-act-$channel-$ts-${thread_ts:-0}.md}"
+  if [[ -n "$pf" ]] && preview_fresh "$pf" "$FZFSLACK_CACHE_DIR/activity.json"; then
+    md_render < "$pf"
+    exit 0
+  fi
 
   if [[ "$type" == "thread_v2" && -n "$thread_ts" ]]; then
     resp="$(api conversations.replies \
@@ -715,14 +806,16 @@ if [[ "$1" == "__preview-activity" ]]; then
     fi
     ids="$( { jq -r '.messages[]?.user // empty' <<<"$resp"; jq -r '.messages[]? | ((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$resp"; } | sort -u)"
     map="$(printf '%s\n' "$ids" | build_user_map)"
-    jq_args -r --argjson map "$map" "$JQLIB"'
+    out="$(jq_args -r --argjson map "$map" "$JQLIB"'
       [.messages[]]
       | map(
           "# " + author(.) + " · " + fmt_full(.ts) + "\n\n"
           + ((msgtext) | decode | render_body)
           + ((.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)
         )
-      | join("\n\n---\n\n")' <<<"$resp" | md_render
+      | join("\n\n---\n\n")' <<<"$resp")"
+    [[ -n "$pf" ]] && printf '%s' "$out" > "$pf"
+    printf '%s' "$out" | md_render
     exit 0
   fi
 
@@ -735,11 +828,13 @@ if [[ "$1" == "__preview-activity" ]]; then
   [[ -z "$msg" ]] && { printf '# %s\n\nMessage not available.\n' "$type" | md_render; exit 0; }
   ids="$( { jq -r '.user // empty' <<<"$msg"; jq -r '((.text // "") + " " + ((.attachments // []) | map((.text // "") + " " + (.pretext // "") + " " + (.title // "")) | join(" "))) | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$msg"; } | sort -u)"
   map="$(printf '%s\n' "$ids" | sort -u | build_user_map)"
-  jq_args -r --argjson map "$map" "$JQLIB"'
+  out="$(jq_args -r --argjson map "$map" "$JQLIB"'
     . as $m
     | "# " + author($m) + " · " + fmt_full(.ts) + "\n\n"
     + ((msgtext) | decode | render_body)
-    + (($m.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)' <<<"$msg" | md_render
+    + (($m.reactions // []) | if length > 0 then "\n\n" + (map(":" + .name + ": " + (.count | tostring)) | join("   ")) else "" end)' <<<"$msg")"
+  [[ -n "$pf" ]] && printf '%s' "$out" > "$pf"
+  printf '%s' "$out" | md_render
   exit 0
 fi
 
@@ -1154,6 +1249,9 @@ Environment:
   FZFSLACK_HISTORY_LIMIT    : messages fetched per conversation (50)
   FZFSLACK_PREVIEW_LIMIT    : messages shown in the conversation preview (15)
   FZFSLACK_SEARCH_COUNT     : search results fetched (40)
+  FZFSLACK_PREVIEW_TTL      : seconds a rendered preview is reused (30)
+  FZFSLACK_PERSIST_DIR      : persistent user/channel name cache directory
+                              (~/.cache/fzfslack, entries pruned after 7 days)
 EOF
 }
 
@@ -1238,12 +1336,17 @@ if [[ "$(jq -r '.ok' <<<"$auth" 2>/dev/null)" != "true" ]]; then
 fi
 FZFSLACK_TEAM="$(jq -r '.team_id // ""' <<<"$auth")"
 
-# Per-run cache dir shared with the fzf child processes.
+# Per-run cache dir shared with the fzf child processes; persistent name cache
+# shared across runs (entries older than 7 days are pruned so renames
+# eventually propagate).
 FZFSLACK_CACHE_DIR="$(mktemp -d -t fzfslack)"
-mkdir -p "$FZFSLACK_CACHE_DIR/users"
+mkdir -p "$FZFSLACK_PERSIST_DIR/${FZFSLACK_TEAM:-default}/users" \
+  "$FZFSLACK_PERSIST_DIR/${FZFSLACK_TEAM:-default}/chan"
+find "$FZFSLACK_PERSIST_DIR" -type f -mtime +7 -delete 2>/dev/null
 export FZFSLACK_WORKSPACE_URL FZFSLACK_XOXC FZFSLACK_XOXD FZFSLACK_API_BASE
-export FZFSLACK_CACHE_DIR FZFSLACK_TEAM
+export FZFSLACK_CACHE_DIR FZFSLACK_PERSIST_DIR FZFSLACK_TEAM
 export FZFSLACK_REFRESH_INTERVAL FZFSLACK_HISTORY_LIMIT FZFSLACK_PREVIEW_LIMIT FZFSLACK_SEARCH_COUNT
+export FZFSLACK_PREVIEW_TTL
 trap 'rm -rf "$FZFSLACK_CACHE_DIR" 2>/dev/null' EXIT
 
 # ---------- Runners ----------
