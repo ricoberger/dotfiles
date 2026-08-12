@@ -2368,12 +2368,19 @@ case "${1:-}" in
           ;;
       esac
     else
-      pr="$(gh pr view --json headRepositoryOwner,headRepository,number 2>/dev/null)"
+      # Resolve the PR for the current branch. Derive the repository and number
+      # from the PR's canonical url (the base repository) rather than the head
+      # repository, so it also works for pull requests coming from a fork (whose
+      # head repository is the fork, but whose number lives in the base repo).
+      pr="$(gh pr view --json url,number 2>/dev/null)"
       if [[ -z "$pr" ]]; then
         echo "No pull request found for the current branch" >&2
         exit 1
       fi
-      FZFGH_ONE_REPO="$(printf '%s' "$pr" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')"
+      url="$(printf '%s' "$pr" | jq -r '.url')"
+      stripped="${url#https://}"
+      stripped="${stripped#github.com/}"
+      FZFGH_ONE_REPO="${stripped%%/pull/*}"
       FZFGH_ONE_NUMBER="$(printf '%s' "$pr" | jq -r '.number')"
       run_prs ""
     fi
