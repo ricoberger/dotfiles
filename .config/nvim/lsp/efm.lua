@@ -86,7 +86,7 @@ return {
   root_markers = { ".git" },
   filetypes = vim.tbl_keys(languages),
   settings = {
-    rootMarkers = { ".git/" },
+    rootMarkers = { ".git", ".git/" },
     languages = languages,
   },
 }

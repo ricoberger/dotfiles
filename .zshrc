@@ -156,8 +156,16 @@ untargz() { tar -zxvf $1; rm -r $1; }
 webshare() { if [[ $(python --version 2>&1) == *2\.* ]]; then python -m SimpleHTTPServer $@; else python -m http.server $@; fi; }
 
 cdp() {
+  local dir
   REPOS=`find $HOME/Documents/GitHub -type d -maxdepth 2 -mindepth 2`
-  cd $(echo "/Users/ricoberger/Desktop\n/Users/ricoberger/Documents\n/Users/ricoberger/Downloads\n$REPOS" | fzf)
+  dir=$(echo "/Users/ricoberger/Desktop\n/Users/ricoberger/Documents\n/Users/ricoberger/Downloads\n$REPOS" | fzf) || return
+  [ -n "$dir" ] && cd "$dir"
+}
+
+cdw() {
+  local dir
+  dir=$(git worktree list | fzf | awk '{print $1}') || return
+  [ -n "$dir" ] && cd "$dir"
 }
 
 kctx() {

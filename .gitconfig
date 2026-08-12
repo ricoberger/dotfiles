@@ -49,6 +49,6 @@
 
 [alias]
 	st = "!$HOME/.local/bin/git-status"
-	wta = "!f() { git worktree add -b \"$1\" \"./.worktrees/$1\"; }; f"
-	wtr = "!f() { git worktree remove \"./.worktrees/$1\"; }; f"
+	wta = "!f() { common=$(git rev-parse --path-format=absolute --git-common-dir); repo=$(basename \"$(dirname \"$common\")\"); dir=\"$HOME/.worktrees/$repo/$1\"; git worktree add -b \"$1\" \"$dir\"; }; f"
+	wtr = "!f() { common=$(git rev-parse --path-format=absolute --git-common-dir); repo=$(basename \"$(dirname \"$common\")\"); dir=\"$HOME/.worktrees/$repo/$1\"; git worktree remove \"$dir\"; }; f"
 	wtl = "!f() { git worktree list; }; f"
