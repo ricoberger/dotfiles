@@ -1063,8 +1063,9 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
 
-      # Only check out a PR that belongs to the current repository and only when
-      # the worktree is clean, so no local changes are unexpectedly overwritten.
+      # Only check out a PR that belongs to the current repository, so its head
+      # ref can be fetched from origin and the worktree is created for the right
+      # repository.
       current_repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
       if [[ -z "$current_repo" ]]; then
         echo "Not inside a GitHub repository"
@@ -1076,28 +1077,87 @@ if [[ "$1" == "__action" ]]; then
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
       fi
-      if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-        echo "The worktree is not clean; commit or stash your changes first"
+
+      # Determine the PR's head branch, which becomes the worktree's branch.
+      head_ref="$(gh pr view "$number" --repo "$repo" --json headRefName -q .headRefName 2>/dev/null)"
+      if [[ -z "$head_ref" ]]; then
+        echo "Could not determine the head branch for PR $repo#$number"
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
       fi
 
-      if ! gh pr checkout "$number"; then
+      # Build the worktree path exactly like the `wta` git alias:
+      #   $HOME/.worktrees/<repo>/<branch>
+      # deriving <repo> from the common git dir so it works from any worktree.
+      common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+      if [[ -z "$common" ]]; then
+        echo "Not inside a git worktree"
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
+      fi
+      repo_name="$(basename "$(dirname "$common")")"
+      worktree_dir="$HOME/.worktrees/$repo_name/$head_ref"
+
+      # Create the worktree for the PR head, reusing it if it already exists.
+      # Create it detached first, then run `gh pr checkout` inside it so gh
+      # configures the branch's upstream / push remote. This keeps fork PRs
+      # pushable (git push from the worktree updates the fork's PR branch); a
+      # plain refs/pull/<n>/head fetch would leave the branch read-only.
+      if [[ ! -d "$worktree_dir" ]]; then
+        if ! git worktree add --detach "$worktree_dir"; then
+          echo "Failed to create worktree at $worktree_dir"
+          read -n 1 -s -r -p "Press any key to continue..."
+          exit 0
+        fi
+        if ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" ); then
+          # Roll back the empty worktree we just created.
+          git worktree remove --force "$worktree_dir" 2>/dev/null
+          echo "Failed to check out PR $repo#$number"
+          read -n 1 -s -r -p "Press any key to continue..."
+          exit 0
+        fi
       fi
 
       # Diff against the PR's up-to-date base branch (matching GitHub's "Files
-      # changed" tab). Fetch the base ref so origin/<base> is current, then diff
-      # HEAD against it; the merge-base of the two is the PR's fork point. This
-      # avoids showing extra commits when the local base branch is stale. If the
-      # fetch fails (offline, base branch deleted, ...) fall back to the plain
-      # GitDiff.
+      # changed" tab). Fetch the base ref so origin/<base> is current; worktrees
+      # share the object store, so the new worktree sees it too. If the fetch
+      # fails (offline, base branch deleted, ...) fall back to the plain GitDiff.
       base_ref="$(gh pr view "$number" --repo "$repo" --json baseRefName -q .baseRefName 2>/dev/null)"
       if [[ -n "$base_ref" ]] && git fetch origin "$base_ref" 2>/dev/null; then
-        nvim -c "GitDiff HEAD origin/$base_ref"
+        nvim_cmd="nvim -c \"GitDiff HEAD origin/$base_ref\""
       else
-        nvim -c "GitDiff"
+        nvim_cmd="nvim -c GitDiff"
+      fi
+
+      # Open the worktree in a new Ghostty tab and run the Neovim command there.
+      # Uses Ghostty's AppleScript API (1.3.0+): a new tab is created in the
+      # front window with the worktree as its working directory, then the Neovim
+      # command is typed into the tab's shell so the login shell environment is
+      # loaded before nvim starts.
+      if ! osascript - "$worktree_dir" "$nvim_cmd" >/dev/null <<'OSA'
+on run argv
+    set wd to item 1 of argv
+    set cmd to item 2 of argv
+    tell application "Ghostty"
+        activate
+        set cfg to new surface configuration
+        set initial working directory of cfg to wd
+        if (count of windows) is 0 then
+            set win to new window with configuration cfg
+            set t to selected tab of win
+        else
+            set t to new tab in front window with configuration cfg
+        end if
+        set term to focused terminal of t
+        input text cmd to term
+        send key "enter" to term
+    end tell
+end run
+OSA
+      then
+        echo "Failed to open a new Ghostty tab"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
       fi
       ;;
 
@@ -1998,8 +2058,9 @@ Pull Request Keybindings:
            alt-y - yank path to file; alt-r - reply to thread,
            alt-x - resolve / unresolve thread; alt-c - new thread on a line or
            range (nvim opens pre-filled with a ```suggestion``` block)
-  alt-g  : check out pull request and open nvim with :GitDiff command (current
-           repo only, requires a clean worktree)
+  alt-g  : check out pull request into a new git worktree at
+           ~/.worktrees/<repo>/<branch> and open it in a new Ghostty tab
+           running nvim with the :GitDiff command (current repo only)
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
