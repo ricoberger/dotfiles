@@ -405,7 +405,7 @@ build_pr_preview() {
   local number="$2"
   {
     gh pr view "$number" --repo "$repo" \
-      --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
+      --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,mergeable,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
       2>/dev/null | jq -r "$FZFGH_REACTIONS_JQ"'
       [
         "# " + (.title // "-"),
@@ -417,6 +417,11 @@ build_pr_preview() {
         "- **Created:** " + (.createdAt // ""),
         "- **Branch:** `" + (.baseRefName // "?") + " \u2190 " + (.headRefName // "?") + "`",
         "- **Changes:** +" + (.additions|tostring) + " / \u2212" + (.deletions|tostring),
+        (if (.mergeable // "") != "" then "- **Mergeable:** "
+           + (if .mergeable == "CONFLICTING" then "conflicting"
+              elif .mergeable == "MERGEABLE" then "yes"
+              else (.mergeable|ascii_downcase) end)
+           else empty end),
         (if (.reviewDecision // "") != "" then "- **Review:** " + (.reviewDecision|ascii_downcase|gsub("_";" ")) else empty end),
         (if (.reviewRequests|length) > 0
            then "- **Review requested:** "
