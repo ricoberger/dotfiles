@@ -49,6 +49,10 @@ echo "\n- Copy Neovim Configuration"
 mkdir -p ~/.config/nvim
 cp -r $(pwd)/.config/nvim ~/.config
 
+# Neovim.app: build the Finder integration and register it as the default
+# handler for text/code files (see apps/Neovim/install.sh for details).
+sh $(pwd)/apps/Neovim/install.sh
+
 # btop
 echo "\n- Copy btop Configuration"
 cp -r $(pwd)/.config/btop ~/.config

@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  File type declarations merged into Neovim.app's Info.plist by install.sh.
+
+  - CFBundleDocumentTypes lets Neovim.app claim the file types below so that
+    LaunchServices accepts it as a handler (a prerequisite for "duti" being able
+    to make it the default application).
+  - UTImportedTypeDeclarations define UTIs for extensions that macOS does not
+    know about (they otherwise resolve to unassignable "dyn.*" dynamic UTIs).
+
+  Keep this list in sync with the "duti" loop in install.sh.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<!-- System UTIs: Neovim is an alternate editor for these. -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.plain-text</string>
+				<string>public.shell-script</string>
+				<string>public.zsh-script</string>
+				<string>public.bash-script</string>
+				<string>public.python-script</string>
+				<string>com.netscape.javascript-source</string>
+				<string>com.microsoft.typescript</string>
+				<string>public.c-source</string>
+				<string>public.c-header</string>
+				<string>public.c-plus-plus-source</string>
+				<string>public.json</string>
+				<string>public.yaml</string>
+				<string>public.toml</string>
+				<string>com.microsoft.ini</string>
+				<string>net.daringfireball.markdown</string>
+				<string>com.apple.log</string>
+			</array>
+		</dict>
+		<!-- Imported UTIs (below): Neovim owns these. -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>de.ricoberger.lua-source</string>
+				<string>de.ricoberger.vim-source</string>
+				<string>de.ricoberger.go-source</string>
+				<string>de.ricoberger.rust-source</string>
+				<string>de.ricoberger.jsx-source</string>
+				<string>de.ricoberger.conf</string>
+				<string>de.ricoberger.env</string>
+				<string>de.ricoberger.gitconfig</string>
+			</array>
+		</dict>
+		<!-- Keep Neovim.app listed under "Open With" for any file. -->
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.item</string>
+				<string>public.content</string>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.lua-source</string>
+			<key>UTTypeDescription</key>
+			<string>Lua source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>lua</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.vim-source</string>
+			<key>UTTypeDescription</key>
+			<string>Vim script</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vim</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.go-source</string>
+			<key>UTTypeDescription</key>
+			<string>Go source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>go</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.rust-source</string>
+			<key>UTTypeDescription</key>
+			<string>Rust source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rs</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.jsx-source</string>
+			<key>UTTypeDescription</key>
+			<string>JSX source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.source-code</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>jsx</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.conf</string>
+			<key>UTTypeDescription</key>
+			<string>Configuration file</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>conf</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.env</string>
+			<key>UTTypeDescription</key>
+			<string>Environment file</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>env</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.ricoberger.gitconfig</string>
+			<key>UTTypeDescription</key>
+			<string>Git configuration</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gitconfig</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>
