@@ -397,6 +397,81 @@ FZFGH_REACTIONS_JQ='
     | if length > 0 then join("   ") else "" end;
 '
 
+# Build the "# References" section for a pull request / issue: the cross-repo
+# and same-repo relationships GitHub renders in the timeline ("mentioned this
+# pull request", "added a commit that referenced this") plus the "Development"
+# linked / closing issues. Emitted as markdown (heading + lines) on stdout, or
+# nothing when there are no references. $kind is "pr" or "issue". Fails silently
+# (empty output) on any API error so the rest of the preview is unaffected.
+#
+# Ordering: closing / linked issues first, then cross-references and commit
+# references in timeline (chronological) order. Duplicate events (e.g. an item
+# that both mentions the PR and has a commit referencing it) are kept as
+# separate lines, matching the web UI.
+build_references_section() {
+  local repo="$1"
+  local number="$2"
+  local kind="$3"
+  local owner="${repo%%/*}"
+  local name="${repo#*/}"
+
+  # Shared timeline fragment. CrossReferencedEvent = a PR / issue that mentions
+  # this one; ReferencedEvent = a commit that references it; ConnectedEvent =
+  # a PR manually linked to an issue via the Development sidebar.
+  local timeline_frag='timelineItems(first:100, itemTypes:[CROSS_REFERENCED_EVENT, REFERENCED_EVENT, CONNECTED_EVENT]){nodes{
+      __typename
+      ... on CrossReferencedEvent{ willCloseTarget referencedAt source{ __typename
+        ... on Issue{number title state url repository{nameWithOwner}}
+        ... on PullRequest{number title state isDraft url repository{nameWithOwner}} } }
+      ... on ReferencedEvent{ createdAt commit{oid messageHeadline} commitRepository{nameWithOwner} }
+      ... on ConnectedEvent{ createdAt subject{ __typename
+        ... on PullRequest{number title state isDraft url repository{nameWithOwner}}
+        ... on Issue{number title state url repository{nameWithOwner}} } }
+    }}'
+
+  local query
+  if [[ "$kind" == "pr" ]]; then
+    query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+      closingIssuesReferences(first:50){nodes{number title state url repository{nameWithOwner}}}
+      '"$timeline_frag"'
+    }}}'
+  else
+    query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
+      '"$timeline_frag"'
+    }}}'
+  fi
+
+  gh api graphql -f query="$query" \
+    -F owner="$owner" -F name="$name" -F number="$number" 2>/dev/null \
+    | jq -r '
+      def refline(verb; item):
+        if (item.number // null) == null then empty
+        else "- " + verb + " `" + (item.repository.nameWithOwner // "?") + "#" + (item.number|tostring) + "` \u00b7 "
+          + (item.title // "-")
+          + (if (item.state // "") != "" then " \u00b7 " + (item.state|ascii_downcase) else "" end)
+          + (if (item.isDraft // false) then " \u00b7 draft" else "" end)
+        end;
+
+      ((.data.repository.pullRequest // .data.repository.issue) // {}) as $n
+      | ([ ($n.closingIssuesReferences.nodes // [])[] | refline("may close"; .) ]) as $closing
+      | ([ ($n.timelineItems.nodes // [])[]
+           | if .__typename == "CrossReferencedEvent" then
+               { ts: (.referencedAt // ""),
+                 line: refline((if .willCloseTarget then "may be closed by" else "mentioned by" end); .source) }
+             elif .__typename == "ConnectedEvent" then
+               { ts: (.createdAt // ""), line: refline("may be closed by"; .subject) }
+             elif .__typename == "ReferencedEvent" then
+               { ts: (.createdAt // ""),
+                 line: ("- referenced by commit `" + (.commitRepository.nameWithOwner // "?")
+                        + "@" + ((.commit.oid // "")[0:7]) + "` \u00b7 " + (.commit.messageHeadline // "")) }
+             else empty end
+           | select(.line != null)
+         ] | sort_by(.ts) | map(.line)) as $timeline
+      | ($closing + $timeline) as $lines
+      | if ($lines|length) > 0 then (["# References", ""] + $lines | join("\n")) else "" end
+    ' 2>/dev/null
+}
+
 # Render the full preview for a pull request as markdown (details, description,
 # reviews, comments and a checks table), piped through md. "gh ... view" is
 # queried as JSON so the markdown can be assembled with jq.
@@ -404,9 +479,11 @@ build_pr_preview() {
   local repo="$1"
   local number="$2"
   {
+    local refs
+    refs="$(build_references_section "$repo" "$number" pr)"
     gh pr view "$number" --repo "$repo" \
       --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,mergeable,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
-      2>/dev/null | jq -r "$FZFGH_REACTIONS_JQ"'
+      2>/dev/null | jq -r --arg refs "$refs" "$FZFGH_REACTIONS_JQ"'
       [
         "# " + (.title // "-"),
         "",
@@ -435,6 +512,7 @@ build_pr_preview() {
       ]
       + ["", "---", ""]
       + (((.body // "") | gsub("\r";"")) as $b | if ($b|test("\\S")) then [$b] else ["_No description provided._"] end)
+      + (if ($refs|test("\\S")) then ["", $refs] else [] end)
       + (if (.reviews|length) > 0
            then ["", "# Reviews", ""] + [ .reviews[] | select((.state//"") != "PENDING")
                   | "**@" + (.author.login//"?") + "** \u2014 " + (.state//"") + "\n\n" + ((.body//"")|gsub("\r";""))
@@ -498,9 +576,11 @@ render_pr_preview() {
 build_issue_preview() {
   local repo="$1"
   local number="$2"
+  local refs
+  refs="$(build_references_section "$repo" "$number" issue)"
   gh issue view "$number" --repo "$repo" \
     --json number,title,state,author,assignees,labels,createdAt,body,comments,reactionGroups \
-    2>/dev/null | jq -r "$FZFGH_REACTIONS_JQ"'
+    2>/dev/null | jq -r --arg refs "$refs" "$FZFGH_REACTIONS_JQ"'
     [
       "# " + (.title // "-"),
       "",
@@ -514,6 +594,7 @@ build_issue_preview() {
     ]
     + ["", "---", ""]
     + (((.body // "") | gsub("\r";"")) as $b | if ($b|test("\\S")) then [$b] else ["_No description provided._"] end)
+    + (if ($refs|test("\\S")) then ["", $refs] else [] end)
     + (if (.comments|length) > 0
          then ["", "# Comments", ""] + [ .comments[]
                 | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";""))
