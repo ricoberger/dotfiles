@@ -46,6 +46,8 @@ Write commit messages following the Conventional Commits specification.
 4. Separate subject from body with a blank line
 5. Use the body to explain intent, nuances, gotchas, or background behind the
    change — not a paraphrase of the diff
+6. Wrap the body at 72 characters, except for long URLs, code, or fenced blocks
+   which may exceed the limit
 
 ## Breaking Changes
 

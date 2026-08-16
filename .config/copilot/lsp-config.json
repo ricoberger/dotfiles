@@ -1,0 +1,100 @@
+{
+  "lspServers": {
+    "bashls": {
+      "command": "bash-language-server",
+      "args": [
+        "start"
+      ],
+      "fileExtensions": {
+        ".sh": "shellscript",
+        ".bash": "shellscript",
+        ".inc": "shellscript",
+        ".command": "shellscript"
+      }
+    },
+    "dartls": {
+      "command": "dart",
+      "args": [
+        "language-server",
+        "--protocol=lsp"
+      ],
+      "fileExtensions": {
+        ".dart": "dart"
+      }
+    },
+    "dockerls": {
+      "command": "docker-langserver",
+      "args": [
+        "--stdio"
+      ],
+      "fileExtensions": {
+        ".dockerfile": "dockerfile"
+      }
+    },
+    "gopls": {
+      "command": "gopls",
+      "fileExtensions": {
+        ".go": "go"
+      }
+    },
+    "lua_ls": {
+      "command": "lua-language-server",
+      "fileExtensions": {
+        ".lua": "lua"
+      }
+    },
+    "pyright": {
+      "command": "pyright-langserver",
+      "args": [
+        "--stdio"
+      ],
+      "fileExtensions": {
+        ".py": "python",
+        ".pyi": "python"
+      }
+    },
+    "rust_analyzer": {
+      "command": "rust-analyzer",
+      "fileExtensions": {
+        ".rs": "rust"
+      }
+    },
+    "terraformls": {
+      "command": "terraform-ls",
+      "args": [
+        "serve"
+      ],
+      "fileExtensions": {
+        ".tf": "terraform",
+        ".tfvars": "terraform-vars"
+      }
+    },
+    "tsgo": {
+      "command": "tsgo",
+      "args": [
+        "--lsp",
+        "--stdio"
+      ],
+      "fileExtensions": {
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mjs": "javascript",
+        ".cjs": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".mts": "typescript",
+        ".cts": "typescript"
+      }
+    },
+    "yamlls": {
+      "command": "yaml-language-server",
+      "args": [
+        "--stdio"
+      ],
+      "fileExtensions": {
+        ".yaml": "yaml",
+        ".yml": "yaml"
+      }
+    }
+  }
+}

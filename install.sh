@@ -61,8 +61,10 @@ cp $(pwd)/.config/glamour-catppuccin-macchiato.json ~/.config/glamour-catppuccin
 echo "\n- Copy Agents Configuration"
 cp -r $(pwd)/.agents ~/
 
-echo "\n- Copy OpenCode Configuration"
-cp -r $(pwd)/.config/opencode ~/.config
+echo "\n- Copy Copilot Configuration"
+mkdir -p ~/.copilot
+cp  $(pwd)/.config/copilot/settings.json ~/.copilot/settings.json
+cp  $(pwd)/.config/copilot/lsp-config.json ~/.copilot/lsp-config.json
 
 # Binaries
 echo "\n- Copy Binaries"

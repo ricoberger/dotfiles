@@ -13,7 +13,6 @@ export ANDROID_HOME=/Users/ricoberger/Library/Android/sdk
 export ANDROID_NDK_HOME=/Users/ricoberger/Library/Android/sdk/ndk/27.0.12077973
 export NODE_OPTIONS="--dns-result-order=ipv4first"
 export MANPAGER="nvim +Man!"
-export OPENCODE_DISABLE_LSP_DOWNLOAD=true
 export GLAMOUR_STYLE=$HOME/.config/glamour-catppuccin-macchiato.json
 
 path=(
@@ -173,12 +172,6 @@ kctx() {
   print -z `echo "export KUBECONFIG=$(echo "$KUBECONFIGS" | fzf)"`
 }
 
-opencode-session() {
-  local sid
-  sid=$(opencode session list | tail -n +3 | fzf --with-nth 2.. --nth 1 | awk '{print $1}') || return
-  [ -n "$sid" ] && opencode -s "$sid"
-}
-
 # Completion for fzfk - suggest available Kubernetes resources for the first
 # argument and delegate the rest to kubectl's own completion when available.
 _fzfk() {
@@ -203,6 +196,19 @@ _fzfk() {
   esac
 }
 compdef _fzfk fzfk
+
+
+urltomd() {
+  if [[ -z "$1" ]]; then
+    echo "usage: urltomd <url>" >&2
+    return 1
+  fi
+
+  curl -sS -X 'POST' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_BROWSER_RUN_ACCOUNT_ID/browser-rendering/markdown" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $CLOUDFLARE_BROWSER_RUN_API_TOKEN" \
+    -d "$(jq -n --arg url "$1" '{url: $url}')" | jq -r '.result' | md
+}
 
 
 

@@ -1,0 +1,22 @@
+{
+  "model": "claude-opus-4.8",
+  "effortLevel": "high",
+  "theme": "default",
+  "includeCoAuthoredBy": false,
+  "footer": {
+    "showModelEffort": true,
+    "showDirectory": true,
+    "showBranch": true,
+    "showContextWindow": true,
+    "showQuota": false,
+    "showAiUsed": true,
+    "showAgent": true,
+    "showCodeChanges": false,
+    "showUsername": false,
+    "showSandbox": true,
+    "showYolo": true,
+    "showCiStatus": false,
+    "showPullRequest": true,
+    "showCustom": true
+  }
+}
