@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# ghostty-tab - Open a command in a new Ghostty tab or window
+#
+# Usage: ghostty-tab [working-dir] [command] [placement]
+#
+# Opens a new surface in Ghostty using its AppleScript API (1.3.0+). The surface
+# starts in "working-dir" (defaults to the current directory) and, if a command
+# is given, it is typed into the surface's shell and run so the login shell
+# environment is loaded first.
+#
+# "placement" controls where the surface is created:
+#   tab    - new tab in the front window, or a new window if none exist (default)
+#   window - always a new window; use this when the caller is not already inside
+#            Ghostty (e.g. launched from Finder) so the window opens on the
+#            current Space instead of switching to the Space of an existing
+#            window.
+#
+# Examples:
+#   ghostty-tab                              # new tab in the current directory
+#   ghostty-tab "$HOME/project"              # new tab in ~/project
+#   ghostty-tab "$PWD" copilot               # new tab running the copilot cli
+#   ghostty-tab /tmp 'nvim -c GitDiff'       # new tab running Neovim
+#   ghostty-tab "$HOME" nvim window          # new window running Neovim
+
+working_dir="${1:-$PWD}"
+command="${2:-}"
+placement="${3:-tab}"
+
+# Open the working directory in a new Ghostty surface and, if provided, run the
+# command there. The window/tab is created before "activate" so that, for the
+# "window" placement, it opens on the current Space instead of pulling focus to
+# the Space of a pre-existing window. The command is typed into the surface's
+# shell so the login shell environment is loaded before it runs.
+if ! osascript - "$working_dir" "$command" "$placement" >/dev/null <<'OSA'
+on run argv
+    set wd to item 1 of argv
+    set cmd to item 2 of argv
+    set placement to item 3 of argv
+    tell application "Ghostty"
+        set cfg to new surface configuration
+        set initial working directory of cfg to wd
+        if placement is "window" or (count of windows) is 0 then
+            set win to new window with configuration cfg
+            set t to selected tab of win
+        else
+            set t to new tab in front window with configuration cfg
+        end if
+        activate
+        set term to focused terminal of t
+        if cmd is not "" then
+            input text cmd to term
+            send key "enter" to term
+        end if
+    end tell
+end run
+OSA
+then
+  echo "ghostty-tab: failed to open a new Ghostty surface" >&2
+  exit 1
+fi
