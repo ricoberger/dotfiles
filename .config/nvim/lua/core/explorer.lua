@@ -169,12 +169,12 @@ local function resolve_target(src, dir)
   return target
 end
 
--- Move the marked files into the current directory.
+-- Move the marked files into the current directory. With no marked files, fall
+-- back to renaming the file under the cursor (both are "mv" operations).
 function M.move()
   local list = marked_list()
   if #list == 0 then
-    vim.notify("No marked files", vim.log.levels.INFO)
-    return
+    return M.rename()
   end
   local dir = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
   for _, src in ipairs(list) do
@@ -191,11 +191,35 @@ function M.move()
   after_op()
 end
 
--- Copy the marked files into the current directory.
+-- Copy the marked files into the current directory. With no marked files, fall
+-- back to duplicating the file under the cursor: prompt for a new name (like
+-- rename) and copy the entry into the same directory.
 function M.copy()
   local list = marked_list()
   if #list == 0 then
-    vim.notify("No marked files", vim.log.levels.INFO)
+    local buf = vim.api.nvim_get_current_buf()
+    local lnum = vim.api.nvim_win_get_cursor(0)[1]
+    local src = line_path(buf, lnum)
+    if not src then
+      return
+    end
+    local name = vim.fn.input({
+      prompt = "Duplicate: ",
+      default = vim.fn.fnamemodify(src, ":t"),
+    })
+    if name == "" or name == vim.fn.fnamemodify(src, ":t") then
+      return
+    end
+    local target = vim.fs.normalize(vim.fs.joinpath(vim.fs.dirname(src), name))
+    if vim.fn.empty(vim.fn.glob(target)) == 0 then
+      if not confirm("Overwrite " .. name .. "?") then
+        return
+      end
+      vim.fn.delete(target, "rf")
+    end
+    if run({ "cp", "-R", src, target }) then
+      after_op()
+    end
     return
   end
   local dir = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
@@ -324,12 +348,6 @@ function M.list_marks()
   vim.cmd("copen")
 end
 
--- Grep the current directory using the fzf picker.
-function M.grep()
-  local dir = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-  require("core.picker").grep_project({ cwd = dir })
-end
-
 --------------------------------------------------------------------------------
 -- SETUP
 --------------------------------------------------------------------------------
@@ -374,13 +392,12 @@ local function attach(buf)
   map("n", "<c-t>", function()
     M.open("tabedit")
   end)
-  map("n", "d", M.delete)
-  map("n", "r", M.rename)
-  map("n", "m", M.move)
-  map("n", "c", M.copy)
-  map("n", "n", M.create)
+  map("n", "<m-d>", M.delete)
+  map("n", "<m-r>", M.rename)
+  map("n", "<m-m>", M.move)
+  map("n", "<m-c>", M.copy)
+  map("n", "<m-n>", M.create)
   map("n", "<c-q>", M.list_marks)
-  map("n", "s", M.grep)
   map("n", "=", M.diff)
 end
 
