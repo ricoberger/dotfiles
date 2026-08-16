@@ -121,7 +121,7 @@ vim.cmd([[let &t_Ce = "\e[4:0m"]])
 require("vim._core.ui2").enable({
   enable = true,
   msg = {
-    targets = "cmd",
+    targets = "msg",
   },
 })
 
@@ -347,7 +347,7 @@ vim.pack.add({
 -- activating the integrations we are really using.
 require("catppuccin").setup({
   flavour = "macchiato",
-  default_integrations = false,
+  auto_integrations = false,
   integrations = {
     gitsigns = true,
     native_lsp = {
@@ -374,9 +374,6 @@ require("catppuccin").setup({
   },
   custom_highlights = function(colors)
     local highlights = {
-      Pmenu = { bg = colors.mantle },
-      PmenuBorder = { bg = colors.mantle, fg = colors.blue },
-
       -- Picker (see "lua/core/picker.lua").
       PickerNormal = { bg = colors.base },
       PickerBorder = { bg = colors.base, fg = colors.blue },
