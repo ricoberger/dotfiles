@@ -145,9 +145,10 @@ end
 --- focuses the existing draft instead of creating a duplicate.
 --- @param title string
 --- @param callback SplitCallback | nil
+--- @param initial_lines string[]? Lines to prefill the buffer with.
 --- @return integer bufnr
 --- @return integer win
-local function show_split_editor(title, callback)
+local function show_split_editor(title, callback, initial_lines)
   local name = "prlsp://" .. title
 
   local existing = find_named_buffer(name)
@@ -161,6 +162,11 @@ local function show_split_editor(title, callback)
   vim.bo[bufnr].buftype = "acwrite"
   vim.bo[bufnr].filetype = "markdown"
   vim.bo[bufnr].bufhidden = "wipe"
+
+  if initial_lines and not vim.tbl_isempty(initial_lines) then
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, initial_lines)
+    vim.bo[bufnr].modified = false
+  end
 
   vim.cmd.vsplit()
 
@@ -347,10 +353,31 @@ function M.reply_to_review_thread()
   end)
 end
 
+--- Build a GitHub "suggestion" block prefilled with the given buffer lines, so
+--- the user can edit them into a code suggestion. The comment text can be added
+--- around the block.
+--- @param bufnr integer
+--- @param start_line integer 1-indexed inclusive
+--- @param end_line integer 1-indexed inclusive
+--- @return string[]
+local function suggestion_block(bufnr, start_line, end_line)
+  local target = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
+
+  --- @type string[]
+  local lines = { "", "```suggestion" }
+  for _, l in ipairs(target) do
+    lines[#lines + 1] = l
+  end
+  lines[#lines + 1] = "```"
+  return lines
+end
+
 --- Open a markdown split to create a PR review comment.
 --- If `range` is provided, it will be used as the target line range.
 --- If `range` is nil and the user is in visual mode, the current visual
 --- selection is used. Otherwise the current cursor line is used.
+--- The editor is prefilled with a GitHub "suggestion" block containing the
+--- target line(s), leaving an empty first line for the comment body.
 --- @param range [integer, integer]|nil 1-indexed line range {start_line, end_line}
 --- @return nil
 function M.create_review_comment(range)
@@ -398,12 +425,14 @@ function M.create_review_comment(range)
   local uri = vim.uri_from_bufnr(bufnr)
   local filename = vim.fn.expand("%:.")
 
+  local prefill = suggestion_block(bufnr, start_line, end_line)
+
   if start_line == end_line then
     local line = start_line
 
     show_split_editor(filename .. "#" .. line, function(input)
       lsp_exec_command(bufnr, "prlsp.createReviewComment", { uri, line, input })
-    end)
+    end, prefill)
   else
     show_split_editor(
       filename .. "#" .. start_line .. "-" .. end_line,
@@ -413,7 +442,8 @@ function M.create_review_comment(range)
           "prlsp.createReviewCommentRange",
           { uri, start_line, end_line, input }
         )
-      end
+      end,
+      prefill
     )
   end
 end
