@@ -23,7 +23,7 @@ Keybindings:
   alt-p  : stage selection interactively
   alt-c  : commit staged changes (git commit)
   alt-a  : amend staged changes to the last commit (git commit --amend)
-  alt-e  : open selection in $EDITOR
+  alt-o  : open selection in $EDITOR
   alt-d  : show diff in the preview
   alt-b  : show blame in the preview
   ctrl-p : toggle preview
@@ -90,7 +90,7 @@ eval "$git_unstaged_files" | fzf \
   --bind "alt-p:+reload($git_unstaged_files)" \
   --bind "alt-c:execute(git commit)+abort" \
   --bind "alt-a:execute(git commit --amend)+abort" \
-  --bind "alt-e:execute(\${EDITOR:-vim} {+})" \
+  --bind "alt-o:execute(\${EDITOR:-vim} {+})" \
   --bind "alt-h:execute(printf '%s\n' \"\$help_text\" | less -R)" \
   --preview-window "right:65%" \
   --preview "git diff --no-ext-diff -- {} 2>/dev/null | grep -q . && git diff --no-ext-diff --color -- {} || bat --style=numbers --color=always {}"
