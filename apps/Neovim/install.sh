@@ -1,7 +1,7 @@
 cd "$(dirname "$0")"
 
 # Neovim.app: an AppleScript application that lets Finder open files in Neovim
-# (via the "ghostty-tab" binary). Compiled from source so it is reproducible and
+# (via the "ghostty-new" binary). Compiled from source so it is reproducible and
 # tracked in this repository. The generated bundle declares an "on open" handler,
 # so it shows up under Finder's "Open With" for every file type.
 echo "\n- Build Neovim.app (Finder integration)"

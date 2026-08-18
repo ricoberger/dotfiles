@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+# ghostty-new - Open a command in a new Ghostty tab, window, or split
+#
+# Usage: ghostty-new [--placement tab|window|split] [--working-dir DIR]
+#                    [--command CMD] [--direction right|left|up|down]
+#
+# Opens a new surface in Ghostty using its AppleScript API (1.3.0+). The surface
+# starts in "--working-dir" (defaults to the current directory) and, if a
+# "--command" is given, it is typed into the surface's shell and run so the
+# login shell environment is loaded first.
+#
+# Flags:
+#   --placement    where the surface is created (default: tab)
+#                    tab    - new tab in the front window, or a new window if
+#                             none exist
+#                    window - always a new window; use this when the caller is
+#                             not already inside Ghostty (e.g. launched from
+#                             Finder) so the window opens on the current Space
+#                             instead of switching to the Space of an existing
+#                             window
+#                    split  - split the front window's focused terminal; falls
+#                             back to a new window if none exist
+#   --working-dir  working directory for the surface (default: current $PWD)
+#   --command      command to run in the surface (default: none)
+#   --direction    split direction, only used with "--placement split"
+#                  (right|left|up|down, default: right)
+#   -h, --help     show this help and exit
+
+usage() {
+  sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+die() {
+  echo "ghostty-new: $1" >&2
+  echo "Try 'ghostty-new --help' for usage." >&2
+  exit 2
+}
+
+placement="tab"
+working_dir="$PWD"
+command=""
+direction="right"
+
+# Parse flags. Accept both "--flag value" and "--flag=value" forms. Every flag
+# that takes a value requires one; unknown flags and invalid values are errors.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --placement=*)   placement="${1#*=}"; shift ;;
+    --placement)     [[ $# -ge 2 ]] || die "--placement requires a value"; placement="$2"; shift 2 ;;
+    --working-dir=*) working_dir="${1#*=}"; shift ;;
+    --working-dir)   [[ $# -ge 2 ]] || die "--working-dir requires a value"; working_dir="$2"; shift 2 ;;
+    --command=*)     command="${1#*=}"; shift ;;
+    --command)       [[ $# -ge 2 ]] || die "--command requires a value"; command="$2"; shift 2 ;;
+    --direction=*)   direction="${1#*=}"; shift ;;
+    --direction)     [[ $# -ge 2 ]] || die "--direction requires a value"; direction="$2"; shift 2 ;;
+    -h|--help)       usage; exit 0 ;;
+    --)              shift; break ;;
+    -*)              die "unknown flag: $1" ;;
+    *)               die "unexpected argument: $1" ;;
+  esac
+done
+
+[[ $# -eq 0 ]] || die "unexpected argument: $1"
+
+case "$placement" in
+  tab|window|split) ;;
+  *) die "invalid --placement: $placement (expected tab, window, or split)" ;;
+esac
+
+case "$direction" in
+  right|left|up|down) ;;
+  *) die "invalid --direction: $direction (expected right, left, up, or down)" ;;
+esac
+
+# Open the working directory in a new Ghostty surface and, if provided, run the
+# command there. The window/tab/split is created before "activate" so that, for
+# the "window" placement, it opens on the current Space instead of pulling focus
+# to the Space of a pre-existing window. The command is typed into the surface's
+# shell so the login shell environment is loaded before it runs.
+if ! osascript - "$working_dir" "$command" "$placement" "$direction" >/dev/null <<'OSA'
+on run argv
+    set wd to item 1 of argv
+    set cmd to item 2 of argv
+    set placement to item 3 of argv
+    set dir to item 4 of argv
+    tell application "Ghostty"
+        set cfg to new surface configuration
+        set initial working directory of cfg to wd
+        if placement is "split" and (count of windows) is greater than 0 then
+            set src to focused terminal of selected tab of front window
+            if dir is "left" then
+                set term to split src direction left with configuration cfg
+            else if dir is "up" then
+                set term to split src direction up with configuration cfg
+            else if dir is "down" then
+                set term to split src direction down with configuration cfg
+            else
+                set term to split src direction right with configuration cfg
+            end if
+        else if placement is "window" or placement is "split" or (count of windows) is 0 then
+            set win to new window with configuration cfg
+            set term to focused terminal of (selected tab of win)
+        else
+            set t to new tab in front window with configuration cfg
+            set term to focused terminal of t
+        end if
+        activate
+        if cmd is not "" then
+            input text cmd to term
+            send key "enter" to term
+        end if
+    end tell
+end run
+OSA
+then
+  echo "ghostty-new: failed to open a new Ghostty surface" >&2
+  exit 1
+fi

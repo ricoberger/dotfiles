@@ -1216,11 +1216,11 @@ if [[ "$1" == "__action" ]]; then
       fi
 
       # Open the worktree in a new Ghostty tab and run the Neovim command there.
-      # Delegated to the "ghostty-tab" helper, which uses Ghostty's AppleScript
+      # Delegated to the "ghostty-new" helper, which uses Ghostty's AppleScript
       # API (1.3.0+) to create a new tab in the front window with the worktree
       # as its working directory and type the Neovim command into the tab's
       # shell so the login shell environment is loaded before nvim starts.
-      if ! ghostty-tab "$worktree_dir" "$nvim_cmd"; then
+      if ! ghostty-new --working-dir "$worktree_dir" --command "$nvim_cmd"; then
         echo "Failed to open a new Ghostty tab"
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
