@@ -39,14 +39,16 @@ criteria.
         `--from-json` creation strategy.
      2. Write a single work item JSON file (e.g. `/tmp/jira-workitem.json`)
         containing `projectKey`, `type`, `summary`, and an ADF `description`.
-        Convert the User Story, Background, and Acceptance Criteria sections
-        into ADF nodes (headings, paragraphs, and a bullet list) — never include
-        the title in the description, since it is the `summary`. Passing the
-        whole work item via a JSON file (instead of inline
-        `--summary`/`--description` flags) avoids broken commands when the title
-        or description contains double quotes, apostrophes, backticks, or other
-        shell-special characters, and ADF ensures the ticket renders cleanly in
-        the Jira web UI.
+        This file might already exist from a previous session, so remove it
+        first (e.g. `rm -f /tmp/jira-workitem.json`) before writing it. Convert
+        the User Story, Background, and Acceptance Criteria sections into ADF
+        nodes (headings, paragraphs, and a bullet list) — never include the
+        title in the description, since it is the `summary`. Passing the whole
+        work item via a JSON file (instead of inline `--summary`/`--description`
+        flags) avoids broken commands when the title or description contains
+        double quotes, apostrophes, backticks, or other shell-special
+        characters, and ADF ensures the ticket renders cleanly in the Jira web
+        UI.
      3. Create the ticket using `--from-json`:
         ```bash
         acli jira workitem create --from-json /tmp/jira-workitem.json
