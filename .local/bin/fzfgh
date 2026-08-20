@@ -1149,30 +1149,40 @@ if [[ "$1" == "__action" ]]; then
       number="$2"
       [[ -z "$repo" || -z "$number" ]] && exit 0
 
-      # Only check out a PR that belongs to the current repository, so its head
-      # ref can be fetched from origin and the worktree is created for the right
-      # repository.
-      current_repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
-      if [[ -z "$current_repo" ]]; then
-        echo "Not inside a GitHub repository"
-        read -n 1 -s -r -p "Press any key to continue..."
-        exit 0
-      fi
-      if [[ "$current_repo" != "$repo" ]]; then
-        echo "PR $repo#$number does not belong to the current repository ($current_repo)"
+      # Locate the local clone of the PR's repository. Repositories live under
+      # "$FZFGH_GITHUB_DIR/<owner>/<repo>" (default ~/Documents/GitHub), and
+      # "$repo" is already "<owner>/<repo>", so the path is the base plus $repo.
+      # The clone must exist so its head ref can be fetched from origin and the
+      # worktree is created for the right repository. Fail fast before any
+      # network calls if the clone is missing.
+      github_base="${FZFGH_GITHUB_DIR:-$HOME/Documents/GitHub}"
+      repo_dir="$github_base/$repo"
+      if [[ ! -d "$repo_dir" ]]; then
+        echo "Local clone not found at $repo_dir"
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
       fi
 
-      # Determine the PR's head branch, which becomes the worktree's branch.
-      head_ref="$(gh pr view "$number" --repo "$repo" --json headRefName -q .headRefName 2>/dev/null)"
+      # Run all subsequent git commands from within the clone. The handler exits
+      # at the end, so this directory change has no side effects elsewhere.
+      if ! cd "$repo_dir"; then
+        echo "Failed to enter local clone at $repo_dir"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      # Determine the PR's head branch, which becomes the worktree's branch, and
+      # its title, which is used for the Ghostty tab title.
+      pr_info="$(gh pr view "$number" --repo "$repo" --json headRefName,title 2>/dev/null)"
+      head_ref="$(jq -r '.headRefName' <<<"$pr_info" 2>/dev/null)"
+      pr_title="$(jq -r '.title' <<<"$pr_info" 2>/dev/null)"
       if [[ -z "$head_ref" ]]; then
         echo "Could not determine the head branch for PR $repo#$number"
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
       fi
 
-      # Build the worktree path exactly like the `wta` git alias:
+      # Build the worktree path exactly like the `gitwta` shell function:
       #   $HOME/.worktrees/<repo>/<branch>
       # deriving <repo> from the common git dir so it works from any worktree.
       common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
@@ -1220,7 +1230,7 @@ if [[ "$1" == "__action" ]]; then
       # API (1.3.0+) to create a new tab in the front window with the worktree
       # as its working directory and type the Neovim command into the tab's
       # shell so the login shell environment is loaded before nvim starts.
-      if ! ghostty-new --working-dir "$worktree_dir" --command "$nvim_cmd"; then
+      if ! ghostty-new --working-dir "$worktree_dir" --command "$nvim_cmd" --title "$repo#$number: $pr_title"; then
         echo "Failed to open a new Ghostty tab"
         read -n 1 -s -r -p "Press any key to continue..."
         exit 0
@@ -2126,7 +2136,7 @@ Pull Request Keybindings:
            range (nvim opens pre-filled with a ```suggestion``` block)
   alt-g  : check out pull request into a new git worktree at
            ~/.worktrees/<repo>/<branch> and open it in a new Ghostty tab
-           running nvim with the :GitDiff command (current repo only)
+           running nvim with the :GitDiff command
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
