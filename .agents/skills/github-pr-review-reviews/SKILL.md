@@ -43,68 +43,22 @@ local files. It does not post replies, resolve threads, commit, or push.
 - Writing/authoring review comments on a PR → use `github-pr-review`
 - Committing the resulting changes → use `git-commit` after this skill finishes
 
-## Prerequisites
-
-**CRITICAL: Check the gh CLI before doing anything else.**
-
-### Check for gh CLI
-
-```bash
-gh --version
-```
-
-**If gh is not installed:**
-
-1. **Stop immediately** - Do not attempt to run gh api commands.
-2. **Inform the user** with this message:
-
-```
-The GitHub CLI (gh) is required for this skill but is not installed.
-
-Please install it from: https://cli.github.com/
-
-Installation options:
-- macOS: brew install gh
-- Windows: winget install GitHub.cli
-- Linux: See https://cli.github.com/ for your distro
-
-After installing, authenticate with:
-  gh auth login
-
-Then try your request again.
-```
-
-3. **Do not proceed** until gh is installed.
-
-### Check Authentication
-
-```bash
-gh auth status
-```
-
-If this fails, stop and tell the user to run `gh auth login` before retrying.
-
 ## Core Workflow
 
 **REQUIRED STEPS (do not skip or reorder):**
 
-1. **Check prerequisites** - `gh --version` and `gh auth status`.
-2. **Resolve the PR** - From the current branch, an explicit number, or a URL;
+1. **Resolve the PR** - From the current branch, an explicit number, or a URL;
    warn + confirm if it is already MERGED/CLOSED.
-3. **Verify branch state** - Ensure the PR's head branch is checked out.
-4. **Collect comments** - All three sources, filtered to unresolved/active.
-5. **Validate & classify** - Each comment as Valid / Not applicable / Needs
+2. **Verify branch state** - Ensure the PR's head branch is checked out.
+3. **Collect comments** - All three sources, filtered to unresolved/active.
+4. **Validate & classify** - Each comment as Valid / Not applicable / Needs
    discussion, with reasoning.
-6. **Show the overview** - Present the full classified list.
-7. **Confirm & implement per item** - For each Valid item: show the proposed
+5. **Show the overview** - Present the full classified list.
+6. **Confirm & implement per item** - For each Valid item: show the proposed
    diff, ask yes/skip/edit, apply only on approval.
-8. **Final summary** - Grouped report plus reminders.
+7. **Final summary** - Grouped report plus reminders.
 
-### Step 1 - Prerequisites
-
-See the [Prerequisites](#prerequisites) section above. Halt on any failure.
-
-### Step 2 - Resolve the PR
+### Step 1 - Resolve the PR
 
 Accept any of these inputs:
 
@@ -139,10 +93,10 @@ gh pr view <number> --repo <owner>/<repo> --json state --jq '.state'
   is merged/closed and ask, via AskUserQuestion, whether to continue anyway or
   stop. Do not collect/edit further until the user confirms.
 
-### Step 3 - Verify Branch State
+### Step 2 - Verify Branch State
 
 Because changes are applied to the **local working tree**, confirm you are on
-the correct branch before editing. (If Step 2 found the PR MERGED/CLOSED, you
+the correct branch before editing. (If Step 1 found the PR MERGED/CLOSED, you
 must already have the user's confirmation to continue before reaching here.)
 
 ```bash
@@ -160,7 +114,7 @@ git rev-parse --abbrev-ref HEAD
   confirm they want to proceed (their changes will be intermixed with the
   applied edits). This is a warning, not a halt.
 
-### Step 4 - Collect Comments
+### Step 3 - Collect Comments
 
 Gather from **all three** sources.
 
@@ -203,7 +157,7 @@ gh api graphql -f query='
            id: .comments.nodes[0].databaseId}'
 ```
 
-### Step 5 - Filter
+### Step 4 - Filter
 
 - **Include**: unresolved, active comments from any author (humans **and** bots
   such as CodeRabbit or Copilot are treated equally).
@@ -211,7 +165,7 @@ gh api graphql -f query='
 - **Set aside**: outdated comments (`position: null` or `isOutdated == true`).
   Do not process them by default — list them separately and let the user opt in.
 
-### Step 6 - Validate & Classify
+### Step 5 - Validate & Classify
 
 For each in-scope comment, read the referenced file/lines, understand the
 request, and assign exactly one class:
@@ -226,7 +180,7 @@ Always include a short **reason** for the classification. For Valid items,
 prepare the concrete edit (file, line(s), and the replacement). Treat a review
 thread (a comment plus its replies) as a single unit.
 
-### Step 7 – Overview, Then Per-Item Confirmation
+### Step 6 – Overview, Then Per-Item Confirmation
 
 First present the **full classified list** so the user sees everything:
 
@@ -268,14 +222,14 @@ Then walk through each **Valid & actionable** item **one at a time**. For each:
 Implement **all** changes as local edits — both literal ```suggestion blocks and
 prose feedback. Do not commit, push, reply, or resolve threads.
 
-### Step 8 – Handle Non-Actionable Items
+### Step 7 – Handle Non-Actionable Items
 
 - **Not applicable** → reported with the reason. No action.
 - **Needs discussion** → surface to the user: the comment, the open question,
   and the skill's own take/recommendation. Do **not** auto-implement; let the
-  user decide. (If the user then asks for a change, run it through Step 7.)
+  user decide. (If the user then asks for a change, run it through Step 6.)
 
-### Step 9 - Final Summary
+### Step 8 - Final Summary
 
 End with a grouped report:
 
@@ -300,6 +254,15 @@ Reminders:
   - No GitHub threads were replied to or resolved.
 ```
 
+## Writing Style
+
+All user-facing text this skill produces — classification reasons, the overview,
+the "needs discussion" take, and the final summary — should read like a human
+wrote it: short, plain, and direct. No praise sandwiches, no restating the same
+point twice, no exhaustive multi-paragraph justifications, no AI tics ("Great
+work!", "Let me know if…", "LGTM 🎉"). Say it once in plain words and move on.
+(This mirrors the tone guidance in the `github-pr-review` skill.)
+
 ## Validation Heuristics
 
 | Signal                                              | Likely class              |
@@ -323,11 +286,9 @@ Stop if you're thinking:
 - "This branch is probably right, I'll just start editing."
 - "The PR is merged but I'll implement the feedback anyway without asking."
 - "I'll implement this 'Needs discussion' item with my best guess."
-- "gh is probably installed, no need to check."
 
-**All of these mean: STOP.** Check prerequisites, verify the branch, classify,
-show the overview, and confirm each change before applying. Never write to
-GitHub. Never commit.
+**All of these mean: STOP.** Verify the branch, classify, show the overview, and
+confirm each change before applying. Never write to GitHub. Never commit.
 
 ## Quick Reference
 

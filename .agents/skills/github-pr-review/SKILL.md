@@ -25,58 +25,52 @@ using AskUserQuestion.
 - Adding code suggestions to PRs
 - Posting review comments with the gh CLI
 
-## Prerequisites
-
-**CRITICAL: Check if gh CLI is installed before attempting to use this skill.**
-
-### Check for gh CLI
-
-Before starting any PR review workflow, verify the gh CLI is available:
-
-```bash
-gh --version
-```
-
-**If gh is not installed:**
-
-1. **Stop immediately** - Do not attempt to run gh api commands
-2. **Inform the user** with this message:
-
-```
-The GitHub CLI (gh) is required for this skill but is not installed.
-
-Please install it from: https://cli.github.com/
-
-Installation options:
-- macOS: brew install gh
-- Windows: winget install GitHub.cli
-- Linux: See https://cli.github.com/ for your distro
-
-After installing, authenticate with:
-  gh auth login
-
-Then try your PR review request again.
-```
-
-3. **Do not proceed** with the review workflow until gh is installed
-
-### After Installation
-
-Once gh is installed, users must authenticate:
-
-```bash
-gh auth login
-```
-
 ## Core Workflow
 
 **REQUIRED STEPS (do not skip):**
 
-1. **Check gh CLI is installed** - Run `gh --version` to verify
-2. **Draft the review** - Analyze PR and prepare all comments
+1. **Gather PR context** - Fetch the diff and metadata (see below)
+2. **Draft the review** - Analyze PR and prepare all comments (see checklist)
 3. **Show user exactly what will be posted** - Use AskUserQuestion with yes/no
 4. **Get explicit approval** - Wait for user confirmation
 5. **Post the review** - Only after approval
+
+Before showing comments for approval, re-read them against **Writing Style &
+Tone** below: short, direct, human. Rewrite anything that reads like an AI.
+
+### Gather PR Context
+
+Before drafting, pull down the diff and metadata — the diff is the primary
+review artifact.
+
+```bash
+# PR metadata, including the head commit SHA and changed files
+gh pr view <PR_NUMBER> --json number,title,url,baseRefName,headRefName,headRefOid,files,additions,deletions
+
+# The diff (primary review artifact)
+gh pr diff <PR_NUMBER> --color=never
+
+# Optional: check CI signal while reviewing
+gh pr checks <PR_NUMBER>
+```
+
+Use `-R owner/repo` on any of these if you are not in a checkout of the target
+repo.
+
+### What to Check
+
+Review the diff for:
+
+- correctness and logic errors
+- security risks
+- API breaks
+- data loss / irreversible behavior
+- missing or failing tests
+- edge cases
+- performance and algorithmic complexity
+- naming, clarity, ergonomics
+- documentation and user-facing behavior
+- consistency with project conventions
 
 ### Approval Pattern
 
@@ -99,33 +93,81 @@ Options:
 
 ### Technical Workflow
 
-**ALWAYS use the pending review pattern, even for single comments:**
+**ALWAYS use the pending review pattern, even for a single comment.** It's two
+API calls:
 
-````bash
-# Step 1: Create PENDING review (no event field)
-gh api repos/:owner/:repo/pulls/<PR_NUMBER>/reviews \
-  -X POST \
-  -f commit_id="<COMMIT_SHA>" \
-  -f 'comments[][path]=path/to/file.ts' \
-  -F 'comments[][line]=<LINE_NUMBER>' \
-  -f 'comments[][side]=RIGHT' \
-  -f 'comments[][body]=Comment text
+1. **Create a PENDING review** (omit the `event` field) with all inline comments
+   in one `POST repos/:owner/:repo/pulls/<PR_NUMBER>/reviews` call. This returns
+   a `REVIEW_ID`.
+2. **Submit it** with
+   `POST repos/:owner/:repo/pulls/<PR_NUMBER>/reviews/<REVIEW_ID>/events`,
+   passing the chosen `event` (`COMMENT`/`APPROVE`/`REQUEST_CHANGES`) and an
+   overall message.
 
-```suggestion
-// suggested code here
-```
+See **Complete Example with Approval** below for the full commands and **Quick
+Reference** for parameters.
 
-Additional explanation...' \
-  --jq '{id, state}'
+## Writing Style & Tone
 
-# Returns: {"id": <REVIEW_ID>, "state": "PENDING"}
+**CRITICAL: Write comments like a normal, busy human reviewer would — not like
+an AI.** Terse, direct, and specific. A colleague reading your comment should
+not be able to tell a machine wrote it. Overly polished, exhaustive, or
+relentlessly upbeat comments feel robotic ("creepy") and waste the author's
+time.
 
-# Step 2: Submit the pending review
-gh api repos/:owner/:repo/pulls/<PR_NUMBER>/reviews/<REVIEW_ID>/events \
-  -X POST \
-  -f event="COMMENT" \
-  -f body="Optional overall review message"
-````
+### Rules
+
+- **Get to the point.** Lead with the actual issue. Cut preambles and framing.
+- **One point, once.** Don't restate the same concern in the summary and the
+  inline comment. Put the detail inline; keep the summary to a sentence.
+- **Skip the praise sandwich.** Don't open every comment with "Nice, focused
+  fix…". Occasional, genuine, specific praise is fine; reflexive praise is not.
+- **Don't over-explain.** Trust the author to know their code. State the problem
+  and, if useful, the fix. Skip the multi-paragraph proof and the exhaustive
+  enumeration of every code path.
+- **Short over complete.** A one-line comment that lands beats a correct essay.
+  If it needs three paragraphs, it probably needs a conversation instead.
+- **Plain words.** Write "this breaks retries" not "this removes the idempotency
+  the deterministic name provided". Avoid stiff, formal, or buzzword-y phrasing.
+- **Contractions and normal punctuation.** "doesn't", "won't", "here's". Avoid
+  em-dash pile-ups, semicolons, and bulleted breakdowns of the obvious.
+- **Drop the AI tics.** No "Great work!", no "Let me know if…", no closing "LGTM
+  🎉", no summarizing what you just said. Say it once and stop.
+- **Match the weight to the issue.** A nit gets one line. Don't dress a nit up
+  with "Non-blocking nit:" ceremony and a justification for why it's fine as-is.
+
+### Before / After
+
+**❌ Too much (robotic):**
+
+> Nice, focused fix for the cross-restore disk-name collision — the pvc-<uuid>
+> shape and dependency are all fine. One blocking concern: generating a fresh
+> UUID on every Reconcile removes the idempotency the deterministic name
+> provided, and can orphan Azure disks and PVs on retries. Previously
+> generateNewPVName returned the same name across reconciles, so
+> CreateDiskFromSnapshot and r.Create were effectively no-ops on a second pass.
+> With a random UUID per call, re-reconciliation re-processes already-restored
+> PVCs and creates brand-new resources each time: [three bullet points]…
+
+**✅ Human:**
+
+> Blocking: the random UUID per Reconcile breaks idempotency. On a requeue (e.g.
+> staggered snapshot readiness) we re-run the whole loop and mint a new disk +
+> PV each pass, orphaning the old ones. Can we skip PVCs that already exist, or
+> persist the name in the Restore status and reuse it?
+
+**❌ Too much (nit):**
+
+> Non-blocking nit: the first reconcile of an N-PVC restore issues up to N
+> separate Status().Update calls inside getOrCreatePVName; could be batched into
+> one, but it's correct as-is. LGTM.
+
+**✅ Human:**
+
+> Nit: could batch these Status().Update calls into one, but fine either way.
+
+Apply this style to **every** comment body and the overall review message before
+showing them for approval.
 
 ## Event Types
 
@@ -139,19 +181,9 @@ Choose the appropriate event type when submitting:
 
 ## Quick Reference
 
-### Getting Prerequisites
-
-```bash
-# Get commit SHA
-gh pr view <PR_NUMBER> --json commits --jq '.commits[-1].oid'
-
-# Repository info (usually auto-detected by gh)
-gh repo view --json owner,name
-```
-
 ### Required Parameters
 
-- `commit_id`: Latest commit SHA from the PR
+- `commit_id`: Head commit SHA — the `headRefOid` fetched in Gather PR Context
 - `comments[][path]`: File path relative to repo root
 - `comments[][line]`: End line number (use `-F` for numbers)
 - `comments[][side]`: Use `RIGHT` for added/modified lines (most common), `LEFT`
@@ -162,6 +194,23 @@ gh repo view --json owner,name
 
 - `comments[][start_line]`: For multi-line code suggestions (use `-F`)
 - `event`: Omit for PENDING, or use `COMMENT`/`APPROVE`/`REQUEST_CHANGES`
+
+### Mapping a Diff Line to `line` and `side`
+
+Inline comments need an exact `path`, a `line`, and a `side`. Derive them
+deterministically from the unified diff:
+
+- Each hunk header looks like `@@ -old_start,old_count +new_start,new_count @@`.
+- Initialize counters: `old_line = old_start`, `new_line = new_start`.
+- Walk each line in the hunk:
+  - Context line (starts with `' '`): increment both `old_line` and `new_line`.
+  - Addition (starts with `'+'`): increment `new_line` only.
+  - Deletion (starts with `'-'`): increment `old_line` only.
+- To comment on new/modified code: `side=RIGHT`, `line=new_line`.
+- To comment on a deleted line: `side=LEFT`, `line=old_line`.
+
+If you can't reliably anchor a comment (complex hunks, uncertainty), do not post
+it inline — raise it in the overall review message instead.
 
 ### Syntax Rules
 
@@ -208,16 +257,6 @@ const example = "value";
 ````
 `````
 
-## Common Mistakes
-
-| Mistake                                        | Fix                                                                   |
-| ---------------------------------------------- | --------------------------------------------------------------------- |
-| Posting immediately under time pressure        | Still create pending review first - can submit immediately after      |
-| "Only one comment so no need for pending"      | Use pending anyway - consistent workflow, allows adding more later    |
-| Forgetting single quotes around `comments[][]` | Always quote: `'comments[][path]'` not `comments[][path]`             |
-| Not getting commit SHA                         | Run `gh pr view <NUMBER> --json commits --jq '.commits[-1].oid'`      |
-| Using wrong event type                         | Security/bugs → REQUEST_CHANGES, Style → APPROVE, Questions → COMMENT |
-
 ## Red Flags - You're About to Violate the Pattern
 
 Stop if you're thinking:
@@ -229,11 +268,9 @@ Stop if you're thinking:
 - **"User already approved the review idea, so I'll skip the approval step"**
 - **"I'll post it and then tell them what I posted"**
 - **"The approval step slows things down"**
-- **"I'll check for gh later, let me draft the review first"**
-- **"gh is probably installed, no need to check"**
 
-**All of these mean: STOP. Check gh first, get explicit approval, then use
-pending review.**
+**All of these mean: STOP. Get explicit approval, then use pending review. Keep
+every comment short and human (see Writing Style & Tone).**
 
 **Why pending reviews?** Take the same time (2 API calls vs 1) but provide
 critical benefits:
@@ -304,19 +341,3 @@ gh api repos/:owner/:repo/pulls/123/reviews/<REVIEW_ID>/events \
   -f event="REQUEST_CHANGES" \
   -f body="Found 3 issues that need to be addressed before merging."
 ```
-
-## Real-World Impact
-
-**Without this pattern:**
-
-- Multiple separate notifications spam the PR author
-- Can't batch feedback together
-- Easy to forget issues while reviewing
-- Inconsistent workflow based on perceived urgency
-
-**With this pattern:**
-
-- All feedback in one coherent review
-- PR author gets one notification with full context
-- Can refine comments before posting
-- Professional, organized reviews
