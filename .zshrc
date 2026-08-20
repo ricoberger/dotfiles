@@ -161,10 +161,25 @@ cdp() {
   [ -n "$dir" ] && cd "$dir"
 }
 
-cdw() {
+gitwt() {
   local dir
   dir=$(git worktree list | fzf | awk '{print $1}') || return
   [ -n "$dir" ] && cd "$dir"
+}
+
+gitwta() {
+  local common repo dir
+  common=$(git rev-parse --path-format=absolute --git-common-dir) || return
+  repo=$(basename "$(dirname "$common")")
+  dir="$HOME/.worktrees/$repo/$1"
+  git worktree add -b "$1" "$dir" || return
+  cd "$dir"
+}
+
+gitwtr() {
+  local dir
+  dir=$(git worktree list | fzf --height 40% --reverse | awk '{print $1}') || return
+  [ -n "$dir" ] && git worktree remove "$dir"
 }
 
 kctx() {
