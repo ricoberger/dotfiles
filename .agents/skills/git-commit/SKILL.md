@@ -66,26 +66,64 @@ Optional. Use to specify area of change (e.g., `api`, `ui`, `auth`, `db`).
 ## Pull Request
 
 After committing, check whether a pull request already exists for the current
-branch and offer to create one if it does not.
+branch. Create one if it does not, and always keep its body in sync with the
+commits on the branch.
 
-1. Check for an existing pull request:
+The pull request body is built from **all** commits on the branch. Each commit
+contributes its full message (subject line, blank line, body), and commits are
+separated from one another by blank lines, in chronological order (oldest
+first):
+
+```
+subject of commit 1
+
+body of commit 1
+
+
+subject of commit 2
+
+body of commit 2
+```
+
+The body must be built from the **exact bytes** of each commit message,
+including the 72-character wrapping. Do not re-flow, unwrap, or re-format the
+text. Always pipe it into `--body-file -` (inline `--body "..."` risks stripping
+or normalizing the hard line breaks).
+
+1. Determine the base branch and build the body from every commit on the branch.
+   `%B` is a commit's raw message (subject + blank line + body), and the
+   trailing `%n%n` separates consecutive commits with a blank line:
+
+   ```sh
+   base="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null \
+     || git remote show origin | sed -n 's/.*HEAD branch: //p')"
+   git log --reverse --format='%B%n' "origin/$base..HEAD"
+   ```
+
+2. Check for an existing pull request:
 
    ```sh
    gh pr view --json url
    ```
 
-   If this succeeds, a pull request already exists — do nothing further.
-
-2. If no pull request exists (the command above fails), ask the user whether a
-   pull request should be created. Only continue if the user confirms.
-
-3. Create the pull request as a **draft**, using the commit subject as the title
-   and the commit body as the body:
+3. If **no** pull request exists (the command above fails), ask the user whether
+   one should be created. Only continue if the user confirms. Create it as a
+   **draft**, using the first commit's subject as the title and the generated
+   body:
 
    ```sh
-   gh pr create --draft --title "<commit subject>" --body "<commit body>"
+   git log --reverse --format='%B%n' "origin/$base..HEAD" | gh pr create \
+     --draft --title "$(git log --reverse --format='%s' "origin/$base..HEAD" \
+     | head -n1)" --body-file -
    ```
 
-   - `--title` is the `<type>(<scope>): <description>` subject line.
-   - `--body` is the commit body. If the commit has no body, pass an empty
-     string (`--body ""`).
+4. If a pull request **already** exists, refresh its body so it includes every
+   commit on the branch (this matters when the branch has more than one commit,
+   or after adding commits to an existing pull request):
+
+   ```sh
+   git log --reverse --format='%B%n' "origin/$base..HEAD" | gh pr edit --body-file -
+   ```
+
+   Leave the title unchanged unless the first commit's subject changed. If a
+   single commit has no body, its contribution is just the subject line.
