@@ -63,6 +63,14 @@ fzfjira_jira_profile() {
     | tr -d '"' | head -n1
 }
 
+# Print acli's current Jira site host (e.g. "example.atlassian.net"), read from
+# acli's config. Used to build browse URLs like https://<site>/browse/<key>.
+fzfjira_jira_site() {
+  sed -n 's/^[[:space:]]*-\{0,1\}[[:space:]]*site:[[:space:]]*//p' \
+    "${HOME}/.config/acli/jira_config.yaml" 2>/dev/null \
+    | tr -d '"' | head -n1
+}
+
 # Print acli's current OAuth access token, extracted from the macOS keychain.
 # The value is stored by go-keyring as "go-keyring-base64:<base64(gzip(json))>".
 fzfjira_jira_token() {
@@ -357,6 +365,17 @@ if [[ "$1" == "__action" ]]; then
 
     web)
       acli jira workitem view "$key" --web >/dev/null 2>&1
+      ;;
+
+    copy)
+      # Copy the browse URL of the work item to the clipboard.
+      site="$(fzfjira_jira_site)"
+      if [[ -z "$site" ]]; then
+        echo "Could not determine the acli Jira site."
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      printf '%s' "https://$site/browse/$key" | pbcopy
       ;;
 
     subtasks)
@@ -822,9 +841,11 @@ if [[ "$1" == "__action" ]]; then
           ;;
 
         *)
-          # enter (or any other accept): open the linked work item.
+          # enter (or any other accept): open the linked work item in a fresh
+          # fzfjira picker scoped to just that key, so the full action set is
+          # available for it.
           [[ -z "$linkedkey" ]] && exit 0
-          acli jira workitem view "$linkedkey" --fields "*all" | nvim -R -
+          "$SCRIPT" "key = $linkedkey"
           ;;
       esac
       ;;
@@ -866,6 +887,7 @@ Keybindings:
            alt-n - create new link
   alt-s  : show work item's sub-tasks in a nested picker
   alt-o  : open work item in the web browser
+  alt-y  : copy the work item's link to the clipboard
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
@@ -987,6 +1009,7 @@ fzf \
   --bind "alt-l:execute($ACTION link {1})+refresh-preview" \
   --bind "alt-s:execute($ACTION subtasks {1})+reload($SCRIPT __list)+refresh-preview" \
   --bind "alt-o:execute($ACTION web {1})" \
+  --bind "alt-y:execute-silent($ACTION copy {1})" \
   --preview-window "right:65%" \
   --preview "$SCRIPT __preview {1}" \
   <<< "$ROWS"
