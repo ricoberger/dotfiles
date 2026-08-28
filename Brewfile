@@ -49,6 +49,7 @@ brew "xcode-build-server"
 
 brew "acli"
 brew "azure/kubelogin/kubelogin"
+brew "bash"
 brew "bat"
 brew "btop"
 brew "duti"
