@@ -36,6 +36,32 @@ if [ -d "/opt/homebrew/opt/ruby/bin" ]; then
   export PATH=`gem environment gemdir`/bin:$PATH
 fi
 
+# # GitHub Copilot settings
+# export COPILOT_ALLOW_ALL=true
+# export COPILOT_MODEL=claude-opus-4.8
+#
+# # Cloudflare account and API token for the browser run API, which is used by the
+# # `urltomd` function
+# export CLOUDFLARE_BROWSER_RUN_ACCOUNT_ID=
+# export CLOUDFLARE_BROWSER_RUN_API_TOKEN=
+#
+# # Vault settings
+# export VAULT_ADDR=
+#
+# # GitHub token to interact with the notifications GraphQL API, extracted from
+# # the GitHub mobile application
+# export GITHUB_NOTIFICATIONS_TOKEN=
+#
+# # A list of Grafana instances and their authentication tokens, used by variour
+# # skills, must look like this:
+# # {"<instance-name>":{"url":"<grafana-url>","auth":{"tokenCommand":"<command-to-get-token>"}}}
+# export GRAFANA_INSTANCES=
+#
+# # Address and tokens for the `fzfslack` command, which is used to interact with
+# # Slack via fzf
+# export FZFSLACK_WORKSPACE_URL=
+# export FZFSLACK_XOXD=
+# export FZFSLACK_XOXC=
 source $HOME/.zshsecrets
 
 
