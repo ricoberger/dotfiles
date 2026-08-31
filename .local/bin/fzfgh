@@ -344,10 +344,11 @@ md_render() {
 
 # Fetch the review threads of a pull request via GraphQL (REST has no resolved
 # state) and emit a simplified array:
-#   [ { gid, isResolved, isOutdated, path, line, diffSide,
+#   [ { gid, isResolved, isOutdated, path, line, startLine, diffSide, diffHunk,
 #       comments:[ {databaseId, login, createdAt, body} ] } ]
 # gid is the thread node id (for resolve/unresolve mutations); each comment's
-# databaseId is the REST id (used to reply). Emits "[]" on error.
+# databaseId is the REST id (used to reply); diffHunk is the root comment's hunk
+# (used to render a trimmed snippet). Emits "[]" on error.
 fzfgh_fetch_threads() {
   local repo="$1"
   local number="$2"
@@ -355,10 +356,12 @@ fzfgh_fetch_threads() {
   local name="${repo#*/}"
   local out
   out="$(gh api graphql \
-    -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine startLine diffSide comments(first:100){nodes{databaseId author{login} createdAt body}}}}}}}' \
+    -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine startLine originalStartLine diffSide comments(first:100){nodes{databaseId author{login} createdAt body diffHunk}}}}}}}' \
     -F owner="$owner" -F name="$name" -F number="$number" 2>/dev/null \
     | jq -c '.data.repository.pullRequest.reviewThreads.nodes // []
-        | map({ gid:.id, isResolved, isOutdated, path, line:(.line // .originalLine), diffSide,
+        | map({ gid:.id, isResolved, isOutdated, path, line:(.line // .originalLine),
+                startLine:(.startLine // .originalStartLine), diffSide,
+                diffHunk:(.comments.nodes[0].diffHunk // ""),
                 comments:(.comments.nodes | map({databaseId, login:(.author.login // "?"), createdAt, body})) })' 2>/dev/null)"
   [[ -z "$out" ]] && out="[]"
   printf '%s' "$out"
@@ -479,11 +482,18 @@ build_pr_preview() {
   local repo="$1"
   local number="$2"
   {
-    local refs
+    local refs pv rc
     refs="$(build_references_section "$repo" "$number" pr)"
-    gh pr view "$number" --repo "$repo" \
+    pv="$(gh pr view "$number" --repo "$repo" \
       --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,mergeable,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
-      2>/dev/null | jq -r --arg refs "$refs" "$FZFGH_REACTIONS_JQ"'
+      2>/dev/null)"
+    # Inline review comments (comments on files / lines) are not part of
+    # "gh pr view"; they come from the pull request review comments API. They
+    # are merged with the review summaries into a single, time-sorted "Reviews"
+    # section so the ordering matches the GitHub web interface.
+    rc="$(gh api --paginate "repos/$repo/pulls/$number/comments" 2>/dev/null)"
+    [[ -z "$rc" ]] && rc="[]"
+    printf '%s' "$pv" | jq -r --arg refs "$refs" --argjson rc "$rc" "$FZFGH_REACTIONS_JQ"'
       [
         "# " + (.title // "-"),
         "",
@@ -513,11 +523,63 @@ build_pr_preview() {
       + ["", "---", ""]
       + (((.body // "") | gsub("\r";"")) as $b | if ($b|test("\\S")) then [$b] else ["_No description provided._"] end)
       + (if ($refs|test("\\S")) then ["", $refs] else [] end)
-      + (if (.reviews|length) > 0
-           then ["", "# Reviews", ""] + [ .reviews[] | select((.state//"") != "PENDING")
-                  | "**@" + (.author.login//"?") + "** \u2014 " + (.state//"") + "\n\n" + ((.body//"")|gsub("\r";""))
-                    + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n" ]
-           else [] end)
+      + (
+          (
+            [ .reviews[]
+              | select((.state//"") != "PENDING")
+              # Drop the empty "COMMENTED" review container GitHub creates when
+              # someone leaves only inline comments; its comments are rendered
+              # individually below.
+              | select(((.body//"")|test("\\S")) or ((.state//"") != "COMMENTED"))
+              | { ts: (.submittedAt // ""),
+                  md: ("**@" + (.author.login//"?") + "** \u2014 " + (.state//"")
+                       + (if (.submittedAt//"") != "" then " \u00b7 " + .submittedAt else "" end)
+                       + "\n\n" + ((.body//"")|gsub("\r";""))
+                       + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n") }
+            ]
+            + ( $rc
+                # Group each inline comment with its replies into one thread
+                # (replies carry in_reply_to_id pointing at the root comment),
+                # ordered by the root comment and rendered under a single
+                # file:line heading, like the GitHub web interface.
+                | group_by(.in_reply_to_id // .id)
+                | map(
+                    (sort_by(.created_at // "")) as $th
+                    | $th[0] as $root
+                    | { ts: ($root.created_at // ""),
+                        md: (
+                          ($root.line // $root.original_line) as $end
+                          | ($root.start_line // $root.original_start_line) as $start
+                          | (if ($start != null and $end != null and $start <= $end) then ($end - $start + 1) else 1 end) as $span
+                          | (if ($span + 3) > 4 then ($span + 3) else 4 end) as $keep
+                          | "**`" + ($root.path // "?")
+                            + (if ($start != null and $end != null and $start < $end)
+                                 then ":" + ($start|tostring) + "-" + ($end|tostring)
+                               elif $end != null
+                                 then ":" + ($end|tostring)
+                               else "" end) + "`**\n\n"
+                          + (if ($root.diff_hunk // "") != ""
+                               then ( ($root.diff_hunk | gsub("\r"; "") | split("\n")) as $lines
+                                      # Drop the leading @@ hunk header, then keep only the last
+                                      # $keep lines so the snippet mirrors the GitHub collapsed view
+                                      # (the commented line/range plus a few lines of context).
+                                      | (if (($lines[0] // "") | startswith("@@")) then $lines[1:] else $lines end) as $body
+                                      | (($body|length) - $keep) as $from
+                                      | "```diff\n" + ($body[(if $from < 0 then 0 else $from end):] | join("\n")) + "\n```\n\n" )
+                               else "" end)
+                          + ( $th
+                              | map("**@" + (.user.login // "?") + "** \u00b7 " + (.created_at // "")
+                                    + "\n\n" + ((.body // "") | gsub("\r"; ""))
+                                    + ((.reactions | rest_reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end))
+                              | join("\n\n") )
+                          + "\n") })
+              )
+          ) as $items
+          | if ($items|length) > 0
+              then ["", "# Reviews", ""]
+                   + ( $items | sort_by(.ts) | map(.md)
+                       | reduce .[] as $m ([]; if length == 0 then [$m] else . + ["", "---", ""] + [$m] end) )
+              else [] end)
       + (if (.comments|length) > 0
            then ["", "# Comments", ""] + [ .comments[]
                   | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";""))
@@ -525,27 +587,6 @@ build_pr_preview() {
            else [] end)
       | join("\n")
     '
-
-    # Inline review comments (comments on files / lines) are not part of
-    # "gh pr view"; they come from the pull request review comments API.
-    local rc
-    rc="$(gh api --paginate "repos/$repo/pulls/$number/comments" 2>/dev/null)"
-    if [[ -n "$rc" && "$rc" != "[]" ]]; then
-      printf '%s' "$rc" | jq -r "$FZFGH_REACTIONS_JQ"'
-        ["", "# Review comments", ""]
-        + [ .[]
-            | "**@" + (.user.login // "?") + "** \u00b7 `" + (.path // "?")
-              + (if .line then ":" + (.line|tostring)
-                 elif .original_line then ":" + (.original_line|tostring)
-                 else "" end) + "`\n\n"
-              + (if (.diff_hunk // "") != ""
-                 then "```diff\n" + (.diff_hunk | gsub("\r"; "")) + "\n```\n\n"
-                 else "" end)
-              + ((.body // "") | gsub("\r"; ""))
-              + ((.reactions | rest_reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n" ]
-        | join("\n")
-      '
-    fi
 
     local checks
     checks="$(gh pr checks "$number" --repo "$repo" --json bucket,name,workflow,state 2>/dev/null)"
@@ -1701,8 +1742,24 @@ if [[ "$1" == "__diff-preview" ]]; then
         + (if ($ts|length) > 0 then
              ["", "# Threads", ""]
              + [ ( $ts
-                   | map( ( "**" + (if .isResolved then "Resolved" else "Unresolved" end)
-                            + (if .isOutdated then " \u00b7 outdated" else "" end) + "**"
+                   | map( ( (.line // .startLine) as $end
+                            | .startLine as $start
+                            | (if ($start != null and $end != null and $start <= $end) then ($end - $start + 1) else 1 end) as $span
+                            | (if ($span + 3) > 4 then ($span + 3) else 4 end) as $keep
+                            | "**`" + (.path // "?")
+                              + (if ($start != null and $end != null and $start < $end)
+                                   then ":" + ($start|tostring) + "-" + ($end|tostring)
+                                 elif $end != null
+                                   then ":" + ($end|tostring)
+                                 else "" end) + "`**"
+                            + (if .isResolved then " \u00b7 resolved" else "" end)
+                            + (if .isOutdated then " \u00b7 outdated" else "" end)
+                            + (if (.diffHunk // "") != ""
+                                 then ( (.diffHunk | gsub("\r"; "") | split("\n")) as $lines
+                                        | (if (($lines[0] // "") | startswith("@@")) then $lines[1:] else $lines end) as $body
+                                        | (($body|length) - $keep) as $from
+                                        | "\n\n```diff\n" + ($body[(if $from < 0 then 0 else $from end):] | join("\n")) + "\n```" )
+                                 else "" end)
                             + "\n\n"
                             + ( .comments
                                 | map("**@" + (.login // "?") + "** \u00b7 " + (.createdAt // "")
