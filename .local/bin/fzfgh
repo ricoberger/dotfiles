@@ -489,8 +489,9 @@ build_pr_preview() {
       2>/dev/null)"
     # Inline review comments (comments on files / lines) are not part of
     # "gh pr view"; they come from the pull request review comments API. They
-    # are merged with the review summaries into a single, time-sorted "Reviews"
-    # section so the ordering matches the GitHub web interface.
+    # are merged with the review summaries and conversation comments into a
+    # single, time-sorted "Conversation" section so the ordering matches the
+    # GitHub web interface.
     rc="$(gh api --paginate "repos/$repo/pulls/$number/comments" 2>/dev/null)"
     [[ -z "$rc" ]] && rc="[]"
     printf '%s' "$pv" | jq -r --arg refs "$refs" --argjson rc "$rc" "$FZFGH_REACTIONS_JQ"'
@@ -574,17 +575,21 @@ build_pr_preview() {
                               | join("\n\n") )
                           + "\n") })
               )
+            # PR conversation comments ("gh pr view" .comments) are folded into
+            # the same time-sorted timeline as reviews and inline comments so the
+            # ordering matches the GitHub web interface, instead of living in a
+            # separate section below.
+            + ( [ .comments[]
+                  | { ts: (.createdAt // ""),
+                      md: ("**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";""))
+                           + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n") } ]
+              )
           ) as $items
           | if ($items|length) > 0
-              then ["", "# Reviews", ""]
+              then ["", "# Conversation", ""]
                    + ( $items | sort_by(.ts) | map(.md)
                        | reduce .[] as $m ([]; if length == 0 then [$m] else . + ["", "---", ""] + [$m] end) )
               else [] end)
-      + (if (.comments|length) > 0
-           then ["", "# Comments", ""] + [ .comments[]
-                  | "**@" + (.author.login//"?") + "** \u00b7 " + (.createdAt//"") + "\n\n" + ((.body//"")|gsub("\r";""))
-                    + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n" ]
-           else [] end)
       | join("\n")
     '
 
