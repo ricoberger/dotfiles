@@ -815,17 +815,75 @@ if [[ "$1" == "__action" ]]; then
       esac
 
       # Merge commits and squash merges take a commit subject / body. They are
-      # pre-filled with the pull request title and body (as gh-pr-merge did) and
-      # edited in nvim (COMMIT_EDITMSG -> gitcommit filetype: line 1 is the
-      # subject, the rest is the body). Rebase merges create no commit message.
+      # pre-filled to match GitHub's web UI default commit messages and edited
+      # in nvim (COMMIT_EDITMSG -> gitcommit filetype: line 1 is the subject,
+      # the rest is the body). Rebase merges create no commit message.
       if [[ "$choice" != "Rebase and merge"* ]]; then
-        pr="$(gh pr view "$number" --repo "$repo" --json title,body 2>/dev/null)"
+        pr="$(gh pr view "$number" --repo "$repo" \
+          --json title,headRefName,headRepositoryOwner,commits 2>/dev/null)"
         title="$(printf '%s' "$pr" | jq -r '.title // ""')"
-        body="$(printf '%s' "$pr" | jq -r '(.body // "") | gsub("\r"; "")')"
+
+        if [[ "$choice" == "Squash and merge"* ]]; then
+          # Squash mirrors GitHub's default squash message. A single commit uses
+          # that commit's headline as the subject and its body; multiple commits
+          # use the PR title with a body listing each commit ("* <headline>" plus
+          # its body). In both cases an aggregated, de-duplicated block of
+          # "Co-authored-by:" trailers for every distinct commit author/co-author
+          # is appended -- GitHub derives these from commit authorship, which is
+          # why even a single Dependabot commit gets a Co-authored-by line. The
+          # PR number is appended to the subject as " (#<number>)".
+          commit_count="$(printf '%s' "$pr" | jq -r '.commits | length')"
+          if [[ "$commit_count" == "1" ]]; then
+            subject="$(printf '%s' "$pr" | jq -r '.commits[0].messageHeadline // ""')"
+            # Commit body, with any existing Co-authored-by trailers stripped so
+            # they are not duplicated by the aggregated block below.
+            body="$(printf '%s' "$pr" | jq -r '
+              (.commits[0].messageBody // "") | gsub("\r"; "") | split("\n")
+              | map(select(test("^Co-authored-by:"; "i") | not))
+              | join("\n") | sub("\n+$"; "")')"
+          else
+            subject="$title"
+            # Per-commit blocks, with any existing Co-authored-by trailers
+            # stripped so they are not duplicated by the aggregated block below.
+            body="$(printf '%s' "$pr" | jq -r '
+              [.commits[]
+               | ((.messageBody // "") | gsub("\r"; "") | split("\n")
+                  | map(select(test("^Co-authored-by:"; "i") | not))
+                  | join("\n") | sub("\n+$"; "")) as $mb
+               | "* " + .messageHeadline
+                 + (if $mb != "" then "\n\n" + $mb else "" end)]
+              | join("\n\n")')"
+          fi
+          # Aggregate distinct Co-authored-by trailers, preserving first-seen
+          # order. GitHub's parsed author list already includes co-authors
+          # declared via trailers in the individual commits.
+          coauthors="$(printf '%s' "$pr" | jq -r '
+            [.commits[].authors[]
+             | select((.name // "") != "" and (.email // "") != "")
+             | "Co-authored-by: " + .name + " <" + .email + ">"]
+            | reduce .[] as $x ([]; if index($x) then . else . + [$x] end)
+            | .[]')"
+          if [[ -n "$coauthors" ]]; then
+            if [[ -n "$body" ]]; then
+              body="$body"$'\n\n'"$coauthors"
+            else
+              body="$coauthors"
+            fi
+          fi
+          subject="$subject (#$number)"
+        else
+          # Merge commit mirrors GitHub's default merge message: the subject is
+          # "Merge pull request #<number> from <owner>/<branch>" and the body is
+          # the pull request title.
+          owner="$(printf '%s' "$pr" | jq -r '.headRepositoryOwner.login // ""')"
+          branch="$(printf '%s' "$pr" | jq -r '.headRefName // ""')"
+          subject="Merge pull request #$number from $owner/$branch"
+          body="$title"
+        fi
 
         dir="$(mktemp -d)"
         tmp="$dir/COMMIT_EDITMSG"
-        { printf '%s\n\n' "$title"; printf '%s\n' "$body"; } > "$tmp"
+        { printf '%s\n\n' "$subject"; printf '%s\n' "$body"; } > "$tmp"
         nvim "$tmp"
 
         subject="$(sed -n '1p' "$tmp")"
@@ -1250,6 +1308,18 @@ if [[ "$1" == "__action" ]]; then
           # Roll back the empty worktree we just created.
           git worktree remove --force "$worktree_dir" 2>/dev/null
           echo "Failed to check out PR $repo#$number"
+          read -n 1 -s -r -p "Press any key to continue..."
+          exit 0
+        fi
+      else
+        # The worktree already exists from an earlier checkout of this PR. Its
+        # branch still points at whatever the PR head was back then, so a PR
+        # that received new commits (or was force-pushed / rebased) in the
+        # meantime would otherwise be reviewed against stale state. Re-run
+        # `gh pr checkout --force` inside the worktree to fetch the current PR
+        # head and reset the branch to it, matching what GitHub shows now.
+        if ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" --force ); then
+          echo "Failed to refresh PR $repo#$number"
           read -n 1 -s -r -p "Press any key to continue..."
           exit 0
         fi
@@ -2193,7 +2263,8 @@ Pull Request Keybindings:
            range (nvim opens pre-filled with a ```suggestion``` block)
   alt-g  : check out pull request into a new git worktree at
            ~/.worktrees/<repo>/<branch> and open it in a new Ghostty tab
-           running nvim with the :GitDiff command
+           running nvim with the :GitDiff command (an existing worktree is
+           reused and refreshed to the PR's current head)
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
