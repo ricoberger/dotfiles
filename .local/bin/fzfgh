@@ -344,11 +344,15 @@ md_render() {
 
 # Fetch the review threads of a pull request via GraphQL (REST has no resolved
 # state) and emit a simplified array:
-#   [ { gid, isResolved, isOutdated, path, line, startLine, diffSide, diffHunk,
-#       comments:[ {databaseId, login, createdAt, body} ] } ]
+#   [ { gid, isResolved, isOutdated, path, line, startLine, liveLine, diffSide,
+#       diffHunk, comments:[ {databaseId, login, createdAt, body, reactions} ] } ]
+# reactions is the GraphQL reactionGroups array (for reactions_emoji).
 # gid is the thread node id (for resolve/unresolve mutations); each comment's
 # databaseId is the REST id (used to reply); diffHunk is the root comment's hunk
-# (used to render a trimmed snippet). Emits "[]" on error.
+# (used to render a trimmed snippet). line/startLine are the display positions
+# (falling back to the original line when the thread is outdated), while
+# liveLine is the thread's line in the *current* diff (null when outdated / no
+# longer present) and is what the hunk mapping anchors on. Emits "[]" on error.
 fzfgh_fetch_threads() {
   local repo="$1"
   local number="$2"
@@ -356,48 +360,101 @@ fzfgh_fetch_threads() {
   local name="${repo#*/}"
   local out
   out="$(gh api graphql \
-    -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine startLine originalStartLine diffSide comments(first:100){nodes{databaseId author{login} createdAt body diffHunk}}}}}}}' \
+    -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine startLine originalStartLine diffSide comments(first:100){nodes{databaseId author{login} createdAt body diffHunk reactionGroups{content users{totalCount}}}}}}}}}' \
     -F owner="$owner" -F name="$name" -F number="$number" 2>/dev/null \
     | jq -c '.data.repository.pullRequest.reviewThreads.nodes // []
         | map({ gid:.id, isResolved, isOutdated, path, line:(.line // .originalLine),
-                startLine:(.startLine // .originalStartLine), diffSide,
+                startLine:(.startLine // .originalStartLine), liveLine:.line, diffSide,
                 diffHunk:(.comments.nodes[0].diffHunk // ""),
-                comments:(.comments.nodes | map({databaseId, login:(.author.login // "?"), createdAt, body})) })' 2>/dev/null)"
+                comments:(.comments.nodes | map({databaseId, login:(.author.login // "?"), createdAt, body, reactions:(.reactionGroups // [])})) })' 2>/dev/null)"
   [[ -z "$out" ]] && out="[]"
   printf '%s' "$out"
 }
 
 # jq snippet (used by the cache build and the refresh) that maps a simplified
-# threads array (passed as --argjson threads) onto an array of hunks: RIGHT-side
-# threads match the hunk's new-line range, LEFT-side threads its old-line range.
+# threads array (passed as --argjson threads) onto an array of hunks. A thread
+# anchors to a hunk only when it is still live in the current diff (liveLine !=
+# null): RIGHT-side threads match the hunk's new-line range, LEFT-side threads
+# its old-line range. Any thread that does not anchor to a hunk (outdated, or a
+# live line outside every hunk) is gathered into one synthetic per-file
+# "catch-all" entry (catchall:true) so no thread is silently dropped from the
+# diff browser. Existing catch-all entries are stripped first so re-running the
+# snippet on the cache (on action refresh) is idempotent.
 FZFGH_DIFF_MAP_JQ='
-  map( .os as $os | .oc as $oc | .ns as $ns | .nc as $nc | .path as $hpath | .nodiff as $nd
-       | ($threads | map(select(
-            (.path == $hpath) and ($nd|not)
-            and ( if .diffSide == "LEFT"
-                  then ((.line // -1) >= $os) and ((.line // -1) <= ($os + (if $oc>0 then $oc-1 else 0 end)))
-                  else ((.line // -1) >= $ns) and ((.line // -1) <= ($ns + (if $nc>0 then $nc-1 else 0 end))) end)
-         ))) as $ts
-       | . + { threads:$ts, nthreads:($ts|length), nunresolved:([$ts[]|select(.isResolved|not)]|length) } )
+  (map(select(.catchall != true))) as $hunks
+  | ([ $hunks[].id ] | max // -1) as $maxid
+  | ( $hunks
+      | map( .os as $os | .oc as $oc | .ns as $ns | .nc as $nc | .path as $hpath | .nodiff as $nd
+             | ($threads | map(select(
+                  (.path == $hpath) and ($nd|not) and (.liveLine != null)
+                  and ( if .diffSide == "LEFT"
+                        then (.liveLine >= $os) and (.liveLine <= ($os + (if $oc>0 then $oc-1 else 0 end)))
+                        else (.liveLine >= $ns) and (.liveLine <= ($ns + (if $nc>0 then $nc-1 else 0 end))) end)
+               ))) as $ts
+             | . + { threads:$ts, nthreads:($ts|length), nunresolved:([$ts[]|select(.isResolved|not)]|length) } ) ) as $mapped
+  | ([ $mapped[].threads[]?.gid ] | unique) as $anchored
+  | ( $threads | map(select(([.gid] - $anchored) | length > 0)) ) as $orphans
+  | $mapped
+    + ( $orphans
+        | group_by(.path)
+        | to_entries
+        | map( .value as $ts
+               | { path:($ts[0].path // "?"), status:"modified", nodiff:true, catchall:true,
+                   header:"", body:"", os:0, oc:0, ns:0, nc:0, additions:0, deletions:0,
+                   id:($maxid + 1 + .key),
+                   threads:$ts, nthreads:($ts|length), nunresolved:([$ts[]|select(.isResolved|not)]|length) } ) )
 '
 
 
-# Shared jq function definitions that turn GitHub reaction data into a compact
+# Shared jq function definition that turns GitHub reaction data into a compact
 # emoji string (e.g. "👍 3   ❤️ 1"). Prepended to the jq programs in the preview
 # builders. reactions_emoji consumes the gh / GraphQL "reactionGroups" array
-# ([{content, users:{totalCount}}]); rest_reactions_emoji consumes the REST
-# "reactions" object ({"+1":n, heart:n, ...}). Both emit "" when there are none.
+# ([{content, users:{totalCount}}]) and emits "" when there are none.
 FZFGH_REACTIONS_JQ='
   def reactions_emoji:
     ({"THUMBS_UP":"👍","THUMBS_DOWN":"👎","LAUGH":"😄","HOORAY":"🎉","CONFUSED":"😕","HEART":"❤️","ROCKET":"🚀","EYES":"👀"}) as $m
     | (. // [])
     | map(select((.users.totalCount // 0) > 0) | (($m[.content] // "\u2022") + " " + (.users.totalCount|tostring)))
     | if length > 0 then join("   ") else "" end;
-  def rest_reactions_emoji:
-    . as $r
-    | [["+1","👍"],["-1","👎"],["laugh","😄"],["hooray","🎉"],["confused","😕"],["heart","❤️"],["rocket","🚀"],["eyes","👀"]]
-    | map(($r[.[0]] // 0) as $n | select($n > 0) | (.[1] + " " + ($n|tostring)))
-    | if length > 0 then join("   ") else "" end;
+'
+
+# Shared jq function that renders a single review thread (as produced by
+# fzfgh_fetch_threads: { isResolved, isOutdated, path, line, startLine, diffHunk,
+# comments:[{login, createdAt, body, reactions}] }) into markdown: a
+# "`file:line`" heading with the resolved / outdated state, a trimmed diff
+# snippet of the commented range, then each comment with its author, timestamp,
+# body and reactions. Used by both the PR preview Conversation section and the
+# diff browser so the two stay identical. Depends on reactions_emoji, so
+# FZFGH_REACTIONS_JQ must be prepended before this.
+FZFGH_THREAD_JQ='
+  def thread_md:
+    (.line // .startLine) as $end
+    | .startLine as $start
+    | (if ($start != null and $end != null and $start <= $end) then ($end - $start + 1) else 1 end) as $span
+    | (if ($span + 3) > 4 then ($span + 3) else 4 end) as $keep
+    | "**`" + (.path // "?")
+      + (if ($start != null and $end != null and $start < $end)
+           then ":" + ($start|tostring) + "-" + ($end|tostring)
+         elif $end != null
+           then ":" + ($end|tostring)
+         else "" end) + "`**"
+      + (if .isResolved then " \u00b7 resolved" else "" end)
+      + (if .isOutdated then " \u00b7 outdated" else "" end)
+      + (if (.diffHunk // "") != ""
+           then ( (.diffHunk | gsub("\r"; "") | split("\n")) as $lines
+                  # Drop the leading @@ hunk header, then keep only the last $keep
+                  # lines so the snippet mirrors the GitHub collapsed view (the
+                  # commented line/range plus a few lines of context).
+                  | (if (($lines[0] // "") | startswith("@@")) then $lines[1:] else $lines end) as $body
+                  | (($body|length) - $keep) as $from
+                  | "\n\n```diff\n" + ($body[(if $from < 0 then 0 else $from end):] | join("\n")) + "\n```" )
+           else "" end)
+      + "\n\n"
+      + ( (.comments | sort_by(.createdAt // ""))
+          | map("**@" + (.login // "?") + "** \u00b7 " + (.createdAt // "")
+                + "\n\n" + ((.body // "") | gsub("\r"; ""))
+                + ((.reactions | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end))
+          | join("\n\n") );
 '
 
 # Build the "# References" section for a pull request / issue: the cross-repo
@@ -482,19 +539,21 @@ build_pr_preview() {
   local repo="$1"
   local number="$2"
   {
-    local refs pv rc
+    local refs pv
     refs="$(build_references_section "$repo" "$number" pr)"
     pv="$(gh pr view "$number" --repo "$repo" \
       --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,mergeable,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
       2>/dev/null)"
     # Inline review comments (comments on files / lines) are not part of
-    # "gh pr view"; they come from the pull request review comments API. They
-    # are merged with the review summaries and conversation comments into a
-    # single, time-sorted "Conversation" section so the ordering matches the
-    # GitHub web interface.
-    rc="$(gh api --paginate "repos/$repo/pulls/$number/comments" 2>/dev/null)"
-    [[ -z "$rc" ]] && rc="[]"
-    printf '%s' "$pv" | jq -r --arg refs "$refs" --argjson rc "$rc" "$FZFGH_REACTIONS_JQ"'
+    # "gh pr view". They come from the review threads (fetched via GraphQL, the
+    # same call the diff browser uses) which — unlike the REST comments API —
+    # also carry the resolved / outdated state and group replies into threads
+    # natively. They are merged with the review summaries and conversation
+    # comments into a single, time-sorted "Conversation" section so the ordering
+    # matches the GitHub web interface.
+    local threads
+    threads="$(fzfgh_fetch_threads "$repo" "$number")"
+    printf '%s' "$pv" | jq -r --arg refs "$refs" --argjson threads "$threads" "$FZFGH_REACTIONS_JQ$FZFGH_THREAD_JQ"'
       [
         "# " + (.title // "-"),
         "",
@@ -538,42 +597,12 @@ build_pr_preview() {
                        + "\n\n" + ((.body//"")|gsub("\r";""))
                        + ((.reactionGroups | reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end) + "\n") }
             ]
-            + ( $rc
-                # Group each inline comment with its replies into one thread
-                # (replies carry in_reply_to_id pointing at the root comment),
-                # ordered by the root comment and rendered under a single
-                # file:line heading, like the GitHub web interface.
-                | group_by(.in_reply_to_id // .id)
-                | map(
-                    (sort_by(.created_at // "")) as $th
-                    | $th[0] as $root
-                    | { ts: ($root.created_at // ""),
-                        md: (
-                          ($root.line // $root.original_line) as $end
-                          | ($root.start_line // $root.original_start_line) as $start
-                          | (if ($start != null and $end != null and $start <= $end) then ($end - $start + 1) else 1 end) as $span
-                          | (if ($span + 3) > 4 then ($span + 3) else 4 end) as $keep
-                          | "**`" + ($root.path // "?")
-                            + (if ($start != null and $end != null and $start < $end)
-                                 then ":" + ($start|tostring) + "-" + ($end|tostring)
-                               elif $end != null
-                                 then ":" + ($end|tostring)
-                               else "" end) + "`**\n\n"
-                          + (if ($root.diff_hunk // "") != ""
-                               then ( ($root.diff_hunk | gsub("\r"; "") | split("\n")) as $lines
-                                      # Drop the leading @@ hunk header, then keep only the last
-                                      # $keep lines so the snippet mirrors the GitHub collapsed view
-                                      # (the commented line/range plus a few lines of context).
-                                      | (if (($lines[0] // "") | startswith("@@")) then $lines[1:] else $lines end) as $body
-                                      | (($body|length) - $keep) as $from
-                                      | "```diff\n" + ($body[(if $from < 0 then 0 else $from end):] | join("\n")) + "\n```\n\n" )
-                               else "" end)
-                          + ( $th
-                              | map("**@" + (.user.login // "?") + "** \u00b7 " + (.created_at // "")
-                                    + "\n\n" + ((.body // "") | gsub("\r"; ""))
-                                    + ((.reactions | rest_reactions_emoji) as $r | if $r != "" then "\n\n" + $r else "" end))
-                              | join("\n\n") )
-                          + "\n") })
+            + ( ($threads // [])
+                # Each review thread is already a grouped conversation (root +
+                # replies) carrying its resolved / outdated state; render it via
+                # the shared thread_md, ordered by the root (oldest) comment.
+                | map( { ts: ((.comments | sort_by(.createdAt // ""))[0].createdAt // ""),
+                         md: (thread_md + "\n") } )
               )
             # PR conversation comments ("gh pr view" .comments) are folded into
             # the same time-sorted timeline as reviews and inline comments so the
@@ -1802,9 +1831,11 @@ if [[ "$1" == "__diff-preview" ]]; then
   cache="$2"
   id="$3"
   [[ -z "$cache" || -z "$id" || ! -f "$cache" ]] && exit 0
-  jq -r --arg id "$id" '
+  jq -r --arg id "$id" "$FZFGH_REACTIONS_JQ$FZFGH_THREAD_JQ"'
     (.[] | select(.id == ($id|tonumber))) as $h
-    | ([ if $h.nodiff then
+    | ([ if $h.catchall then
+           ( "_Outdated or unanchored review threads \u2014 not attached to any current hunk._" )
+         elif $h.nodiff then
            ( "_Binary or no textual diff available._",
              "",
              "- **Status:** " + ($h.status // "?"),
@@ -1816,31 +1847,7 @@ if [[ "$1" == "__diff-preview" ]]; then
     | ( $diff
         + (if ($ts|length) > 0 then
              ["", "# Threads", ""]
-             + [ ( $ts
-                   | map( ( (.line // .startLine) as $end
-                            | .startLine as $start
-                            | (if ($start != null and $end != null and $start <= $end) then ($end - $start + 1) else 1 end) as $span
-                            | (if ($span + 3) > 4 then ($span + 3) else 4 end) as $keep
-                            | "**`" + (.path // "?")
-                              + (if ($start != null and $end != null and $start < $end)
-                                   then ":" + ($start|tostring) + "-" + ($end|tostring)
-                                 elif $end != null
-                                   then ":" + ($end|tostring)
-                                 else "" end) + "`**"
-                            + (if .isResolved then " \u00b7 resolved" else "" end)
-                            + (if .isOutdated then " \u00b7 outdated" else "" end)
-                            + (if (.diffHunk // "") != ""
-                                 then ( (.diffHunk | gsub("\r"; "") | split("\n")) as $lines
-                                        | (if (($lines[0] // "") | startswith("@@")) then $lines[1:] else $lines end) as $body
-                                        | (($body|length) - $keep) as $from
-                                        | "\n\n```diff\n" + ($body[(if $from < 0 then 0 else $from end):] | join("\n")) + "\n```" )
-                                 else "" end)
-                            + "\n\n"
-                            + ( .comments
-                                | map("**@" + (.login // "?") + "** \u00b7 " + (.createdAt // "")
-                                      + "\n\n" + ((.body // "") | gsub("\r"; "")) )
-                                | join("\n\n") ) ) )
-                   | join("\n\n---\n\n") ) ]
+             + [ ( $ts | map(thread_md) | join("\n\n---\n\n") ) ]
            else [] end) )
     | join("\n")
   ' "$cache" | md_render
@@ -1857,8 +1864,12 @@ if [[ "$1" == "__diff-rows" ]]; then
     def st(s): {added:"A",modified:"M",removed:"D",renamed:"R"}[s]//"?";
     def sc(s): {added:"green",modified:"yellow",removed:"red",renamed:"mauve"}[s]//"gray";
     .[] | (.id|tostring) + "\t" + .path + "\t"
-      + "\u001b[" + color(sc(.status)) + "m" + st(.status) + "\u001b[0m " + .path + "  "
-      + (if .nodiff then "(no diff)" else .header end)
+      + (if .catchall then
+           "\u001b[90m\uf071 " + .path + "  outdated / unanchored threads\u001b[0m"
+         else
+           "\u001b[" + color(sc(.status)) + "m" + st(.status) + "\u001b[0m " + .path + "  "
+           + (if .nodiff then "(no diff)" else .header end)
+         end)
       + ( (.nthreads // 0) as $n | (.nunresolved // 0) as $u
           | if $u > 0 then "  \u001b[33m\uf442 " + ($u|tostring) + "\u001b[0m"
             elif $n > 0 then "  \u001b[32m\uf00c " + ($n|tostring) + "\u001b[0m"
@@ -1940,6 +1951,11 @@ if [[ "$1" == "__diff-action" ]]; then
     create)
       node="$(jq -c --arg id "$hunk_id" '.[] | select(.id == ($id|tonumber))' "$cache")"
       [[ -z "$node" ]] && exit 0
+      if [[ "$(printf '%s' "$node" | jq -r '.catchall // false')" == "true" ]]; then
+        echo "Cannot create a comment on outdated / unanchored threads"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
       if [[ "$(printf '%s' "$node" | jq -r '.nodiff')" == "true" ]]; then
         echo "Cannot comment on a file with no textual diff"
         read -n 1 -s -r -p "Press any key to continue..."
