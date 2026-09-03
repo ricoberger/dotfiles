@@ -57,6 +57,10 @@ sh $(pwd)/apps/Neovim/install.sh
 echo "\n- Copy btop Configuration"
 cp -r $(pwd)/.config/btop ~/.config
 
+# radar
+echo "\n- Copy radar Configuration"
+cp -r $(pwd)/.config/radar ~/.config
+
 # Glamour
 echo "\n- Copy Glamour Configuration"
 cp $(pwd)/.config/glamour-catppuccin-macchiato.json ~/.config/glamour-catppuccin-macchiato.json

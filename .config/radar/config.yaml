@@ -1,0 +1,103 @@
+editor: nvim
+
+dashboards:
+  - name: Main
+    layout:
+      direction: row
+      children:
+        - direction: column
+          weight: 2
+          children:
+            - direction: column
+              children:
+                - panel: httpmonitor
+                  params:
+                    targets:
+                      - name: backend (prod/de1)
+                        url: https://team-diablo.staffbase.com/health
+                      - name: backend (prod/us1)
+                        url: https://staffpranos.staffbase.com/health
+                      - name: backend (prod/au1)
+                        url: https://team-diablo-au.staffbase.com/health
+                      - name: backend (prod/ae1)
+                        url: https://team-diablo-ae.staffbase.com/health
+                      - name: backend (stage/de1)
+                        url: https://team-diablo.staffbase.rocks/health
+                      - name: backend (dev/de1)
+                        url: https://team-diablo.staffbase.dev/health
+                      - name: Grafana (prod/de1)
+                        url: https://observatory-de1.staffbase.com/api/health
+                      - name: Grafana (prod/us1)
+                        url: https://observatory-us1.staffbase.com/api/health
+                      - name: Grafana (prod/au1)
+                        url: https://observatory-au1.staffbase.com/api/health
+                      - name: Grafana (prod/ae1)
+                        url: https://observatory-ae1.staffbase.com/api/health
+                      - name: Grafana (prod/core)
+                        url: https://observatory-core.staffbase.com/api/health
+                      - name: Grafana (stage/de1)
+                        url: https://observatory-de1.staffbase.rocks/api/health
+                      - name: Grafana (dev/de1)
+                        url: https://observatory-de1.staffbase.dev/api/health
+                - panel: alertmanager
+                  weight: 2
+                  params:
+                    filter: team-core (incident.io)
+            - direction: column
+              children:
+                - panel: kubectl-issues
+                  params:
+                    command: pods
+                    contexts:
+                      - prod-de1
+                      - prod-us1
+                      - prod-au1
+                      - prod-ae1
+                      - prod-core
+                      - stage-de1
+                      - dev-de1
+                    args:
+                      - --all-namespaces
+        - direction: column
+          weight: 2
+          children:
+            - direction: column
+              children:
+                - panel: jira
+                  params:
+                    jql:
+                      project = CORE AND assignee = currentUser() AND
+                      statusCategory != Done AND status != Backlog ORDER BY
+                      priority DESC, updated DESC
+                - panel: github-notifications
+                  weight: 2
+                  params:
+                    open: fzfgh
+            - direction: column
+              children:
+                - panel: github-prs
+                  title: "GitHub Pull Requests: Created"
+                  params:
+                    query: "archived:false is:open author:ricoberger"
+                    open: fzfgh
+                - panel: github-prs
+                  title: "GitHub Pull Requests: Review Requested"
+                  params:
+                    query: "archived:false is:open review-requested:ricoberger"
+                    open: fzfgh
+        - direction: column
+          children:
+            - direction: column
+              children:
+                - panel: copilot
+                - panel: ricoberger-notes
+                  weight: 2
+                  params:
+                    dir: ~/Documents/GitHub/ricoberger/notes/daily
+            - direction: column
+              children:
+                - panel: apple-calendar
+                  params:
+                    view: day
+                    day: today
+                - panel: apple-mail
