@@ -118,12 +118,21 @@ vim.cmd([[let &t_Cs = "\e[4:3m"]])
 vim.cmd([[let &t_Ce = "\e[4:0m"]])
 
 -- Enable the new Neovim UI, which is currently experimental.
-require("vim._core.ui2").enable({
-  enable = true,
-  msg = {
-    targets = "msg",
-  },
-})
+--
+-- The new, experimental Neovim UI ("vim._core.ui2", formerly "vim._extui") is
+-- currently disabled because enabling it breaks treesitter highlighting: when
+-- the UI is enabled the startup buffer ends up without treesitter highlighting
+-- (i.e. no colors at all). This is an upstream regression in the experimental
+-- feature, tracked under the "ui2" label (see e.g. neovim/neovim#36245), and it
+-- happens whenever the UI is enabled - deferring the call to "VimEnter" does not
+-- help. Re-enable this once the experimental UI no longer disrupts treesitter.
+--
+-- require("vim._core.ui2").enable({
+--   enable = true,
+--   msg = {
+--     targets = "msg",
+--   },
+-- })
 
 --------------------------------------------------------------------------------
 -- FILETYPE HANDLING
@@ -628,6 +637,12 @@ vim.api.nvim_create_autocmd("QuickFixCmdPost", {
   pattern = { "[^l]*" },
   command = "cwindow",
 })
+
+--------------------------------------------------------------------------------
+-- MULTICURSOR
+--------------------------------------------------------------------------------
+
+require("core.multicursor").setup()
 
 --------------------------------------------------------------------------------
 -- TREESITTER
@@ -1201,66 +1216,6 @@ end)
 vim.keymap.set("n", "<leader>gfL", function()
   require("core.picker").git_log()
 end)
-
---------------------------------------------------------------------------------
--- MULTICURSOR
---------------------------------------------------------------------------------
-
-vim.pack.add({
-  {
-    src = "https://github.com/jake-stewart/multicursor.nvim",
-    name = "multicursor",
-    version = "main",
-  },
-}, { confirm = false, load = true })
-
-vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile" }, {
-  group = vim.api.nvim_create_augroup(
-    "lazy-load-multicursor",
-    { clear = true }
-  ),
-  once = true,
-  callback = function()
-    local mc = require("multicursor-nvim")
-    mc.setup()
-
-    -- Define keymaps for multicursor operations. A new cursor can be added
-    -- using "Ctrl + k" / "Ctrl + j" for the line above / below, using
-    -- "Ctrl + n" for the next word under the cursor "Ctrl + a" for all
-    -- occurrences of the word under the cursor or using "Ctrl = m" for all
-    -- provided matches.
-    vim.keymap.set("n", "<c-k>", function()
-      mc.addCursor("k")
-    end)
-    vim.keymap.set("n", "<c-j>", function()
-      mc.addCursor("j")
-    end)
-    vim.keymap.set({ "n", "x" }, "<c-n>", function()
-      mc.addCursor("*")
-    end)
-    vim.keymap.set({ "n", "x" }, "<c-a>", mc.matchAllAddCursors)
-    vim.keymap.set("x", "<c-m>", mc.matchCursors)
-
-    mc.addKeymapLayer(function(layerSet)
-      layerSet("n", "<esc>", function()
-        if not mc.cursorsEnabled() then
-          mc.enableCursors()
-        else
-          mc.clearCursors()
-        end
-      end)
-    end)
-
-    -- Customize highlight groups for multicursor.
-    local hl = vim.api.nvim_set_hl
-    hl(0, "MultiCursorCursor", { link = "Cursor" })
-    hl(0, "MultiCursorVisual", { link = "Visual" })
-    hl(0, "MultiCursorSign", { link = "SignColumn" })
-    hl(0, "MultiCursorDisabledCursor", { link = "Visual" })
-    hl(0, "MultiCursorDisabledVisual", { link = "Visual" })
-    hl(0, "MultiCursorDisabledSign", { link = "SignColumn" })
-  end,
-})
 
 --------------------------------------------------------------------------------
 -- NOTES

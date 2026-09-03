@@ -10,13 +10,8 @@
       "src": "https://github.com/lewis6991/gitsigns.nvim",
       "version": "'main'"
     },
-    "multicursor": {
-      "rev": "704b99f10a72cc05d370cfeb294ff83412a8ab55",
-      "src": "https://github.com/jake-stewart/multicursor.nvim",
-      "version": "'main'"
-    },
     "nvim-treesitter": {
-      "rev": "074aa4422bf029908338e855d0c0f71470a971bb",
+      "rev": "427e9222363d07c32d6db6169e4049c28d58d141",
       "src": "https://github.com/nvim-treesitter/nvim-treesitter",
       "version": "'main'"
     }
