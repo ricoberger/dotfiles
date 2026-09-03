@@ -67,8 +67,9 @@ cp -r $(pwd)/.agents ~/
 
 echo "\n- Copy Copilot Configuration"
 mkdir -p ~/.copilot
-cp  $(pwd)/.config/copilot/settings.json ~/.copilot/settings.json
-cp  $(pwd)/.config/copilot/lsp-config.json ~/.copilot/lsp-config.json
+cp $(pwd)/.config/copilot/settings.json ~/.copilot/settings.json
+cp $(pwd)/.config/copilot/lsp-config.json ~/.copilot/lsp-config.json
+cp -r $(pwd)/.config/copilot/agents ~/.copilot
 
 # Binaries
 echo "\n- Copy Binaries"
