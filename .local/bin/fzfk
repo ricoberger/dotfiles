@@ -208,13 +208,12 @@ fzfk - Fuzzy Finder for Kubernetes
 Usage: fzfk <resource> [kubectl get args...]
 
 Browse Kubernetes resources with fzf, previewing their details and performing
-common actions, like describe, edit, delete, logs, exec, and port-forward. The
-list is automatically refreshed every 5 seconds, preserving the cursor position
-and marked resources.
+common actions, like describe, edit, delete, logs, exec, and port-forward.
 
 Examples:
   fzfk pods
-  fzfk pods -A
+  fzfk pods -w
+  fzfk pods -A --watch
   fzfk pods -n kube-system
   fzfk deployments -l app=foo
 
@@ -228,6 +227,7 @@ Keybindings:
   alt-d  : delete marked resources; the confirmation offers a force option
            (--grace-period=0 --force)
   ctrl-r : reload list
+  alt-w  : toggle watch mode (auto-refresh) on/off
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
   ctrl-u : scroll half page up
@@ -238,7 +238,7 @@ Keybindings:
   alt-h  : show help
 
 Environment:
-  FZFK_REFRESH_INTERVAL : seconds between automatic list refreshes (default: 5)
+  FZFK_REFRESH_INTERVAL : seconds between watch refreshes (default: 5)
 EOF
 }
 
@@ -252,26 +252,43 @@ shift
 KUBECTL_ARGS=("$@")
 
 # Parse namespace flags from kubectl args, so action handlers can
-# operate on the same namespace as the listing.
+# operate on the same namespace as the listing. The -w / --watch flags are
+# intercepted here to control fzfk's own watch (auto-refresh) mode and are
+# stripped from the arguments forwarded to kubectl (kubectl get is run once per
+# refresh, so its own --watch must never be passed through).
 NAMESPACE=""
 ALL_NS=false
+WATCH=false
+FILTERED_ARGS=()
 i=0
 while [[ $i -lt ${#KUBECTL_ARGS[@]} ]]; do
   arg="${KUBECTL_ARGS[$i]}"
   case "$arg" in
+    -w|--watch)
+      WATCH=true
+      i=$((i+1))
+      continue
+      ;;
     -A|--all-namespaces)
       ALL_NS=true
       ;;
     -n|--namespace)
+      FILTERED_ARGS+=("$arg")
       i=$((i+1))
       NAMESPACE="${KUBECTL_ARGS[$i]}"
+      FILTERED_ARGS+=("${KUBECTL_ARGS[$i]}")
+      i=$((i+1))
+      continue
       ;;
     --namespace=*)
       NAMESPACE="${arg#*=}"
       ;;
   esac
+  FILTERED_ARGS+=("$arg")
   i=$((i+1))
 done
+# Arguments forwarded to kubectl, with fzfk's own -w / --watch removed.
+KUBECTL_ARGS=("${FILTERED_ARGS[@]}")
 
 # Determine field positions used by the fzf bindings.
 #   - With -A / --all-namespaces the kubectl output starts with the
@@ -318,9 +335,44 @@ LIST_CMD="kubectl get $RESOURCE ${KUBECTL_ARGS[*]}"
 # display in the border label.
 LIST_CMD_RUN="$LIST_CMD 2>&1"
 
-# Interval (seconds) for automatically refreshing the listed resources
+# Interval (seconds) between watch refreshes of the listed resources
 # (override via FZFK_REFRESH_INTERVAL).
 FZFK_REFRESH_INTERVAL="${FZFK_REFRESH_INTERVAL:-5}"
+
+# Watch mode (auto-refresh) on/off is stored in a small state file so it can be
+# toggled at runtime (alt-w) and read back by the periodic timer. The timer
+# reloads only while the file contains "on"; toggling to "off" pauses the watch
+# so the input field and list navigation stay responsive (--track blocks the UI
+# while fzf searches the reloaded stream for the item under the cursor). The
+# initial state mirrors kubectl's -w / --watch flag: on when it was passed,
+# off otherwise.
+if $WATCH; then
+  WATCH_INITIAL="on"
+else
+  WATCH_INITIAL="off"
+fi
+WATCH_STATE_FILE="$(mktemp -t fzfk_watch.XXXXXX)"
+printf '%s' "$WATCH_INITIAL" >"$WATCH_STATE_FILE"
+trap 'rm -f "$WATCH_STATE_FILE"' EXIT
+
+WATCH_LABEL_ON="󱃾 $LIST_CMD  (watch: on) "
+WATCH_LABEL_OFF="󱃾 $LIST_CMD  (watch: off) "
+if $WATCH; then
+  WATCH_LABEL_INITIAL="$WATCH_LABEL_ON"
+else
+  WATCH_LABEL_INITIAL="$WATCH_LABEL_OFF"
+fi
+
+# Periodic refresh, gated on the state file: the timer runs a transform that
+# emits a reload-sync action only while watch is "on", and nothing otherwise.
+# reload-sync (rather than reload) swaps the list only once the new output is
+# ready, avoiding the flicker of an emptied list and preserving marked rows;
+# kubectl get returns quickly, so the tracking block it holds is brief.
+WATCH_BIND="every($FZFK_REFRESH_INTERVAL):transform:[ \"\$(cat '$WATCH_STATE_FILE')\" = on ] && echo 'reload-sync($LIST_CMD_RUN)' || true"
+
+# Toggle watch mode and reflect the new state in the border label. Turning it
+# back on also triggers an immediate reload so the list is up to date at once.
+WATCH_TOGGLE_BIND="alt-w:transform:if [ \"\$(cat '$WATCH_STATE_FILE')\" = on ]; then printf off >'$WATCH_STATE_FILE'; echo 'change-border-label( $WATCH_LABEL_OFF)'; else printf on >'$WATCH_STATE_FILE'; echo 'change-border-label( $WATCH_LABEL_ON)+reload-sync($LIST_CMD_RUN)'; fi"
 
 # Build the per-row preview command (kubectl describe under the cursor).
 if $ALL_NS; then
@@ -345,7 +397,7 @@ fzf \
   --track \
   --id-nth "$ID_NTH" \
   --border "rounded" \
-  --border-label " 󱃾 $LIST_CMD " \
+  --border-label " $WATCH_LABEL_INITIAL" \
   --border-label-pos center \
   --bind "ctrl-d:half-page-down" \
   --bind "ctrl-u:half-page-up" \
@@ -356,7 +408,8 @@ fzf \
   --bind "end:preview-bottom" \
   --bind "ctrl-p:toggle-preview" \
   --bind "ctrl-r:reload-sync($LIST_CMD_RUN)" \
-  --bind "every($FZFK_REFRESH_INTERVAL):reload-sync($LIST_CMD_RUN)" \
+  --bind "$WATCH_BIND" \
+  --bind "$WATCH_TOGGLE_BIND" \
   --bind "enter:execute($ACTION describe $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-p:execute($ACTION portforward $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-x:execute($ACTION exec $RESOURCE $NS_FIELD $NAME_FIELD)" \
