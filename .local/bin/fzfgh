@@ -1316,8 +1316,10 @@ if [[ "$1" == "__action" ]]; then
       fi
 
       # Build the worktree path exactly like the `gitwta` shell function:
-      #   $HOME/.worktrees/<repo>/<branch>
-      # deriving <repo> from the common git dir so it works from any worktree.
+      #   $HOME/.worktrees/<org>/<repo>/<branch>
+      # deriving <org> and <repo> from the common git dir so it works from any
+      # worktree. Slashes in the branch name are replaced with dashes so the
+      # branch maps to a single directory instead of nested directories.
       common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
       if [[ -z "$common" ]]; then
         echo "Not inside a git worktree"
@@ -1325,7 +1327,8 @@ if [[ "$1" == "__action" ]]; then
         exit 0
       fi
       repo_name="$(basename "$(dirname "$common")")"
-      worktree_dir="$HOME/.worktrees/$repo_name/$head_ref"
+      org_name="$(basename "$(dirname "$(dirname "$common")")")"
+      worktree_dir="$HOME/.worktrees/$org_name/$repo_name/${head_ref//\//-}"
 
       # Create the worktree for the PR head, reusing it if it already exists.
       # Create it detached first, then run `gh pr checkout` inside it so gh
@@ -2283,7 +2286,7 @@ Pull Request Keybindings:
            alt-x - resolve / unresolve thread; alt-c - new thread on a line or
            range (nvim opens pre-filled with a ```suggestion``` block)
   alt-g  : check out pull request into a new git worktree at
-           ~/.worktrees/<repo>/<branch> and open it in a new Ghostty tab
+           ~/.worktrees/<org>/<repo>/<branch> and open it in a new Ghostty tab
            running nvim with the :GitDiff command (an existing worktree is
            reused and refreshed to the PR's current head)
   ctrl-r : reload list

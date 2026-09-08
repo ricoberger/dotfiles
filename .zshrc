@@ -194,10 +194,11 @@ gitwt() {
 }
 
 gitwta() {
-  local common repo dir
+  local common repo org dir
   common=$(git rev-parse --path-format=absolute --git-common-dir) || return
   repo=$(basename "$(dirname "$common")")
-  dir="$HOME/.worktrees/$repo/$1"
+  org=$(basename "$(dirname "$(dirname "$common")")")
+  dir="$HOME/.worktrees/$org/$repo/${1//\//-}"
   git worktree add -b "$1" "$dir" || return
   cd "$dir"
 }
