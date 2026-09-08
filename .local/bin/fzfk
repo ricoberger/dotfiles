@@ -226,8 +226,8 @@ Keybindings:
   alt-e  : edit manifest
   alt-d  : delete marked resources; the confirmation offers a force option
            (--grace-period=0 --force)
-  ctrl-r : reload list
   alt-w  : toggle watch mode (auto-refresh) on/off
+  ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
   ctrl-u : scroll half page up
