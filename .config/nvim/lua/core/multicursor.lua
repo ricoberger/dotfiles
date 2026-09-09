@@ -67,29 +67,60 @@ local function match_cursors(pattern, sline, eline)
   vim.api.nvim_feedkeys(vim.keycode("1q="), "n", false)
 end
 
--- Add a cursor on the line above / below (keeping the current column) and
--- enable follow-mode, so subsequent motions replay across all cursors. The
--- column is built with the API instead of a "j"/"k" motion, otherwise
--- follow-mode would replay that motion and move the whole column instead of
--- extending it.
+-- Whether a multicursor session is currently active (cursors exist).
+local function session_active()
+  local ns = vim.api.nvim_get_namespaces()["nvim.multicursor"]
+  return ns ~= nil
+    and #vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, { limit = 1 }) > 0
+end
+
+-- Return the position { row (1-based), col (0-based) } of the "frontier"
+-- cursor: the primary cursor together with every extra cursor, reduced to the
+-- furthest one in the given direction (the lowest for delta > 0, the highest
+-- for delta < 0, the last in buffer order for a forward search).
+local function frontier(compare)
+  local best = vim.api.nvim_win_get_cursor(0)
+  local ns = vim.api.nvim_get_namespaces()["nvim.multicursor"]
+  if ns then
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {})) do
+      local p = { m[2] + 1, m[3] }
+      if compare(p, best) then
+        best = p
+      end
+    end
+  end
+  return best
+end
+
+-- Add a cursor on the line above / below the column, keeping the current
+-- column, and enable follow-mode so subsequent edits/motions replay across all
+-- cursors. The primary cursor is deliberately kept in place: Neovim replays a
+-- mapping's keys at every cursor when the mapping moves the primary by API
+-- while follow-mode is enabled (see Neovim's mc_clock_edge), which would
+-- corrupt the cursor set on the next press. Extending the column only by
+-- placing extra cursors avoids that, and the primary still participates in the
+-- replayed edits.
 local function add_line_cursor(delta)
   return function()
-    local pos = vim.api.nvim_win_get_cursor(0)
-    local row, col = pos[1], pos[2]
-    local target = row + delta
+    local col = vim.api.nvim_win_get_cursor(0)[2]
+    local edge = frontier(function(p, best)
+      return delta > 0 and p[1] > best[1] or delta < 0 and p[1] < best[1]
+    end)
+    local target = edge[1] + delta
     if target < 1 or target > vim.fn.line("$") then
       return
     end
-    vim.api.nvim_mcursor(0, { row, col })
     local target_col = math.min(col, math.max(#vim.fn.getline(target) - 1, 0))
-    vim.api.nvim_win_set_cursor(0, { target, target_col })
+    vim.api.nvim_mcursor(0, { target, target_col })
     vim.api.nvim_feedkeys(vim.keycode("1q="), "n", false)
   end
 end
 
--- Create a cursor for the word under the cursor (or the Visual selection),
--- jump to its next occurrence (via the API so follow-mode doesn't replay the
--- jump) and enable follow-mode. Repeated presses add cursors incrementally.
+-- Create a cursor for the next occurrence of the word under the cursor (or the
+-- Visual selection) and enable follow-mode. Repeated presses add a cursor at
+-- each further occurrence. As with add_line_cursor, the primary cursor is kept
+-- in place (it stays on the first match and still participates in edits) so
+-- that follow-mode does not cause the mapping to cascade across cursors.
 local function add_next()
   local mode = vim.fn.mode()
   local visual = mode == "v" or mode == "V" or mode == "\22"
@@ -97,33 +128,61 @@ local function add_next()
   -- search pattern instead of recomputing it from the word under the cursor,
   -- so a session started from a Visual selection keeps matching the whole
   -- selection rather than falling back to the leading word.
-  local ns = vim.api.nvim_get_namespaces()["nvim.multicursor"]
-  local active = ns ~= nil
-    and #vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, { limit = 1 }) > 0
+  local active = session_active()
   local pattern = (not visual and active) and vim.fn.getreg("/")
     or search_pattern()
   if visual then
-    -- Place the first cursor at the start of the selection (where the matched
+    -- Put the primary cursor on the start of the selection (where the matched
     -- text begins) rather than where the cursor happens to sit after leaving
     -- Visual mode (its end).
     local a, b = vim.fn.getpos("v"), vim.fn.getpos(".")
     local s = (a[2] < b[2] or (a[2] == b[2] and a[3] <= b[3])) and a or b
     vim.api.nvim_feedkeys(vim.keycode("<esc>"), "nx", false)
     vim.api.nvim_win_set_cursor(0, { s[2], s[3] - 1 })
-  end
-  -- On a fresh Normal-mode start, snap the cursor to the start of the word so
-  -- the first cursor lands on the match boundary (matching every subsequent
-  -- occurrence) instead of wherever the cursor happened to sit within the word.
-  if not visual and not active then
+  elseif not active then
+    -- On a fresh Normal-mode start, snap the primary to the start of the word
+    -- so it lands on the match boundary (matching every occurrence). This is
+    -- safe: follow-mode is still off on the first press, so it cannot cascade.
     vim.fn.search(pattern, "bcW")
   end
   vim.fn.setreg("/", pattern)
   vim.opt.hlsearch = true
-  local pos = vim.api.nvim_win_get_cursor(0)
-  vim.api.nvim_mcursor(0, { pos[1], pos[2] })
-  local next_match = vim.fn.searchpos(pattern, "nw")
-  if next_match[1] ~= 0 then
-    vim.api.nvim_win_set_cursor(0, { next_match[1], next_match[2] - 1 })
+  ---@type { lnum: integer, byteidx: integer }[]
+  local matches = vim.fn.matchbufline("%", pattern, 1, "$")
+  if #matches > 0 then
+    -- Positions already covered by a cursor: the primary and every extra. The
+    -- primary counts even though it has no extmark, so wrapping never places a
+    -- duplicate cursor on top of it.
+    local covered = {}
+    local pr = vim.api.nvim_win_get_cursor(0)
+    covered[pr[1] .. ":" .. pr[2]] = true
+    local ns = vim.api.nvim_get_namespaces()["nvim.multicursor"]
+    if ns then
+      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {})) do
+        covered[(m[2] + 1) .. ":" .. m[3]] = true
+      end
+    end
+    -- Walk the matches starting after the furthest cursor and wrapping around,
+    -- then add the first one that is not already covered. When every match is
+    -- covered this is a no-op.
+    local edge = frontier(function(p, best)
+      return p[1] > best[1] or (p[1] == best[1] and p[2] > best[2])
+    end)
+    local after, wrapped = {}, {}
+    for _, m in ipairs(matches) do
+      if m.lnum > edge[1] or (m.lnum == edge[1] and m.byteidx > edge[2]) then
+        after[#after + 1] = m
+      else
+        wrapped[#wrapped + 1] = m
+      end
+    end
+    vim.list_extend(after, wrapped)
+    for _, m in ipairs(after) do
+      if not covered[m.lnum .. ":" .. m.byteidx] then
+        vim.api.nvim_mcursor(0, { m.lnum, m.byteidx })
+        break
+      end
+    end
   end
   vim.api.nvim_feedkeys(vim.keycode("1q="), "n", false)
 end
