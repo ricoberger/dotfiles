@@ -1,5 +1,12 @@
 local M = {}
 
+-- Pattern of the active multicursor session. Kept in a module-local instead of
+-- the "/" search register so that placing cursors neither highlights every
+-- match (which would drown out the cursor markers) nor clobbers the user's own
+-- search when they later press "/". add_next reuses it to keep matching the
+-- session's pattern across presses.
+local last_pattern
+
 -- Multiple cursors are provided by Neovim's built-in multicursor support
 -- (see ":help multiple-cursors"), so no plugin is required. The built-in
 -- commands already cover most operations:
@@ -58,8 +65,7 @@ local function match_cursors(pattern, sline, eline)
   if #matches == 0 then
     return
   end
-  vim.fn.setreg("/", pattern)
-  vim.opt.hlsearch = true
+  last_pattern = pattern
   vim.api.nvim_win_set_cursor(0, { matches[1].lnum, matches[1].byteidx })
   for i = 2, #matches do
     vim.api.nvim_mcursor(0, { matches[i].lnum, matches[i].byteidx })
@@ -125,11 +131,11 @@ local function add_next()
   local mode = vim.fn.mode()
   local visual = mode == "v" or mode == "V" or mode == "\22"
   -- While a multicursor session is already active, keep matching the session's
-  -- search pattern instead of recomputing it from the word under the cursor,
+  -- stored pattern instead of recomputing it from the word under the cursor,
   -- so a session started from a Visual selection keeps matching the whole
   -- selection rather than falling back to the leading word.
   local active = session_active()
-  local pattern = (not visual and active) and vim.fn.getreg("/")
+  local pattern = (not visual and active) and last_pattern
     or search_pattern()
   if visual then
     -- Put the primary cursor on the start of the selection (where the matched
@@ -145,8 +151,7 @@ local function add_next()
     -- safe: follow-mode is still off on the first press, so it cannot cascade.
     vim.fn.search(pattern, "bcW")
   end
-  vim.fn.setreg("/", pattern)
-  vim.opt.hlsearch = true
+  last_pattern = pattern
   ---@type { lnum: integer, byteidx: integer }[]
   local matches = vim.fn.matchbufline("%", pattern, 1, "$")
   if #matches > 0 then
