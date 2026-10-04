@@ -1,6 +1,6 @@
 ---
 name: ai-product-owner
-model: claude-fable-5
+model: gpt-6-astra
 reasoning-effort: high
 description:
   Requirements engineer of the AI dev team. Compiles a task and codebase context

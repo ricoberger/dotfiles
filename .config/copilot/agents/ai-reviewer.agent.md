@@ -1,6 +1,6 @@
 ---
 name: ai-reviewer
-model: claude-fable-5
+model: gpt-6-astra
 reasoning-effort: high
 description:
   Code reviewer of the AI dev team. Reviews a branch against a spec and writes
