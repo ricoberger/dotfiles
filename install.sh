@@ -57,15 +57,6 @@ sh $(pwd)/apps/Neovim/install.sh
 echo "\n- Copy btop Configuration"
 cp -r $(pwd)/.config/btop ~/.config
 
-# tower
-echo "\n- Copy tower Configuration"
-# agent.working_dir must exist before tower starts.
-(
-  umask 077
-  mkdir -p "$HOME/.local/state/tower/pi/workspace" "$HOME/.local/state/tower/pi/sessions"
-)
-cp -r $(pwd)/.config/tower ~/.config
-
 # Glamour
 echo "\n- Copy Glamour Configuration"
 cp $(pwd)/.config/glamour-catppuccin-macchiato.json ~/.config/glamour-catppuccin-macchiato.json
