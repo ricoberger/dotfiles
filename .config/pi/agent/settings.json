@@ -1,0 +1,35 @@
+{
+  "defaultProvider": "github-copilot",
+  "defaultModel": "claude-opus-5.5",
+  "defaultThinkingLevel": "medium",
+  "defaultTools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "theme": "catppuccin-macchiato",
+  "compaction": {
+    "enabled": true
+  },
+  "terminal": {
+    "showTerminalProgress": true,
+    "showImages": true
+  },
+  "enableInstallTelemetry": false,
+  "enableAnalytics": false,
+  "defaultProjectTrust": "always",
+  "treeFilterMode": "default",
+  "doubleEscapeAction": "none",
+  "images": {
+    "autoResize": true,
+    "blockImages": false
+  },
+  "enableSkillCommands": true,
+  "showHardwareCursor": false,
+  "httpIdleTimeoutMs": 300000,
+  "quietStartup": true
+}

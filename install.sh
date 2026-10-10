@@ -65,11 +65,19 @@ cp $(pwd)/.config/glamour-catppuccin-macchiato.json ~/.config/glamour-catppuccin
 echo "\n- Copy Agents Configuration"
 cp -r $(pwd)/.agents ~/
 
+echo "\n- Copy Pi Configuration"
+mkdir -p ~/.pi/agent
+cp -r $(pwd)/.config/pi/agent/themes ~/.pi/agent
+cp -r $(pwd)/.config/pi/agent/agents ~/.pi/agent
+cp -r $(pwd)/.config/pi/agent/extensions ~/.pi/agent
+(cd ~/.pi/agent/extensions/web-fetch && npm ci --ignore-scripts --no-audit --no-fund --silent)
+cp $(pwd)/.config/pi/agent/settings.json ~/.pi/agent/settings.json
+cp $(pwd)/.config/pi/agent/AGENTS.md ~/.pi/agent/AGENTS.md
+
 echo "\n- Copy Copilot Configuration"
 mkdir -p ~/.copilot
 cp $(pwd)/.config/copilot/settings.json ~/.copilot/settings.json
 cp $(pwd)/.config/copilot/lsp-config.json ~/.copilot/lsp-config.json
-cp -r $(pwd)/.config/copilot/agents ~/.copilot
 
 # Binaries
 echo "\n- Copy Binaries"
@@ -98,4 +106,5 @@ echo "  - npm install -g @github/copilot-language-server"
 echo "  - npm install -g @github/copilot"
 echo "  - npm install -g pyright"
 echo "  - npm install -g bash-language-server"
+echo "  - curl -fsSL https://pi.dev/install.sh | sh"
 echo "  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path"

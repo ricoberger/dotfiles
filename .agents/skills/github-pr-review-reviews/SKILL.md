@@ -91,7 +91,7 @@ Accept any of these inputs:
 
 - **A PR number** (e.g. `16722`) → use the current repo context.
 
-- **A full URL** (e.g. `https://github.com/Staffbase/mops/pull/16722`) → parse
+- **A full URL** (e.g. `https://github.com/ricoberger/playground/pull/16722`) → parse
   `<owner>`, `<repo>`, and `<number>` from the path and target that repo
   explicitly with `gh api repos/<owner>/<repo>/...`.
 

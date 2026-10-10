@@ -1,7 +1,7 @@
 ---
 name: ai-developer
-model: claude-opus-5.5
-reasoning-effort: medium
+model: github-copilot/claude-opus-5.5
+thinking: medium
 description:
   Developer of the AI dev team. Implements a spec on a feature branch with tests
   and conventional commits, and addresses reviewer findings in fix rounds. Use

@@ -1,8 +1,12 @@
 {
-  "model": "claude-opus-4.8",
-  "effortLevel": "high",
+  "model": "claude-opus-5.5",
+  "effortLevel": "medium",
   "theme": "default",
   "includeCoAuthoredBy": false,
+  "sidebar": false,
+  "tabs": {
+    "enabled": false
+  },
   "footer": {
     "showModelEffort": true,
     "showDirectory": true,
