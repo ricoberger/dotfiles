@@ -7,6 +7,14 @@ local M = {}
 -- session's pattern across presses.
 local last_pattern
 
+-- Place an extra cursor at { row (1-based), col (0-based) }. Cursors are
+-- extmarks in the "nvim.multicursor" namespace (see ":help mcursor-api");
+-- setting one adds a cursor unless one is already there.
+local function add_cursor(row, col)
+  local ns = vim.api.nvim_create_namespace("nvim.multicursor")
+  vim.api.nvim_buf_set_extmark(0, ns, row - 1, col, {})
+end
+
 -- Multiple cursors are provided by Neovim's built-in multicursor support
 -- (see ":help multiple-cursors"), so no plugin is required. The built-in
 -- commands already cover most operations:
@@ -68,7 +76,7 @@ local function match_cursors(pattern, sline, eline)
   last_pattern = pattern
   vim.api.nvim_win_set_cursor(0, { matches[1].lnum, matches[1].byteidx })
   for i = 2, #matches do
-    vim.api.nvim_mcursor(0, { matches[i].lnum, matches[i].byteidx })
+    add_cursor(matches[i].lnum, matches[i].byteidx)
   end
   vim.api.nvim_feedkeys(vim.keycode("1q="), "n", false)
 end
@@ -117,7 +125,7 @@ local function add_line_cursor(delta)
       return
     end
     local target_col = math.min(col, math.max(#vim.fn.getline(target) - 1, 0))
-    vim.api.nvim_mcursor(0, { target, target_col })
+    add_cursor(target, target_col)
     vim.api.nvim_feedkeys(vim.keycode("1q="), "n", false)
   end
 end
@@ -184,7 +192,7 @@ local function add_next()
     vim.list_extend(after, wrapped)
     for _, m in ipairs(after) do
       if not covered[m.lnum .. ":" .. m.byteidx] then
-        vim.api.nvim_mcursor(0, { m.lnum, m.byteidx })
+        add_cursor(m.lnum, m.byteidx)
         break
       end
     end
