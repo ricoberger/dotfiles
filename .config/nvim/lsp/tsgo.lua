@@ -60,4 +60,8 @@ return {
     -- We fallback to the current working directory if no project root is found
     on_dir(project_root or vim.fn.getcwd())
   end,
+  on_init = function(client)
+    client.server_capabilities.documentFormattingProvider = nil
+    client.server_capabilities.documentRangeFormattingProvider = nil
+  end,
 }

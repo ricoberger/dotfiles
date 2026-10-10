@@ -797,14 +797,18 @@ vim.api.nvim_create_autocmd("LspAttach", {
         vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
       end)
 
-      -- -- Add "<leader>mlo" keymap for tsgo to organize imports, since the
-      -- -- default code action keymap "gra" does not provide it.
-      -- vim.keymap.set("n", "<leader>mlo", function()
-      --   vim.lsp.buf.code_action({
-      --     context = { only = { "source.organizeImports" }, diagnostics = {} },
-      --     apply = true,
-      --   })
-      -- end)
+      -- tsgo only returns source actions (organize / sort / remove unused
+      -- imports) when they are explicitly requested via "context.only", so the
+      -- default "gra" keymap does not show them. Override "gra" for tsgo
+      -- buffers to also request source actions. This is scoped to tsgo, because
+      -- setting "only" makes Neovim drop actions without a kind.
+      if client.name == "tsgo" then
+        vim.keymap.set({ "n", "x" }, "gra", function()
+          vim.lsp.buf.code_action({
+            context = { only = { "quickfix", "refactor", "source" } },
+          })
+        end, { buffer = buffer, desc = "vim.lsp.buf.code_action()" })
+      end
 
       -- Enable completion.
       if
