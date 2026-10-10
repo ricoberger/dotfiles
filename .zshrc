@@ -36,10 +36,6 @@ if [ -d "/opt/homebrew/opt/ruby/bin" ]; then
   export PATH=`gem environment gemdir`/bin:$PATH
 fi
 
-# # GitHub Copilot settings
-# export COPILOT_ALLOW_ALL=true
-# export COPILOT_MODEL=claude-opus-4.8
-#
 # # Cloudflare account and API token for the browser run API, which is used by the
 # # `urltomd` function
 # export CLOUDFLARE_BROWSER_RUN_ACCOUNT_ID=
@@ -56,6 +52,9 @@ fi
 # # skills, must look like this:
 # # {"<instance-name>":{"url":"<grafana-url>","auth":{"tokenCommand":"<command-to-get-token>"}}}
 # export GRAFANA_INSTANCES=
+#
+# # Configuration for `fzfalertmanager`
+# export FZFALERTMANAGER_CONFIG="$(cat <<'EOF'
 #
 # # Address and tokens for the `fzfslack` command, which is used to interact with
 # # Slack via fzf
@@ -129,7 +128,7 @@ setopt interactive_comments
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
-zstyle ':fzf-tab:*' fzf-flags --bind ctrl-p:toggle-preview --bind ctrl-d:half-page-down --bind ctrl-u:half-page-up --bind ctrl-f:preview-half-page-down --bind ctrl-b:preview-half-page-up --bind home:preview-top --bind end:preview-bottom --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6
+zstyle ':fzf-tab:*' fzf-flags --bind ctrl-n:ignore --bind alt-b:ignore --bind alt-f:ignore --bind alt-d:ignore --bind ctrl-p:toggle-preview --bind ctrl-d:half-page-down --bind ctrl-u:half-page-up --bind ctrl-f:preview-half-page-down --bind ctrl-b:preview-half-page-up --bind home:preview-top --bind end:preview-bottom --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6
 
 
 
@@ -139,7 +138,7 @@ zstyle ':fzf-tab:*' fzf-flags --bind ctrl-p:toggle-preview --bind ctrl-d:half-pa
 
 eval "$(fzf --zsh)"
 export FZF_DEFAULT_COMMAND='fd --full-path --hidden --color never --type f --exclude .git --exclude node_modules --exclude dist --exclude .DS_Store'
-export FZF_DEFAULT_OPTS='--bind ctrl-p:toggle-preview --bind ctrl-d:half-page-down --bind ctrl-u:half-page-up --bind ctrl-f:preview-half-page-down --bind ctrl-b:preview-half-page-up --bind home:preview-top --bind end:preview-bottom --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6'
+export FZF_DEFAULT_OPTS='--bind ctrl-n:ignore --bind alt-b:ignore --bind alt-f:ignore --bind alt-d:ignore --bind ctrl-p:toggle-preview --bind ctrl-d:half-page-down --bind ctrl-u:half-page-up --bind ctrl-f:preview-half-page-down --bind ctrl-b:preview-half-page-up --bind home:preview-top --bind end:preview-bottom --color=fg:#cad3f5,fg+:#cad3f5,bg+:#363a4f,border:#6e738d,label:#6e738d,bg:#24273a,spinner:#c6a0f6,hl:#ed8796,hl+:#ed8796,header:#ed8796,info:#c6a0f6,pointer:#c6a0f6,marker:#f4dbd6,prompt:#c6a0f6'
 
 
 
@@ -162,6 +161,7 @@ alias watch='watch '
 alias k='kubectl'
 alias chrome='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222'
 alias gg="git log --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold green)(%ar)%C(reset) %C(white)%s%C(reset) %C(dim white)- %an%C(reset)%C(auto)%d%C(reset)'"
+alias copilot='copilot --yolo --remote'
 
 
 
@@ -204,9 +204,12 @@ gitwta() {
 }
 
 gitwtr() {
-  local dir
-  dir=$(git worktree list | fzf --height 40% --reverse | awk '{print $1}') || return
-  [ -n "$dir" ] && git worktree remove "$dir"
+  local dirs dir
+  dirs=$(git worktree list | fzf --height 40% --reverse --multi | awk '{print $1}') || return
+  [ -n "$dirs" ] || return
+  while IFS= read -r dir; do
+    git worktree remove "$dir"
+  done <<< "$dirs"
 }
 
 kctx() {
