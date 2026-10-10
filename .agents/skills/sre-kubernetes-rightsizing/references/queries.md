@@ -9,6 +9,38 @@ first, build request bodies with `jq -n`, and pass `from` / `to` explicitly.
 All variables below: `$NS` namespace, `$WL` workload name, `$WLTYPE` one of
 `deployment` / `statefulset` / `daemonset`, `$CONTAINER` container name.
 
+## Result Identity and Reproducibility
+
+Before collecting usage, resolve the 30-day window to fixed UTC timestamps.
+Use the same bounds and instant evaluation time (`end`) for every target and
+retry. Keep exact executed queries, bindings, timestamps and results in the
+session analysis. Include supporting baselines in approved PR content following
+[Reproducible Evidence](history.md#reproducible-evidence); no local journal is
+required. A moving `now-30d`/`now` pair or a deleted helper script is not a
+reproducible shared baseline.
+
+Assign a descriptive `refId` unique to each target/metric in a batch and save
+it with the query ID/bindings. Extract the response by that ID, then identify
+the numeric value field from the frame schema, not an assumed column index
+(the time field is numeric too). Check target labels and expected cardinality;
+do not silently select the first frame when several targets were returned.
+Keep a named result mapping through calculation and report generation,
+including raw value, unit and status. Round only for presentation.
+
+Check both request-level and per-refId errors/status before reading values.
+After required retries/selector checks, an absent series is `unavailable`, a
+failed query is `error`, and a returned numeric zero is `observed`. Never use
+`or 0`, `// 0`, `or vector(0)` or an equivalent default to make missing
+OOM/PSI/page-fault evidence look healthy. Do not feed unknown values into sizing
+arithmetic or claim a downsize guard passed when its evidence is unavailable.
+Null or non-finite values (`NaN`, infinity) are unavailable with an explicit
+reason, not zero. An unexpected frame shape/cardinality is an error to resolve.
+
+Check compatible statistics satisfy `p50 <= p95 <= p99 <= max`, comparing only
+the same target, window, unit and aggregation. Do not mix fleet-average
+percentiles and hottest-replica peaks as if they describe the same series.
+Trace claims of pressure to that pressure metric, not a coincident restart count.
+
 ## Preferred Metric Source — `kube-prometheus` Mixin Recording Rules
 
 If the cluster runs the standard kube-prometheus / VictoriaMetrics mixin rules
@@ -247,23 +279,125 @@ and use PSI to (a) detect real starvation episodes and (b) gate any downsizing
 
 ### OOMKills and Restarts
 
-```promql
-# OOMKills over the window (per container)
-max by (container) (
-  increase(
-    kube_pod_container_status_last_terminated_reason{namespace="$NS", container="$CONTAINER", reason="OOMKilled"}[30d]
-  )
-)
+Keep OOM event counters, last-termination **evidence**, and restart counters
+separate. `kube_pod_container_status_last_terminated_reason` is a gauge:
+**never use `increase()` or `rate()` on it to count OOMKills.**
 
-# total restarts over the window
-max by (container) (
-  increase(kube_pod_container_status_restarts_total{namespace="$NS", container="$CONTAINER"}[30d])
+For these window-wide queries, use historical ownership so pods that vanished
+before `end` are not dropped. Substitute this expression as `$OWNERS_30D` below:
+
+```promql
+max by (namespace, pod) (
+  max_over_time(
+    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}[30d]
+  )
 )
 ```
 
-A non-zero OOMKill count is a hard signal that the memory limit is too low — the
-recommended limit must clear the observed peak with headroom regardless of the
-`max × 1.25` rule.
+If owner rules are absent, use the cross-checked kind-specific pod selector
+above and state that attribution is weaker. Scope both sides to the selected
+cluster when a datasource spans clusters. Deduplicate scrape copies without
+merging distinct pod/container incarnations. Apply `increase` to original
+counter series before aggregation. If historical ownership or incarnation
+labels are incomplete, report the count's coverage limitation.
+
+**OOM event counter, when available.** Probe `container_oom_events_total` for
+the selected containers and confirm counter/identity labels before using it:
+
+```promql
+# Estimated OOM events across all selected pods/containers in the window
+sum by (container) (
+  max by (namespace, pod, container, id) (
+    increase(container_oom_events_total{namespace="$NS", container="$CONTAINER"}[30d])
+  )
+  * on (namespace, pod) group_left $OWNERS_30D
+)
+```
+
+Here `id` distinguishes cAdvisor container incarnations; adapt to the actual
+exporter's identity labels. Counter increases are estimates over scraped
+history, not exact event logs; record gaps and short-lived containers that may
+be missed. Do not call a generic OOM-event counter an exact killed-process count.
+
+**Last-termination evidence, including when no event counter is available:**
+
+```promql
+# Per-pod OOM termination evidence observed during the window (gauge 0/1)
+max by (namespace, pod, uid, container) (
+  max_over_time(
+    kube_pod_container_status_last_terminated_reason{namespace="$NS", container="$CONTAINER", reason="OOMKilled"}[30d]
+  )
+)
+* on (namespace, pod) group_left $OWNERS_30D
+```
+
+A positive gauge means an OOM termination reason was observed, **not** how many
+OOMs occurred or when. The underlying termination can predate the window and
+repeated OOMs may leave the gauge unchanged. Use a matching termination timestamp
+or retained event evidence to establish occurrence time; otherwise say timing
+and count are unknown. Do not sum this with OOM event counts.
+
+**Latest observed OOM termination timestamp.** Match reason and timestamp at
+each observation **before** reducing over time. Never join independently
+computed 30-day maxima of timestamp and reason: an OOM on Monday followed by
+an `Error` on Friday would incorrectly become a Friday OOM.
+
+```promql
+# Per-pod latest observed OOM termination time (Unix seconds, not a count)
+max by (namespace, pod, uid, container) (
+  max_over_time((
+    kube_pod_container_status_last_terminated_timestamp{namespace="$NS", container="$CONTAINER"}
+    and on (namespace, pod, uid, container, job, instance)
+    (
+      kube_pod_container_status_last_terminated_reason{namespace="$NS", container="$CONTAINER", reason="OOMKilled"} == 1
+    )
+  )[30d:1m])
+)
+* on (namespace, pod) group_left $OWNERS_30D
+```
+
+This example assumes both gauges have the same pod UID and scrape-source
+labels. Confirm that schema; retain any additional labels needed to pair the
+same source, and filter to the selected cluster. Do not collapse different
+scrape sources or pod UIDs before matching. If identity or consistent paired
+samples cannot be established, use retained events or a pod's matching
+`lastState.terminated.reason` and `.finishedAt`, or mark timing unknown.
+
+The `1m` subquery step is illustrative: use no coarser than the source scrape
+interval, not the CPU/memory `10m` statistics step, and save the actual
+resolution. Even then, short-lived reasons can be missed between scrapes.
+After querying, retain only event timestamps in the selected `(start, end]`
+interval; a carried-forward pre-window OOM is not a new OOM. For verification,
+use the post-rollout interval for both lookbacks and these timestamp bounds.
+Report this as the **latest observed** OOM, not proof that every OOM was seen.
+No matching samples means no observed evidence, not a verified zero when
+coverage is insufficient.
+
+**Restarts across the workload**, deduplicated by pod identity before summing:
+
+```promql
+sum by (container) (
+  max by (namespace, pod, uid, container) (
+    increase(kube_pod_container_status_restarts_total{namespace="$NS", container="$CONTAINER"}[30d])
+  )
+  * on (namespace, pod) group_left $OWNERS_30D
+)
+```
+
+This is a workload-wide estimated increase, not `max` restarts on one pod.
+Retain per-pod results when attributing a restart storm. Restarts alone do not
+prove OOMs or page-cache thrashing. An absent counter/gauge is not proof of zero
+OOMs. Confirmed in-window OOMKills are a memory risk: the recommended limit must
+clear the observed peak with headroom regardless of the `max × 1.25` rule.
+
+For before/after comparisons, use equal-duration, comparable windows or
+normalize increases to the same unit, such as restarts/day. With changing
+replicas, compare restarts per observed pod-day when that exposure is available,
+and retain fleet totals as context. Save numerator, denominator, coverage and
+replica assumptions for both periods. Never compare seven days of restarts
+directly to a 21- or 30-day total: 10/7d is 2.5 times the rate of 12/21d,
+despite the smaller count. Missing samples or unknown exposure are not zero
+restarts and cannot be fixed by dividing an incomplete count by nominal days.
 
 ### Memory Pressure (PSI) — Optional Bottleneck Signal
 
@@ -271,8 +405,8 @@ Pressure Stall Information quantifies how long tasks were _stalled waiting for
 memory_ (reclaim, refault, thrashing). It is a **leading** indicator that fires
 before an OOM and, unlike working set, exposes pressure that happens _between_
 scrapes — so it catches bottlenecks the sampled peak misses. **Optional:**
-requires cgroup v2 (kernel ≥ 4.20) and cAdvisor PSI; probe first and skip
-silently if absent:
+requires cgroup v2 (kernel ≥ 4.20) and cAdvisor PSI; probe first and record
+unavailability explicitly if absent:
 
 ```promql
 count(container_pressure_memory_stalled_seconds_total{namespace="$NS", container="$CONTAINER"})
