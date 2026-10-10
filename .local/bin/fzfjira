@@ -363,6 +363,23 @@ if [[ "$1" == "__action" ]]; then
       rm -rf "$tmpdir"
       ;;
 
+    task)
+      # Hand the work item to fzftasks: a new item asks for an optional
+      # repository and a prompt (or "Track") and starts pi in the background,
+      # an existing item is opened. The work item as Markdown (the preview
+      # document without its title heading) is stored as the item's details
+      # snapshot (shown in the preview and passed to the agent).
+      wi="$(acli jira workitem view "$key" --fields "*all" --json 2>/dev/null)"
+      if [[ -z "$wi" ]]; then
+        echo "Could not load $key."
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      title="$(printf '%s' "$wi" | jq -r '.fields.summary // empty | gsub("[\t\n\r]"; " ")')"
+      emit_markdown "$wi" | sed -e '1{/^# /d;}' | sed -e '1{/^$/d;}' |
+        fzftasks start "jira:$key" --title "${title:-$key}" --details -
+      ;;
+
     web)
       acli jira workitem view "$key" --web >/dev/null 2>&1
       ;;
@@ -875,28 +892,29 @@ Examples:
   fzfjira "assignee = currentUser() AND sprint in openSprints()"
 
 Keybindings:
-  enter  : view work item
-  alt-a  : assign work item
-  alt-t  : transition work item
-  alt-c  : add comment to the work item
-  alt-e  : edit work item
-  alt-p  : set / change the work item's parent epic
-  alt-f  : flag / unflag the work item
-  alt-n  : create new work item
-  alt-l  : manage links; enter - open linked work item; alt-d - delete link;
-           alt-n - create new link
-  alt-s  : show work item's sub-tasks in a nested picker
-  alt-o  : open work item in the web browser
-  alt-y  : copy the work item's link to the clipboard
-  ctrl-r : reload list
-  ctrl-p : toggle preview
-  ctrl-d : scroll half page down
-  ctrl-u : scroll half page up
-  ctrl-f : scroll preview half page down
-  ctrl-b : scroll preview half page up
-  home   : scroll preview to top
-  end    : scroll preview to bottom
-  alt-h  : show help
+  enter     : view work item
+  alt-a     : assign work item
+  alt-t     : transition work item
+  alt-c     : add comment to the work item
+  alt-e     : edit work item
+  alt-p     : set / change the work item's parent epic
+  alt-f     : flag / unflag the work item
+  alt-n     : create new work item
+  alt-l     : manage links; enter - open linked work item; alt-d - delete link;
+              alt-n - create new link
+  alt-s     : show work item's sub-tasks in a nested picker
+  alt-o     : open work item in the web browser
+  alt-y     : copy the work item's link to the clipboard
+  alt-enter : hand work item to fzftasks
+  ctrl-r    : reload list
+  ctrl-p    : toggle preview
+  ctrl-d    : scroll half page down
+  ctrl-u    : scroll half page up
+  ctrl-f    : scroll preview half page down
+  ctrl-b    : scroll preview half page up
+  home      : scroll preview to top
+  end       : scroll preview to bottom
+  alt-h     : show help
 
 Environment:
   FZFJIRA_LIMIT      : max work items to fetch (default: 250)
@@ -999,6 +1017,7 @@ fzf \
   --bind "ctrl-p:toggle-preview" \
   --bind "ctrl-r:reload($SCRIPT __list)" \
   --bind "enter:execute($ACTION view {1})" \
+  --bind "alt-enter:execute($ACTION task {1})" \
   --bind "alt-a:execute($ACTION assign {1})+reload($SCRIPT __list)" \
   --bind "alt-t:execute($ACTION transition {1})+reload($SCRIPT __list)" \
   --bind "alt-c:execute($ACTION comment {1})+refresh-preview" \

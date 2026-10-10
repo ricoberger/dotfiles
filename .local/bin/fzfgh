@@ -170,10 +170,11 @@ if [[ "$1" == "__list" ]]; then
         | .repository.nameWithOwner as $repo
         | (.number|tostring) as $num
         | (.isDraft // false) as $draft
-        | (if $draft then "gray"
+        | (if (.state|ascii_downcase) == "merged" then "mauve"
+           elif (.state|ascii_downcase) == "closed" then "red"
+           elif $draft then "gray"
            elif (.state|ascii_downcase) == "open" then "green"
-           elif (.state|ascii_downcase) == "closed" then "mauve"
-           else "green" end) as $c
+           else "gray" end) as $c
         | $repo + "\t" + $num + "\t" + ($draft|tostring) + "\t"
           + "\u001b[" + color($c) + "m\uf407\u001b[0m"
           + " [#" + $num + "] " + $repo + ": "
@@ -240,7 +241,7 @@ if [[ "$1" == "__list" ]]; then
         | (.number|tostring) as $num
         | (if (.state|ascii_downcase) == "open" then "green"
            elif (.state|ascii_downcase) == "closed" then "mauve"
-           else "green" end) as $c
+           else "gray" end) as $c
         | $repo + "\t" + $num + "\t"
           + "\u001b[" + color($c) + "m\uf41b\u001b[0m"
           + " [#" + $num + "] " + $repo + ": "
@@ -291,10 +292,10 @@ if [[ "$1" == "__list" ]]; then
         | (
             if $type == "PullRequest" then
               {ic:"\uf407", c:(
-                 if (.subject.isDraft // false) then "gray"
-                 elif .subject.pullRequestState == "OPEN" then "green"
-                 elif .subject.pullRequestState == "MERGED" then "mauve"
+                 if .subject.pullRequestState == "MERGED" then "mauve"
                  elif .subject.pullRequestState == "CLOSED" then "red"
+                 elif (.subject.isDraft // false) then "gray"
+                 elif .subject.pullRequestState == "OPEN" then "green"
                  else "gray" end)}
             elif $type == "Issue" then
               {ic:"\uf41b", c:(
@@ -1277,6 +1278,27 @@ if [[ "$1" == "__action" ]]; then
       fi
       ;;
 
+    pr-task)
+      # Hand the pull request to fzftasks: a new item asks for a prompt (or
+      # "Track") and starts pi in the background, an existing item is opened.
+      # The PR metadata and description are stored as Markdown in the item's
+      # details snapshot (shown in the preview and passed to the agent).
+      repo="$1"
+      number="$2"
+      [[ -z "$repo" || -z "$number" ]] && exit 0
+      title="$(gh pr view "$number" --repo "$repo" --json title -q .title 2>/dev/null)"
+      gh pr view "$number" --repo "$repo" \
+        --json url,state,isDraft,author,baseRefName,headRefName,labels,body \
+        --jq '"- **URL:** \(.url)
+- **State:** \(.state)\(if .isDraft then " (draft)" else "" end)
+- **Author:** \(.author.login)
+- **Branch:** \(.headRefName) → \(.baseRefName)
+- **Labels:** \([.labels[].name] | join(", "))
+
+\(.body)"' 2>/dev/null | tr -d '\r' |
+        fzftasks start "pr:$repo#$number" --title "${title:-$repo#$number}" --repo "$repo" --details -
+      ;;
+
     pr-checkout)
       repo="$1"
       number="$2"
@@ -1351,11 +1373,12 @@ if [[ "$1" == "__action" ]]; then
       else
         # The worktree already exists from an earlier checkout of this PR. Its
         # branch still points at whatever the PR head was back then, so a PR
-        # that received new commits (or was force-pushed / rebased) in the
-        # meantime would otherwise be reviewed against stale state. Re-run
-        # `gh pr checkout --force` inside the worktree to fetch the current PR
-        # head and reset the branch to it, matching what GitHub shows now.
-        if ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" --force ); then
+        # that received new commits in the meantime would otherwise be reviewed
+        # against stale state. Re-run `gh pr checkout` inside the worktree to
+        # fetch the current PR head. No --force: the worktree may be shared with
+        # an agent started via fzftasks, whose local changes must not be
+        # discarded, so a diverged (force-pushed / rebased) branch fails here.
+        if ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" ); then
           echo "Failed to refresh PR $repo#$number"
           read -n 1 -s -r -p "Press any key to continue..."
           exit 0
@@ -1585,6 +1608,18 @@ if [[ "$1" == "__action" ]]; then
           [[ -n "$url" ]] && open "$url"
           ;;
       esac
+      ;;
+
+    notif-task)
+      # Hand the pull request of a notification to fzftasks (see pr-task).
+      # Other notification types are ignored.
+      id="$1"
+      [[ -z "$id" ]] && exit 0
+      node="$(jq -c --arg id "$id" '.[] | select(.id == $id)' "$FZFGH_NOTIF_CACHE" 2>/dev/null)"
+      [[ "$(printf '%s' "$node" | jq -r '.subject.__typename // ""')" == PullRequest ]] || exit 0
+      repo="$(printf '%s' "$node" | jq -r 'try (.url | capture("github.com/(?<r>[^/]+/[^/]+)").r) catch ""')"
+      number="$(printf '%s' "$node" | jq -r '.subject.number // ""')"
+      [[ -n "$repo" && -n "$number" ]] && "$SCRIPT" __action pr-task "$repo" "$number"
       ;;
 
     notif-done)
@@ -2245,59 +2280,61 @@ pull request with per-commit diffs. Open, edit, assign, label, comment, and
 close issues.
 
 Notification Keybindings:
-  enter  : open notification
-  alt-d  : mark selected notifications as done
-  alt-e  : mark selected notifications as read
-  alt-o  : open notification in the web browser
-  alt-y  : copy notification url to the clipboard
-  ctrl-r : reload list
-  ctrl-p : toggle preview
-  ctrl-d : scroll half page down
-  ctrl-u : scroll half page up
-  ctrl-f : scroll preview half page down
-  ctrl-b : scroll preview half page up
-  home   : scroll preview to top
-  end    : scroll preview to bottom
-  alt-h  : show help
+  enter     : open notification
+  alt-d     : mark selected notifications as done
+  alt-e     : mark selected notifications as read
+  alt-o     : open notification in the web browser
+  alt-y     : copy notification url to the clipboard
+  alt-enter : hand the pull request of a notification to fzftasks
+  ctrl-r    : reload list
+  ctrl-p    : toggle preview
+  ctrl-d    : scroll half page down
+  ctrl-u    : scroll half page up
+  ctrl-f    : scroll preview half page down
+  ctrl-b    : scroll preview half page up
+  home      : scroll preview to top
+  end       : scroll preview to bottom
+  alt-h     : show help
 
 Pull Request Keybindings:
-  enter  : open preview (details, description, checks, comments) in nvim
-  alt-o  : open pull request in the web browser
-  alt-y  : copy pull request url to the clipboard
-  alt-m  : merge pull request (merge / squash / rebase, with/without admin;
-           edit the commit subject & body in nvim)
-  alt-l  : add / remove label
-  alt-a  : assign pull request to me
-  alt-e  : edit pull request title and body
-  alt-c  : add a comment
-  alt-x  : close pull request (close / and delete branch / with comment / with
-           comment and delete branch)
-  alt-k  : show checks; enter - view job summary and logs; alt-r - rerun failed
-           job; alt-o - open check in the web browser
-  alt-s  : show commits; enter - view commit details and diff in nvim;
-           alt-o - open commit in the web browser; alt-y - copy commit sha to
-           the clipboard
-  alt-w  : toggle draft / ready for review
-  alt-v  : review pull request (approve / comment / request changes)
-  alt-q  : request a review (suggested + assignable reviewers)
-  alt-d  : browse pull request diff hunk-by-hunk in fzf (shows the hunk and its
-           review threads with resolved state); alt-o - open in the web browser;
-           alt-y - yank path to file; alt-r - reply to thread,
-           alt-x - resolve / unresolve thread; alt-c - new thread on a line or
-           range (nvim opens pre-filled with a ```suggestion``` block)
-  alt-g  : check out pull request into a new git worktree at
-           ~/.worktrees/<org>/<repo>/<branch> and open it in a new Ghostty tab
-           running nvim with the :GitDiff command (an existing worktree is
-           reused and refreshed to the PR's current head)
-  ctrl-r : reload list
-  ctrl-p : toggle preview
-  ctrl-d : scroll half page down
-  ctrl-u : scroll half page up
-  ctrl-f : scroll preview half page down
-  ctrl-b : scroll preview half page up
-  home   : scroll preview to top
-  end    : scroll preview to bottom
-  alt-h  : show help
+  enter     : open preview (details, description, checks, comments) in nvim
+  alt-o     : open pull request in the web browser
+  alt-y     : copy pull request url to the clipboard
+  alt-m     : merge pull request (merge / squash / rebase, with/without admin;
+              edit the commit subject & body in nvim)
+  alt-l     : add / remove label
+  alt-a     : assign pull request to me
+  alt-e     : edit pull request title and body
+  alt-c     : add a comment
+  alt-x     : close pull request (close / and delete branch / with comment /
+              with comment and delete branch)
+  alt-k     : show checks; enter - view job summary and logs; alt-r - rerun
+              failed job; alt-o - open check in the web browser
+  alt-s     : show commits; enter - view commit details and diff in nvim;
+              alt-o - open commit in the web browser; alt-y - copy commit sha to
+              the clipboard
+  alt-w     : toggle draft / ready for review
+  alt-v     : review pull request (approve / comment / request changes)
+  alt-q     : request a review (suggested + assignable reviewers)
+  alt-d     : browse pull request diff hunk-by-hunk in fzf (shows the hunk and
+              its review threads with resolved state); alt-o - open in the web
+              browser; alt-y - yank path to file; alt-r - reply to thread,
+              alt-x - resolve / unresolve thread; alt-c - new thread on a line
+              or range (nvim opens pre-filled with a ```suggestion``` block)
+  alt-g     : check out pull request into a new git worktree at
+              ~/.worktrees/<org>/<repo>/<branch> and open it in a new Ghostty
+              tab running nvim with the :GitDiff command (an existing worktree
+              is reused and refreshed to the PR's current head without --force)
+  alt-enter : hand pull request to fzftasks
+  ctrl-r    : reload list
+  ctrl-p    : toggle preview
+  ctrl-d    : scroll half page down
+  ctrl-u    : scroll half page up
+  ctrl-f    : scroll preview half page down
+  ctrl-b    : scroll preview half page up
+  home      : scroll preview to top
+  end       : scroll preview to bottom
+  alt-h     : show help
 
 Issue Keybindings:
   enter  : open preview (details, description, comments) in nvim
@@ -2381,6 +2418,7 @@ run_prs() {
     --bind "alt-e:execute($ACTION pr-edit {1} {2})+reload($SCRIPT __list prs)+refresh-preview" \
     --bind "alt-d:execute($ACTION pr-diff {1} {2})" \
     --bind "alt-g:execute($ACTION pr-checkout {1} {2})" \
+    --bind "alt-enter:execute($ACTION pr-task {1} {2})" \
     --bind "alt-v:execute($ACTION pr-review {1} {2})+refresh-preview" \
     --bind "alt-q:execute($ACTION pr-request-review {1} {2})+refresh-preview" \
     --bind "alt-c:execute($ACTION pr-comment {1} {2})+refresh-preview" \
@@ -2437,6 +2475,7 @@ run_notifications() {
     --bind "enter:execute($ACTION notif-open {1})" \
     --bind "alt-o:execute($ACTION notif-browse {1})" \
     --bind "alt-y:execute($ACTION notif-yank {1})" \
+    --bind "alt-enter:execute($ACTION notif-task {1})" \
     --bind "alt-d:execute($ACTION notif-done {+1})+reload($SCRIPT __list notifications)" \
     --bind "alt-e:execute($ACTION notif-read {+1})+reload($SCRIPT __list notifications)" \
     --preview-window "right:65%" \

@@ -656,6 +656,7 @@ fi
 #   fzfalertmanager __action open <source|silence|runbook|dashboard|panel> <alertmanager-idx> <fingerprint>
 #   fzfalertmanager __action view <alertmanager-idx> <fingerprint>
 #   fzfalertmanager __action yank <alertmanager-idx> <fingerprint>
+#   fzfalertmanager __action task <alertmanager-idx> <fingerprint>
 
 if [[ "$1" == "__action" ]]; then
   case "$2" in
@@ -684,6 +685,26 @@ if [[ "$1" == "__action" ]]; then
       url="$(jq_alerts '.[] | select(._am == $am and .fingerprint == $fp) | link("source")' \
         --argjson am "$3" --arg fp "$4")"
       printf '%s' "${url:-$4}" | pbcopy
+      ;;
+
+    task)
+      # Hand the alert to fzftasks: a new item asks for an optional repository
+      # and a prompt (or "Track") and starts pi in the background, an existing
+      # item is opened. The alert markdown (the preview document without its
+      # title heading) is stored as the item's details snapshot (shown in the
+      # preview and passed to the agent).
+      [[ -z "$3" || -z "$4" ]] && exit 0
+      am_name="$(cfg '.alertmanagers[$i].name' --argjson i "$3")"
+      title="$(jq_alerts '.[] | select(._am == $am and .fingerprint == $fp)
+        | (.labels.alertname // "unknown") + (secondary | if . != "" then ": " + . else "" end)' \
+        --argjson am "$3" --arg fp "$4")"
+      if [[ -z "$am_name" || -z "$title" ]]; then
+        pause_msg "Could not find the alert $4."
+        exit 0
+      fi
+      jq_alerts '.[] | select(._am == $am and .fingerprint == $fp) | markdown' \
+        --argjson am "$3" --arg fp "$4" | sed -e '1{/^# /d;}' | sed -e '1{/^$/d;}' |
+        fzftasks start "alert:$am_name:$4" --title "$title" --details -
       ;;
 
     *)
@@ -725,23 +746,24 @@ Filters & Alertmanagers Keybindings:
   esc    : quit
 
 Alert Keybindings:
-  enter  : open the alert markdown in nvim (read-only)
-  alt-o  : open the alert source (generatorURL) in the web browser
-  alt-s  : open the "create silence" page in the web browser
-  alt-r  : open the runbook (runbook_url annotation) in the web browser
-  alt-d  : open the Grafana dashboard in the web browser (Grafana only)
-  alt-p  : open the Grafana panel in the web browser (Grafana only)
-  alt-y  : copy the alert source url (or the fingerprint) to the clipboard
-  ctrl-r : refresh alerts and reload list
-  ctrl-p : toggle preview
-  ctrl-d : scroll half page down
-  ctrl-u : scroll half page up
-  ctrl-f : scroll preview half page down
-  ctrl-b : scroll preview half page up
-  home   : scroll preview to top
-  end    : scroll preview to bottom
-  alt-h  : show help
-  esc    : back to the filters / alertmanagers list (quit in the view command)
+  enter     : open the alert markdown in nvim (read-only)
+  alt-o     : open the alert source (generatorURL) in the web browser
+  alt-s     : open the "create silence" page in the web browser
+  alt-r     : open the runbook (runbook_url annotation) in the web browser
+  alt-d     : open the Grafana dashboard in the web browser (Grafana only)
+  alt-p     : open the Grafana panel in the web browser (Grafana only)
+  alt-y     : copy the alert source url (or the fingerprint) to the clipboard
+  alt-enter : hand alert to fzftasks
+  ctrl-r    : refresh alerts and reload list
+  ctrl-p    : toggle preview
+  ctrl-d    : scroll half page down
+  ctrl-u    : scroll half page up
+  ctrl-f    : scroll preview half page down
+  ctrl-b    : scroll preview half page up
+  home      : scroll preview to top
+  end       : scroll preview to bottom
+  alt-h     : show help
+  esc       : back to the filters / alertmanagers list (quit in the view command)
 
 Environment:
   FZFALERTMANAGER_CONFIG           : JSON config (required)
@@ -870,6 +892,7 @@ run_alerts() {
     --bind "ctrl-r:reload-sync($LIST refresh)" \
     --bind "every($FZFALERTMANAGER_REFRESH_INTERVAL):reload-sync($LIST refresh)" \
     --bind "enter:execute($ACTION view {1} {2})" \
+    --bind "alt-enter:execute($ACTION task {1} {2})" \
     --bind "alt-o:execute($ACTION open source {1} {2})" \
     --bind "alt-s:execute($ACTION open silence {1} {2})" \
     --bind "alt-r:execute($ACTION open runbook {1} {2})" \
