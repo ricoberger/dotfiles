@@ -75,6 +75,10 @@ cp -r $(pwd)/.config/copilot/agents ~/.copilot
 echo "\n- Copy Binaries"
 cp -r $(pwd)/.local/bin ~/.local
 
+echo "\n- Copy fzftasks Configuration"
+mkdir -p ~/.config
+cp -r $(pwd)/.config/fzftasks ~/.config
+
 # Add symlink for iCloud in the home directory
 echo "\n- Add Symlink for iCloud"
 ln -sfn ~/Library/Mobile\ Documents/com\~apple\~CloudDocs ~/iCloud

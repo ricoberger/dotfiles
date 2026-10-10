@@ -1,0 +1,1011 @@
+#!/usr/bin/env bash
+
+# fzftasks - Track work items and the pi agents working on them
+#
+# Usage: fzftasks [start <key> | open <key> | reply <key> | done <key> |
+#                  reopen <key> | new]
+#
+# Work items are identified by a key, which encodes the item's kind:
+#
+#   pr:<owner>/<repo>#<number>      GitHub pull request
+#   jira:<KEY>                      Jira work item
+#   alert:<alertmanager>:<fp>       Alertmanager alert (name and fingerprint)
+#   adhoc:<timestamp>-<slug>        ad-hoc task created via "fzftasks new"
+#
+# Every item maps to exactly one pi session (the session id is derived from the
+# key) and one workspace: a git worktree for pull requests and for other items
+# with a selected repository, a scratch directory otherwise. Starting an item
+# that already exists never creates a new session or workspace; it opens the
+# existing one instead. Deleting a done item removes its session and workspace
+# (worktrees only without local changes; their branches are kept).
+#
+# State is stored in a SQLite database. Items are in one of these states:
+#
+#   todo     tracked, no run started yet
+#   running  pi is running (background or interactive)
+#   waiting  pi finished, open the item to continue
+#   done     marked as done
+#
+# Agents started in the background run with "pi -p"; when they finish, the item
+# moves to "waiting" and can be opened with an interactive pi on the same
+# session, or continued in the background with a reply ("fzftasks reply").
+# Failed runs are logged to fzftasks.log in the state directory.
+
+SCRIPT="$(realpath "$0")"
+
+# Directory for the state of fzftasks:
+#   fzftasks.db   items (SQLite)
+#   fzftasks.log  failed runs
+#   sessions/     pi sessions
+#   workspaces/   scratch workspaces of items without a repository
+#   notify/       notifications of finished background runs, shown by the
+#                 picker on its next reload
+FZFTASKS_STATE_DIR="${FZFTASKS_STATE_DIR:-$HOME/.local/state/fzftasks}"
+# Directory containing the prompt templates ("prompts/*.md"). All templates are
+# shown in the prompt picker for every item; the frontmatter "title" (default:
+# file name) and "description" are shown in the picker. The placeholders
+# {{key}}, {{title}}, {{workspace}}, {{repo}} (empty without repository) and
+# {{details}} are replaced.
+FZFTASKS_CONFIG_DIR="${FZFTASKS_CONFIG_DIR:-$HOME/.config/fzftasks}"
+# Base directory of the local clones ("<dir>/<owner>/<repo>").
+FZFTASKS_GITHUB_DIR="${FZFTASKS_GITHUB_DIR:-$HOME/Documents/GitHub}"
+# Base directory of the pull request worktrees ("<dir>/<owner>/<repo>/<branch>").
+FZFTASKS_WORKTREE_DIR="${FZFTASKS_WORKTREE_DIR:-$HOME/.worktrees}"
+# The pi binary.
+FZFTASKS_PI="${FZFTASKS_PI:-pi}"
+# Seconds between automatic refreshes of the list.
+FZFTASKS_REFRESH_INTERVAL="${FZFTASKS_REFRESH_INTERVAL:-10}"
+
+DB="$FZFTASKS_STATE_DIR/fzftasks.db"
+LOG="$FZFTASKS_STATE_DIR/fzftasks.log"
+SESSIONS="$FZFTASKS_STATE_DIR/sessions"
+WORKSPACES="$FZFTASKS_STATE_DIR/workspaces"
+# Notifications of finished background runs, one file per item, shown by the
+# picker on its next reload.
+NOTIFY="$FZFTASKS_STATE_DIR/notify"
+PROMPTS="$FZFTASKS_CONFIG_DIR/prompts"
+
+# Bash 5.2+ expands "&" in the replacement of ${var//pattern/replacement} to the
+# matched text. Disable it, so "&" in titles and details stays literal.
+shopt -u patsub_replacement 2>/dev/null || true
+
+# Nerd font glyphs used in prompts / labels. Defined via byte escapes so they do
+# not depend on a bash that supports the \u / \U printf escapes.
+ICON_TASKS=$'\xef\x92\xa0'      # tasklist (items)
+ICON_PROMPT=$'\xf3\xb1\x99\xba' # robot (prompt for the agent)
+ICON_TRASH=$'\xf3\xb0\xa9\xba'  # trash (delete)
+ICON_REPO=$'\xef\x90\x81'       # repository
+
+# ---------- Helpers ----------
+
+die() {
+  echo "fzftasks: $*" >&2
+  exit 1
+}
+
+# Wait for a key press, so messages stay visible when fzftasks runs from an fzf
+# binding. Reads from /dev/tty instead of stdin, because stdin may be the pipe
+# of the details (fzfgh pipes the PR into "fzftasks start"). Does nothing
+# without a terminal.
+pause() {
+  if (exec </dev/tty) 2>/dev/null; then
+    read -n 1 -s -r -p "Press any key to continue..." </dev/tty
+    echo
+  fi
+}
+
+fail() {
+  echo "$*"
+  pause
+  exit 0
+}
+
+now() {
+  date +%s
+}
+
+sql() {
+  sqlite3 -batch -separator $'\t' -cmd ".timeout 5000" "$DB" "$@"
+}
+
+# Quote a value as an SQL string literal.
+q() {
+  local sq="'"
+  printf "'%s'" "${1//$sq/$sq$sq}"
+}
+
+init() {
+  mkdir -p "$FZFTASKS_STATE_DIR" "$SESSIONS" "$WORKSPACES" "$NOTIFY" || die "cannot create $FZFTASKS_STATE_DIR"
+  sql >/dev/null <<'SQL' || die "cannot initialize $DB"
+PRAGMA journal_mode = WAL;
+CREATE TABLE IF NOT EXISTS items (
+  key        TEXT PRIMARY KEY,
+  title      TEXT NOT NULL,
+  details    TEXT,
+  repo       TEXT,
+  workspace  TEXT,
+  state      TEXT NOT NULL,
+  pid        INTEGER,
+  updated_at INTEGER NOT NULL
+);
+SQL
+  # Databases created before the repo column existed. Fails (ignored) when the
+  # column is already there.
+  sql "ALTER TABLE items ADD COLUMN repo TEXT;" >/dev/null 2>&1 || true
+}
+
+item_field() {
+  sql "SELECT $2 FROM items WHERE key = $(q "$1");"
+}
+
+kind_of() {
+  printf '%s' "${1%%:*}"
+}
+
+# Derive the pi session id from a key: "pr:org/repo#123" -> "pr.org.repo.123".
+session_id() {
+  printf '%s' "$1" | sed -e 's/[:\/#]/./g' -e 's/[^A-Za-z0-9._-]/_/g'
+}
+
+# Split a pull request key into PR_REPO ("org/repo") and PR_NUMBER.
+parse_pr_key() {
+  local rest="${1#pr:}"
+  PR_REPO="${rest%%#*}"
+  PR_NUMBER="${rest##*#}"
+}
+
+# Move "running" items whose process is gone (crash, reboot, closed tab) to
+# "waiting". Without a key all running items are checked.
+reset_stale() {
+  local where="state = 'running'" key pid
+  [[ -n "$1" ]] && where="$where AND key = $(q "$1")"
+  while IFS=$'\t' read -r key pid; do
+    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+      sql "UPDATE items SET state = 'waiting', pid = NULL, updated_at = $(now) WHERE key = $(q "$key") AND state = 'running';"
+    fi
+  done < <(sql "SELECT key, pid FROM items WHERE $where;")
+}
+
+# Atomically mark an item as running. Fails when it is already running.
+claim() {
+  local changed
+  changed="$(sql "UPDATE items SET state = 'running', pid = $2, updated_at = $(now) WHERE key = $(q "$1") AND state != 'running'; SELECT changes();")"
+  [[ "$changed" == 1 ]]
+}
+
+# Render markdown read from stdin with md, falling back to the raw markdown.
+md_render() {
+  if command -v md >/dev/null 2>&1; then
+    MD_WORD_WRAP="${FZF_PREVIEW_COLUMNS:-80}" md
+  else
+    cat
+  fi
+}
+
+# Queue a notification for an item. The picker shows it via OSC 777 in its own
+# Ghostty tab, so clicking the notification focuses fzftasks.
+queue_notification() {
+  local f
+  f="$NOTIFY/$(session_id "$1")"
+  printf '%s' "$2" >"$f.tmp" && mv "$f.tmp" "$f"
+}
+
+# Show and remove all queued notifications. Writes to /dev/tty, because stdout
+# is the list read by fzf.
+flush_notifications() {
+  local f msg
+  (exec >/dev/tty) 2>/dev/null || return 0
+  for f in "$NOTIFY"/*; do
+    [[ -f "$f" && "$f" != *.tmp ]] || continue
+    msg="$(tr -d '\000-\037' <"$f")"
+    rm -f "$f"
+    printf '\033]777;notify;fzftasks;%s\007' "$msg" >/dev/tty
+  done
+}
+
+# ---------- Workspaces ----------
+#
+# prepare_workspace sets WORKSPACE (and BASE, the base branch, for git
+# worktrees) and stores the workspace in the database. Problems that do not
+# prevent working in the workspace are printed and set WARN.
+
+# Check out a pull request into "$FZFTASKS_WORKTREE_DIR/<org>/<repo>/<branch>".
+# An existing worktree is refreshed to the PR's current head, unless it has
+# local changes. The refresh never uses --force, so local commits of an agent
+# are never discarded; a diverged branch is kept as is.
+workspace_pr() {
+  local repo_dir info head wt
+  parse_pr_key "$1"
+
+  repo_dir="$FZFTASKS_GITHUB_DIR/$PR_REPO"
+  if [[ ! -d "$repo_dir" ]]; then
+    echo "Local clone not found at $repo_dir"
+    return 1
+  fi
+
+  info="$(gh pr view "$PR_NUMBER" --repo "$PR_REPO" --json headRefName,baseRefName 2>/dev/null)"
+  head="$(jq -r '.headRefName // empty' <<<"$info" 2>/dev/null)"
+  BASE="$(jq -r '.baseRefName // empty' <<<"$info" 2>/dev/null)"
+  if [[ -z "$head" ]]; then
+    echo "Could not determine the head branch of $PR_REPO#$PR_NUMBER"
+    return 1
+  fi
+
+  wt="$FZFTASKS_WORKTREE_DIR/${PR_REPO%%/*}/${PR_REPO#*/}/${head//\//-}"
+  if [[ ! -d "$wt" ]]; then
+    if ! git -C "$repo_dir" worktree add --detach "$wt"; then
+      echo "Failed to create worktree at $wt"
+      return 1
+    fi
+    if ! (cd "$wt" && gh pr checkout "$PR_NUMBER" --branch "$head"); then
+      git -C "$repo_dir" worktree remove --force "$wt" 2>/dev/null
+      echo "Failed to check out $PR_REPO#$PR_NUMBER"
+      return 1
+    fi
+  elif [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+    echo "Worktree $wt has local changes, not refreshing it"
+    WARN=1
+  elif ! (cd "$wt" && gh pr checkout "$PR_NUMBER" --branch "$head"); then
+    echo "Failed to refresh $wt, using it as is"
+    WARN=1
+  fi
+
+  WORKSPACE="$wt"
+}
+
+# Ad-hoc, Jira and alert items without a repository work in a scratch
+# directory. With a repository they get a worktree at
+# "$FZFTASKS_WORKTREE_DIR/<org>/<repo>/<branch>" on a new branch named like the
+# session id (e.g. "adhoc.<timestamp>-<slug>", "jira.CORE-123"), created from
+# the repository's default branch. An existing worktree is reused as is; it is
+# the item's own branch, so there is nothing to refresh.
+workspace_task() {
+  local repo repo_dir branch
+  repo="$(item_field "$1" repo)"
+  if [[ -z "$repo" ]]; then
+    WORKSPACE="$WORKSPACES/$(session_id "$1")"
+    mkdir -p "$WORKSPACE"
+    return
+  fi
+
+  repo_dir="$FZFTASKS_GITHUB_DIR/$repo"
+  if [[ ! -d "$repo_dir" ]]; then
+    echo "Local clone not found at $repo_dir"
+    return 1
+  fi
+
+  BASE="$(git -C "$repo_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"
+  BASE="${BASE#origin/}"
+  if [[ -z "$BASE" ]]; then
+    BASE="$(gh repo view "$repo" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)"
+  fi
+
+  branch="$(session_id "$1")"
+  WORKSPACE="$FZFTASKS_WORKTREE_DIR/${repo%%/*}/${repo#*/}/$branch"
+  [[ -d "$WORKSPACE" ]] && return 0
+
+  if git -C "$repo_dir" show-ref --verify --quiet "refs/heads/$branch"; then
+    if ! git -C "$repo_dir" worktree add "$WORKSPACE" "$branch"; then
+      echo "Failed to create worktree at $WORKSPACE"
+      return 1
+    fi
+  else
+    if [[ -z "$BASE" ]]; then
+      echo "Could not determine the default branch of $repo"
+      return 1
+    fi
+    if ! git -C "$repo_dir" fetch origin "$BASE"; then
+      echo "Failed to fetch origin/$BASE, using the local state"
+      WARN=1
+    fi
+    # --no-track: the new branch must not use origin/<base> as its upstream,
+    # so a plain "git push" never targets the default branch.
+    if ! git -C "$repo_dir" worktree add --no-track -b "$branch" "$WORKSPACE" "origin/$BASE"; then
+      echo "Failed to create worktree at $WORKSPACE"
+      return 1
+    fi
+  fi
+}
+
+prepare_workspace() {
+  WORKSPACE=""
+  BASE=""
+  case "$(kind_of "$1")" in
+    pr) workspace_pr "$1" || return 1 ;;
+    adhoc | jira | alert) workspace_task "$1" || return 1 ;;
+    *)
+      echo "Unsupported item kind: $1"
+      return 1
+      ;;
+  esac
+  sql "UPDATE items SET workspace = $(q "$WORKSPACE") WHERE key = $(q "$1");"
+}
+
+# ---------- Prompts ----------
+
+# Print a field ("title", "description") from a template's YAML frontmatter.
+prompt_field() {
+  awk -v field="$2" '
+    NR == 1 { if ($0 != "---") exit; fm = 1; next }
+    fm && $0 == "---" { exit }
+    fm && index($0, field ":") == 1 {
+      sub(/^[^:]*:[ \t]*/, "")
+      gsub(/^["'\'']|["'\'']$/, "")
+      print
+      exit
+    }
+  ' "$1"
+}
+
+# Let the user pick one of all prompt templates (every "*.md" in the prompts
+# directory). Prints the template path, or "track" for the "Track" entry when
+# allowed. Returns 1 when cancelled.
+choose_prompt() {
+  local key="$1" allow_track="$2" rows="" f title sel path
+
+  if [[ "$allow_track" == 1 ]]; then
+    rows="$(printf '%-30s %s' "Track" "Track as new todo")"$'\t'$'\n'
+  fi
+  for f in "$PROMPTS"/*.md; do
+    [[ -f "$f" ]] || continue
+    title="$(prompt_field "$f" title)"
+    [[ -n "$title" ]] || title="$(basename "$f" .md)"
+    rows+="$(printf '%-30s %s' "$title" "$(prompt_field "$f" description)")"$'\t'"$f"$'\n'
+  done
+  if [[ -z "$rows" ]]; then
+    # stdout is captured by the caller, so the message goes to stderr.
+    echo "No prompts found in $PROMPTS" >&2
+    pause >&2
+    return 1
+  fi
+
+  sel="$(printf '%s' "$rows" | fzf \
+    --delimiter $'\t' \
+    --with-nth 1 \
+    --reverse \
+    --height 100% \
+    --prompt "$ICON_PROMPT Prompt: " \
+    --border rounded \
+    --border-label " $ICON_PROMPT Prompt for $key " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --preview-window "right:65%" \
+    --preview '[ -n {2} ] && cat {2}')" || return 1
+
+  path="$(printf '%s' "$sel" | cut -f2)"
+  if [[ -z "$path" ]]; then
+    echo track
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+# Let the user pick a local repository ("$FZFTASKS_GITHUB_DIR/<org>/<repo>") or
+# none. Prints "<org>/<repo>", or nothing for "No repository". Returns 1 when
+# cancelled.
+choose_repo() {
+  local rows d sel
+  rows="No repository (scratch directory)"$'\t'$'\n'
+  while IFS= read -r d; do
+    d="${d#"$FZFTASKS_GITHUB_DIR"/}"
+    rows+="$d"$'\t'"$d"$'\n'
+  done < <(find "$FZFTASKS_GITHUB_DIR" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort)
+
+  sel="$(printf '%s' "$rows" | fzf \
+    --delimiter $'\t' \
+    --with-nth 1 \
+    --reverse \
+    --height 100% \
+    --prompt "$ICON_REPO Repository: " \
+    --border rounded \
+    --border-label " $ICON_REPO Repository " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)")" || return 1
+
+  printf '%s' "$sel" | cut -f2
+}
+
+# Render a template: strip the frontmatter and replace the placeholders.
+render_prompt() {
+  local body p
+  body="$(awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { fm = 0; next } !fm' "$1")"
+  p='{{key}}'
+  body=${body//"$p"/$2}
+  p='{{title}}'
+  body=${body//"$p"/$3}
+  p='{{workspace}}'
+  body=${body//"$p"/$4}
+  p='{{repo}}'
+  body=${body//"$p"/$6}
+  p='{{details}}'
+  body=${body//"$p"/$5}
+  printf '%s\n' "$body"
+}
+
+# ---------- Commands ----------
+
+cmd_start() {
+  local key="" title="" repo="" repo_given=0 details_stdin=0 kind state tmp tpl
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --title=*) title="${1#*=}"; shift ;;
+      --title) title="$2"; shift 2 ;;
+      --repo=*) repo="${1#*=}"; repo_given=1; shift ;;
+      --repo) repo="$2"; repo_given=1; shift 2 ;;
+      --details=-) details_stdin=1; shift ;;
+      --details)
+        [[ "$2" == "-" ]] || die "start: --details only supports '-' (stdin)"
+        details_stdin=1
+        shift 2
+        ;;
+      -*) die "start: unknown flag: $1" ;;
+      *) key="$1"; shift ;;
+    esac
+  done
+  [[ -n "$key" ]] || die "start: missing key"
+
+  kind="$(kind_of "$key")"
+  case "$kind" in
+    pr | adhoc | jira | alert) ;;
+    *) fail "Unsupported item kind: $key" ;;
+  esac
+
+  init
+  reset_stale "$key"
+  state="$(item_field "$key" state)"
+
+  case "$state" in
+    running) fail "$key is already running" ;;
+    waiting | done)
+      cmd_open "$key"
+      return
+      ;;
+    todo)
+      tpl="$(choose_prompt "$key" 0)" || return 0
+      ;;
+    "")
+      [[ -n "$title" ]] || die "start: --title is required for new items"
+      tmp="$(mktemp "${TMPDIR:-/tmp}/fzftasks.XXXXXX")"
+      [[ "$details_stdin" == 1 ]] && cat >"$tmp"
+      # Ad-hoc, Jira and alert items can work in a repository; ask for it
+      # unless the caller passed --repo (an empty value means "no repository").
+      if [[ "$repo_given" == 0 && "$kind" != pr ]]; then
+        if ! repo="$(choose_repo)"; then
+          rm -f "$tmp"
+          return 0
+        fi
+      fi
+      if ! tpl="$(choose_prompt "$key" 1)"; then
+        rm -f "$tmp"
+        return 0
+      fi
+      title="$(printf '%s' "$title" | tr '\t\n' '  ')"
+      sql "INSERT INTO items (key, title, details, repo, state, updated_at) VALUES ($(q "$key"), $(q "$title"), CAST(readfile($(q "$tmp")) AS TEXT), NULLIF($(q "$repo"), ''), 'todo', $(now));"
+      rm -f "$tmp"
+      if [[ "$tpl" == track ]]; then
+        echo "Tracking $key"
+        return 0
+      fi
+      ;;
+  esac
+
+  start_run "$key" "$tpl"
+}
+
+# Start a background run of a "todo" item with the given prompt template.
+start_run() {
+  local key="$1" tpl="$2" prompt_file
+  WARN=""
+
+  claim "$key" "$$" || fail "$key is already running"
+  if ! prepare_workspace "$key"; then
+    sql "UPDATE items SET state = 'todo', pid = NULL, updated_at = $(now) WHERE key = $(q "$key");"
+    fail "Failed to prepare the workspace for $key"
+  fi
+
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/fzftasks-prompt.XXXXXX")"
+  render_prompt "$tpl" "$key" "$(item_field "$key" title)" "$WORKSPACE" "$(item_field "$key" details)" "$(item_field "$key" repo)" >"$prompt_file"
+
+  launch_run "$key" "$prompt_file"
+
+  echo "Started $key"
+  [[ -n "$WARN" ]] && pause
+  return 0
+}
+
+# Open the item's layout: for items with a repository (pull requests and other
+# items with a selected repository) a Ghostty tab with nvim showing the
+# diff against the base branch and a split with an interactive pi; otherwise a
+# tab with pi.
+cmd_open() {
+  local key="$1" state title repo run_cmd nvim_cmd tab_title
+  [[ -n "$key" ]] || die "open: missing key"
+  WARN=""
+
+  init
+  reset_stale "$key"
+  state="$(item_field "$key" state)"
+  [[ -n "$state" ]] || fail "Unknown item: $key"
+  [[ "$state" == running ]] && fail "$key is already running"
+
+  prepare_workspace "$key" || fail "Failed to prepare the workspace for $key"
+  [[ -n "$WARN" ]] && pause
+
+  title="$(item_field "$key" title)"
+  repo="$(item_field "$key" repo)"
+  run_cmd="$(printf '%q ' "$SCRIPT" __run "$key")"
+
+  if [[ "$(kind_of "$key")" == pr ]]; then
+    parse_pr_key "$key"
+    tab_title="$PR_REPO#$PR_NUMBER: $title"
+  elif [[ "$(kind_of "$key")" == jira ]]; then
+    tab_title="${key#jira:}: $title"
+  elif [[ -n "$repo" ]]; then
+    tab_title="$repo: $title"
+  else
+    tab_title="$title"
+  fi
+
+  if [[ -z "$repo" ]]; then
+    ghostty-new --working-dir "$WORKSPACE" --title "$tab_title" --command "$run_cmd" ||
+      fail "Failed to open a new Ghostty tab"
+    return
+  fi
+
+  nvim_cmd="nvim -c GitDiff"
+  if [[ -n "$BASE" ]] && git -C "$WORKSPACE" fetch origin "$BASE" >/dev/null 2>&1; then
+    nvim_cmd="nvim -c \"GitDiff HEAD origin/$BASE\""
+  fi
+  ghostty-new --working-dir "$WORKSPACE" --title "$tab_title" --command "$nvim_cmd" ||
+    fail "Failed to open a new Ghostty tab"
+  ghostty-new --placement split --direction right --working-dir "$WORKSPACE" --command "$run_cmd" ||
+    fail "Failed to open a new Ghostty split"
+}
+
+cmd_done() {
+  [[ -n "$1" ]] || die "done: missing key"
+  init
+  sql "UPDATE items SET state = 'done', updated_at = $(now) WHERE key = $(q "$1");"
+}
+
+# Move a done item back to waiting. Other states are left unchanged.
+cmd_reopen() {
+  [[ -n "$1" ]] || die "reopen: missing key"
+  init
+  sql "UPDATE items SET state = 'waiting', updated_at = $(now) WHERE key = $(q "$1") AND state = 'done';"
+}
+
+# Create an ad-hoc item in $EDITOR: the first non-empty line is the title, the
+# rest the details. An empty file cancels. Afterwards a repository can be
+# selected, in which the item gets its own worktree.
+cmd_new() {
+  local tmp title details slug key repo
+  tmp="$(mktemp "${TMPDIR:-/tmp}/fzftasks-new.XXXXXX")" || die "cannot create a temporary file"
+  mv "$tmp" "$tmp.md" && tmp="$tmp.md"
+  "${EDITOR:-nvim}" "$tmp"
+
+  title="$(awk 'NF { print; exit }' "$tmp")"
+  details="$(awk 'found { print; next } NF { found = 1 }' "$tmp")"
+  rm -f "$tmp"
+  [[ -n "$title" ]] || return 0
+
+  slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g' -e 's/^-//' | cut -c1-40 | sed 's/-*$//')"
+  key="adhoc:$(date +%Y%m%d-%H%M%S)${slug:+-$slug}"
+  printf '%s\n' "$details" | cmd_start "$key" --title "$title" --details -
+}
+
+# Start a background run of an item claimed by this process with the given
+# prompt file, which the run removes when it finishes.
+launch_run() {
+  local pid
+  nohup "$SCRIPT" __run "$1" --prompt-file "$2" >/dev/null 2>&1 </dev/null &
+  pid=$!
+  sql "UPDATE items SET pid = $pid WHERE key = $(q "$1") AND state = 'running' AND pid = $$;"
+}
+
+# Continue a waiting item in the background: the reply is written in $EDITOR
+# (an empty reply cancels) and sent to the item's session with "pi -p".
+cmd_reply() {
+  local key="$1" workspace tmp prompt_file changed
+  [[ -n "$key" ]] || die "reply: missing key"
+
+  init
+  reset_stale "$key"
+  [[ "$(item_field "$key" state)" == waiting ]] ||
+    fail "Only waiting items can be continued in the background"
+  workspace="$(item_field "$key" workspace)"
+  [[ -n "$workspace" && -d "$workspace" ]] ||
+    fail "Workspace of $key not found, open the item instead"
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/fzftasks-reply.XXXXXX")" || die "cannot create a temporary file"
+  mv "$tmp" "$tmp.md" && tmp="$tmp.md"
+  "${EDITOR:-nvim}" "$tmp"
+  if ! grep -q '[^[:space:]]' "$tmp"; then
+    rm -f "$tmp"
+    return 0
+  fi
+
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/fzftasks-prompt.XXXXXX")"
+  {
+    cat "$tmp"
+    printf '\n%s\n' "(You are still running unattended, nobody is watching this session. Stop again at the FIRST point where you would ask the user anything and state the exact question.)"
+  } >"$prompt_file"
+  rm -f "$tmp"
+
+  # Claim only while still waiting: the item may have been opened or marked as
+  # done while the reply was written.
+  changed="$(sql "UPDATE items SET state = 'running', pid = $$, updated_at = $(now) WHERE key = $(q "$key") AND state = 'waiting'; SELECT changes();")"
+  if [[ "$changed" != 1 ]]; then
+    rm -f "$prompt_file"
+    fail "$key is no longer waiting, the reply was not sent"
+  fi
+  launch_run "$key" "$prompt_file"
+  echo "Continued $key"
+}
+
+# Run pi for an item and track its state. With --prompt-file the run is a
+# background run started (and already claimed) by "start" or "reply"; otherwise an
+# interactive pi is started on the item's session.
+cmd_run() {
+  local key="$1" prompt_file="" prev workspace sid rc errf="" new
+  [[ "$2" == "--prompt-file" ]] && prompt_file="$3"
+  [[ -n "$key" ]] || die "__run: missing key"
+
+  init
+  if [[ -n "$prompt_file" ]]; then
+    prev="todo"
+    sql "UPDATE items SET pid = $$ WHERE key = $(q "$key") AND state = 'running';"
+  else
+    reset_stale "$key"
+    prev="$(item_field "$key" state)"
+    [[ -n "$prev" ]] || fail "Unknown item: $key"
+    claim "$key" "$$" || fail "$key is already running"
+  fi
+
+  workspace="$(item_field "$key" workspace)"
+  sid="$(session_id "$key")"
+  local args=(--session-dir "$SESSIONS" --session-id "$sid")
+
+  if [[ -z "$workspace" ]] || ! cd "$workspace"; then
+    rc=1
+    printf '%s %s exit=%s workspace not found: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$key" "$rc" "$workspace" >>"$LOG"
+  elif [[ -n "$prompt_file" ]]; then
+    errf="$(mktemp "${TMPDIR:-/tmp}/fzftasks-err.XXXXXX")"
+    "$FZFTASKS_PI" "${args[@]}" -p <"$prompt_file" >/dev/null 2>"$errf"
+    rc=$?
+  else
+    "$FZFTASKS_PI" "${args[@]}"
+    rc=$?
+  fi
+
+  if [[ "$rc" != 0 && -n "$workspace" && -d "$workspace" ]]; then
+    {
+      printf '%s %s exit=%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$key" "$rc"
+      [[ -s "$errf" ]] && printf ' %s' "$(tr '\n' ' ' <"$errf")"
+      printf '\n'
+    } >>"$LOG"
+  fi
+
+  new="waiting"
+  [[ "$prev" == done ]] && new="done"
+  sql "UPDATE items SET state = $(q "$new"), pid = NULL, updated_at = $(now) WHERE key = $(q "$key") AND state = 'running';"
+  rm -f "$prompt_file" "$errf"
+
+  if [[ -n "$prompt_file" ]]; then
+    if [[ "$rc" == 0 ]]; then
+      queue_notification "$key" "Finished: $(item_field "$key" title)"
+    else
+      queue_notification "$key" "Failed (exit $rc): $(item_field "$key" title)"
+    fi
+  fi
+}
+
+age() {
+  local s="$1"
+  if ((s < 60)); then
+    echo "${s}s"
+  elif ((s < 3600)); then
+    echo "$((s / 60))m"
+  elif ((s < 86400)); then
+    echo "$((s / 3600))h"
+  else
+    echo "$((s / 86400))d"
+  fi
+}
+
+cmd_list() {
+  local ts key state title updated icon kind
+  init
+  reset_stale
+  ts="$(now)"
+  sql "SELECT key, state, title, updated_at FROM items ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'waiting' THEN 1 WHEN 'todo' THEN 2 ELSE 3 END, updated_at DESC;" |
+    while IFS=$'\t' read -r key state title updated; do
+      case "$state" in
+        running) icon=$'\033[33m◐' ;;
+        waiting) icon=$'\033[35m●' ;;
+        todo) icon=$'\033[37m○' ;;
+        *) icon=$'\033[32m✓' ;;
+      esac
+      kind="$(kind_of "$key")"
+      printf '%s\t%s %-7s\033[0m \033[36m%-5s\033[0m %s \033[90m%s\033[0m\n' \
+        "$key" "$icon" "$state" "$kind" "$title" "$(age $((ts - updated)))"
+    done
+  flush_notifications
+}
+
+# Print the transcript of a session as markdown: the user and agent messages
+# in file order, without tool calls, tool results, thinking and compactions.
+transcript() {
+  jq -rs '
+    [ .[]
+      | select(.type == "message") | .message
+      | select(.role == "user" or .role == "assistant")
+      | { role,
+          text: (if (.content | type) == "string" then .content
+                 else [ .content[]? | select(.type == "text") | .text ] | join("\n") end) }
+      | select(.text | test("\\S"))
+      | (if .role == "user" then "# User" else "# Agent" end) + "\n\n" + .text ]
+    | join("\n\n")' "$1" 2>/dev/null
+}
+
+# Print the fzf actions switching the preview between the summary and the
+# transcript, based on the current preview label.
+cmd_preview_toggle() {
+  if [[ "${FZF_PREVIEW_LABEL:-}" == *Transcript* ]]; then
+    printf 'change-preview(%s __preview {1})+change-preview-label()+change-preview-window(nofollow)' "$SCRIPT"
+  else
+    printf 'change-preview(%s __preview --transcript {1})+change-preview-label( Transcript )+change-preview-window(follow)' "$SCRIPT"
+  fi
+}
+
+cmd_preview() {
+  local key mode=summary sid session msg details workspace repo
+  if [[ "$1" == --transcript ]]; then
+    mode=transcript
+    shift
+  fi
+  key="$1"
+  [[ -n "$key" ]] || exit 0
+  init
+  sid="$(session_id "$key")"
+  session="$(find "$SESSIONS" -type f -name "*_${sid}.jsonl" 2>/dev/null | sort | tail -n 1)"
+
+  if [[ "$mode" == transcript ]]; then
+    [[ -n "$session" ]] && msg="$(transcript "$session")"
+    printf '%s\n' "${msg:-No session yet.}" | md_render
+    return
+  fi
+
+  if [[ -n "$session" ]]; then
+    msg="$(jq -rs '
+      [ .[]
+        | select(.type == "message" and .message.role == "assistant")
+        | [ .message.content[]? | select(.type == "text") | .text ] | join("\n")
+        | select(length > 0) ]
+      | last // empty' "$session" 2>/dev/null)"
+  fi
+
+  {
+    printf '# %s\n\n' "$(item_field "$key" title)"
+    printf -- '- **Key:** `%s`\n' "$key"
+    printf -- '- **State:** %s\n' "$(item_field "$key" state)"
+    repo="$(item_field "$key" repo)"
+    printf -- '- **Repository:** %s\n' "$repo"
+    workspace="$(item_field "$key" workspace)"
+    if [[ -n "$workspace" ]]; then
+      printf -- '- **Workspace:** `%s`\n\n' "$workspace"
+    else
+      printf -- '- **Workspace:**\n\n'
+    fi
+    [[ -n "$msg" ]] && printf '# Agent\n\n%s\n\n' "$msg"
+    details="$(item_field "$key" details)"
+    [[ -n "$details" ]] && printf '# Description\n\n%s\n' "$details"
+  } | md_render
+}
+
+cmd_action() {
+  local action="$1" key="$2" answer rest title workspace repo
+  [[ -n "$key" ]] || exit 0
+  init
+
+  case "$action" in
+    view)
+      case "$(kind_of "$key")" in
+        pr)
+          parse_pr_key "$key"
+          fzfgh view "https://github.com/$PR_REPO/pull/$PR_NUMBER"
+          ;;
+        jira)
+          fzfjira "key = ${key#jira:}"
+          ;;
+        alert)
+          rest="${key#alert:}"
+          fzfalertmanager view "${rest%:*}" "${rest##*:}"
+          ;;
+        *)
+          # Ad-hoc items have no source; their details are in the preview.
+          ;;
+      esac
+      ;;
+
+    delete)
+      [[ "$(item_field "$key" state)" == done ]] ||
+        fail "Only done items can be deleted, mark it as done first (alt-d)"
+      title="$(item_field "$key" title)"
+      answer="$(printf '%s\n' "No" "Yes" | fzf \
+        --bind "ctrl-d:half-page-down" \
+        --bind "ctrl-u:half-page-up" \
+        --bind "alt-h:execute($SCRIPT --help | less -R)" \
+        --prompt "$ICON_TRASH Delete $title: " \
+        --height 100% \
+        --reverse \
+        --border rounded \
+        --border-label " $ICON_TRASH Delete $title " \
+        --border-label-pos center)"
+      [[ "$answer" != "Yes" ]] && exit 0
+
+      # Remove the workspace: scratch directories are deleted, worktrees are
+      # removed without --force (refuses on local changes). The branch is kept.
+      # The item is only deleted when the workspace is gone, so it can be
+      # retried.
+      workspace="$(item_field "$key" workspace)"
+      if [[ -n "$workspace" && -d "$workspace" ]]; then
+        if [[ "$workspace" == "$WORKSPACES"/* ]]; then
+          rm -rf "$workspace"
+        else
+          if [[ "$(kind_of "$key")" == pr ]]; then
+            parse_pr_key "$key"
+            repo="$PR_REPO"
+          else
+            repo="$(item_field "$key" repo)"
+          fi
+          git -C "$FZFTASKS_GITHUB_DIR/$repo" worktree remove "$workspace" ||
+            fail "Failed to remove the worktree $workspace (local changes?), the item is kept"
+        fi
+      fi
+      find "$SESSIONS" -type f -name "*_$(session_id "$key").jsonl" -delete
+      rm -f "$NOTIFY/$(session_id "$key")"
+      sql "DELETE FROM items WHERE key = $(q "$key");"
+      ;;
+  esac
+}
+
+usage() {
+  cat <<'EOF'
+fzftasks - Track work items and the pi agents working on them
+
+Usage:
+  fzftasks                browse all items
+  fzftasks start <key>    start a new item: pick a repository (not for PRs and
+                          not when --repo is given), a prompt (or "Track") and
+                          run pi in the background; opens an existing item
+                          instead; new items require --title, --repo sets the
+                          repository (empty for none) and --details - reads the
+                          details from stdin
+  fzftasks open <key>     open the item in Ghostty with an interactive pi on its
+                          session
+  fzftasks done <key>     mark an item as done
+  fzftasks reply <key>    continue a waiting item in the background with a
+                          reply written in $EDITOR
+  fzftasks reopen <key>   move a done item back to waiting
+  fzftasks new            create an ad-hoc item in $EDITOR, optionally in a
+                          worktree of a repository
+
+Track work items (pull requests, Jira work items, alerts and ad-hoc tasks) and
+the pi agents working on them. Each item has its own pi session and workspace (a
+git worktree or a scratch directory). Agents run in the background; when they
+finish, the item moves to waiting and can be opened in Ghostty to continue the
+session.
+
+Keybindings:
+  enter  : start a todo item (pick a prompt), open all other items
+  alt-s  : switch the preview between summary and session transcript
+  alt-v  : view the item in its source (fzfgh view, ...); does nothing for
+           ad-hoc items
+  alt-d  : mark item as done
+  alt-r  : continue a waiting item in the background with a reply
+  alt-w  : move a done item back to waiting
+  alt-x  : delete a done item, its session and workspace
+  alt-n  : new ad-hoc item
+  ctrl-r : reload list (the list also reloads automatically, see
+           FZFTASKS_REFRESH_INTERVAL)
+  ctrl-p : toggle preview
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  ctrl-f : scroll preview half page down
+  ctrl-b : scroll preview half page up
+  home   : scroll preview to top
+  end    : scroll preview to bottom
+  alt-h  : show help
+
+Environment:
+  FZFTASKS_STATE_DIR        : database, log, sessions, workspaces and
+                              notifications (default: ~/.local/state/fzftasks)
+  FZFTASKS_CONFIG_DIR       : directory with the prompt templates in
+                              prompts/*.md (default: ~/.config/fzftasks)
+  FZFTASKS_GITHUB_DIR       : local clones as <dir>/<owner>/<repo>
+                              (default: ~/Documents/GitHub)
+  FZFTASKS_WORKTREE_DIR     : worktrees as <dir>/<owner>/<repo>/<branch>
+                              (default: ~/.worktrees)
+  FZFTASKS_PI               : pi binary (default: pi)
+  FZFTASKS_REFRESH_INTERVAL : seconds between automatic reloads of the list
+                              (default: 10)
+EOF
+}
+
+cmd_pick() {
+  init
+  # Only runs that finish while the picker is open are notified.
+  rm -f "$NOTIFY"/*
+  clear
+  "$SCRIPT" __list | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 2 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --track \
+    --id-nth 1 \
+    --prompt "$ICON_TASKS Tasks: " \
+    --border rounded \
+    --border-label " $ICON_TASKS fzftasks " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "alt-s:transform($SCRIPT __preview-toggle)" \
+    --bind "ctrl-r:reload-sync($SCRIPT __list)+refresh-preview" \
+    --bind "every($FZFTASKS_REFRESH_INTERVAL):reload-sync($SCRIPT __list)+refresh-preview" \
+    --bind "enter:execute($SCRIPT start {1})+reload-sync($SCRIPT __list)" \
+    --bind "alt-v:execute($SCRIPT __action view {1})" \
+    --bind "alt-d:execute-silent($SCRIPT done {1})+reload-sync($SCRIPT __list)" \
+    --bind "alt-r:execute($SCRIPT reply {1})+reload-sync($SCRIPT __list)" \
+    --bind "alt-w:execute-silent($SCRIPT reopen {1})+reload-sync($SCRIPT __list)" \
+    --bind "alt-x:execute($SCRIPT __action delete {1})+reload-sync($SCRIPT __list)" \
+    --bind "alt-n:execute($SCRIPT new)+reload-sync($SCRIPT __list)" \
+    --preview-window "right:65%" \
+    --preview "$SCRIPT __preview {1}"
+}
+
+case "${1:-}" in
+  "") cmd_pick ;;
+  start)
+    shift
+    [[ -n "$1" ]] || exit 0
+    cmd_start "$@"
+    ;;
+  open) cmd_open "$2" ;;
+  done) cmd_done "$2" ;;
+  reply) cmd_reply "$2" ;;
+  reopen) cmd_reopen "$2" ;;
+  new) cmd_new ;;
+  __list) cmd_list ;;
+  __preview)
+    shift
+    cmd_preview "$@"
+    ;;
+  __preview-toggle) cmd_preview_toggle ;;
+  __run)
+    shift
+    cmd_run "$@"
+    ;;
+  __action)
+    shift
+    cmd_action "$@"
+    ;;
+  -h | --help | help) usage ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
