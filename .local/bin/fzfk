@@ -9,8 +9,13 @@ SCRIPT="$(realpath "$0")"
 # ---------- Action handlers ----------
 #
 # Called recursively from fzf bindings as:
-#   fzfk __action <action> <resource> <namespace_or_-> <name>
-#   fzfk __action delete <resource> <all_ns> <fixed_ns_or_-> <row>...
+#   fzfk __action [<cluster_flag>...] -- <action> <resource> <namespace_or_-> <name>
+#   fzfk __action [<cluster_flag>...] -- delete <resource> <all_ns> <fixed_ns_or_-> <row>...
+#
+# The optional <cluster_flag>s (e.g. --context=prod, --kubeconfig=/path) are
+# the cluster selection flags given to fzfk, normalized to the --flag=value
+# form. They are passed to every kubectl call, so actions operate on the same
+# cluster as the listing.
 #
 # The sentinel "-" is used for the namespace when no namespace was given
 # (i.e. the current kubectl context's namespace should be used). The delete
@@ -19,6 +24,12 @@ SCRIPT="$(realpath "$0")"
 
 if [[ "$1" == "__action" ]]; then
   shift
+  cluster_args=()
+  while [[ $# -gt 0 && "$1" != "--" ]]; do
+    cluster_args+=("$1")
+    shift
+  done
+  [[ "$1" == "--" ]] && shift
   action="$1"
   resource="$2"
 
@@ -76,7 +87,7 @@ if [[ "$1" == "__action" ]]; then
       del_name="${target#*$'\t'}"
       del_ns_arg=()
       [[ -n "$del_ns" && "$del_ns" != "-" ]] && del_ns_arg=(-n "$del_ns")
-      kubectl delete "${del_ns_arg[@]}" "${force_args[@]}" "$resource" "$del_name"
+      kubectl "${cluster_args[@]}" delete "${del_ns_arg[@]}" "${force_args[@]}" "$resource" "$del_name"
     done
     read -n 1 -s -r -p "Press any key to continue..."
     exit 0
@@ -92,20 +103,20 @@ if [[ "$1" == "__action" ]]; then
 
   case "$action" in
     describe)
-      kubectl describe "${ns_arg[@]}" "$resource" "$name" | nvim -R -
+      kubectl "${cluster_args[@]}" describe "${ns_arg[@]}" "$resource" "$name" | nvim -R -
       ;;
 
     yaml)
-      kubectl get "${ns_arg[@]}" "$resource" "$name" -o yaml | nvim -R -
+      kubectl "${cluster_args[@]}" get "${ns_arg[@]}" "$resource" "$name" -o yaml | nvim -R -
       ;;
 
     edit)
-      kubectl edit "${ns_arg[@]}" "$resource" "$name"
+      kubectl "${cluster_args[@]}" edit "${ns_arg[@]}" "$resource" "$name"
       read -n 1 -s -r -p "Press any key to continue..."
       ;;
 
     logs)
-      containers=$(kubectl get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].name} {.spec.template.spec.containers[*].name} {.spec.initContainers[*].name} {.spec.template.spec.initContainers[*].name}' 2>/dev/null \
+      containers=$(kubectl "${cluster_args[@]}" get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].name} {.spec.template.spec.containers[*].name} {.spec.initContainers[*].name} {.spec.template.spec.initContainers[*].name}' 2>/dev/null \
         | tr ' ' '\n' | awk 'NF && !seen[$0]++')
       if [[ -z "$containers" ]]; then
         echo "No containers found for $resource/$name"
@@ -123,11 +134,11 @@ if [[ "$1" == "__action" ]]; then
         --border-label " 󰆧 Logs $resource/$name " \
         --border-label-pos center)
       [[ -z "$container" ]] && exit 0
-      kubectl logs "${ns_arg[@]}" "$resource/$name" -c "$container" --tail=500 -f
+      kubectl "${cluster_args[@]}" logs "${ns_arg[@]}" "$resource/$name" -c "$container" --tail=500 -f
       ;;
 
     exec)
-      containers=$(kubectl get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].name} {.spec.template.spec.containers[*].name}' 2>/dev/null \
+      containers=$(kubectl "${cluster_args[@]}" get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].name} {.spec.template.spec.containers[*].name}' 2>/dev/null \
         | tr ' ' '\n' | awk 'NF && !seen[$0]++')
       if [[ -z "$containers" ]]; then
         echo "No containers found for $resource/$name"
@@ -145,12 +156,12 @@ if [[ "$1" == "__action" ]]; then
         --border-label " 󰆧 Exec $resource/$name " \
         --border-label-pos center)
       [[ -z "$container" ]] && exit 0
-      kubectl exec "${ns_arg[@]}" -it "$resource/$name" -c "$container" -- \
+      kubectl "${cluster_args[@]}" exec "${ns_arg[@]}" -it "$resource/$name" -c "$container" -- \
         sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
       ;;
 
     portforward)
-      ports=$(kubectl get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].ports[*].containerPort} {.spec.template.spec.containers[*].ports[*].containerPort} {.spec.ports[*].port}' 2>/dev/null \
+      ports=$(kubectl "${cluster_args[@]}" get "${ns_arg[@]}" "$resource" "$name" -o jsonpath='{.spec.containers[*].ports[*].containerPort} {.spec.template.spec.containers[*].ports[*].containerPort} {.spec.ports[*].port}' 2>/dev/null \
         | tr ' ' '\n' | awk 'NF && !seen[$0]++' | sort -n)
       if [[ -z "$ports" ]]; then
         echo "No ports found for $resource/$name"
@@ -187,7 +198,7 @@ if [[ "$1" == "__action" ]]; then
       local_port="$(printf '%s\n' "$local_port" | head -1)"
       local_port=${local_port:-$port}
       echo "Forwarding $resource/$name $local_port -> $port (Ctrl-C to stop)"
-      kubectl port-forward "${ns_arg[@]}" "$resource/$name" "$local_port:$port"
+      kubectl "${cluster_args[@]}" port-forward "${ns_arg[@]}" "$resource/$name" "$local_port:$port"
       read -n 1 -s -r -p "Press any key to continue..."
       ;;
 
@@ -216,6 +227,7 @@ Examples:
   fzfk pods -A --watch
   fzfk pods -n kube-system
   fzfk deployments -l app=foo
+  fzfk pods --context prod -A
 
 Keybindings:
   enter  : describe the resource under the cursor
@@ -256,10 +268,15 @@ KUBECTL_ARGS=("$@")
 # intercepted here to control fzfk's own watch (auto-refresh) mode and are
 # stripped from the arguments forwarded to kubectl (kubectl get is run once per
 # refresh, so its own --watch must never be passed through).
+#
+# Cluster selection flags are collected in CLUSTER_ARGS (normalized to the
+# --flag=value form) so the preview and the action handlers target the same
+# cluster as the listing; they are also kept in the arguments for kubectl get.
 NAMESPACE=""
 ALL_NS=false
 WATCH=false
 FILTERED_ARGS=()
+CLUSTER_ARGS=()
 i=0
 while [[ $i -lt ${#KUBECTL_ARGS[@]} ]]; do
   arg="${KUBECTL_ARGS[$i]}"
@@ -282,6 +299,19 @@ while [[ $i -lt ${#KUBECTL_ARGS[@]} ]]; do
       ;;
     --namespace=*)
       NAMESPACE="${arg#*=}"
+      ;;
+    --context|--kubeconfig|--cluster|--user|-s|--server)
+      flag="$arg"
+      [[ "$flag" == "-s" ]] && flag="--server"
+      FILTERED_ARGS+=("$arg")
+      i=$((i+1))
+      CLUSTER_ARGS+=("$flag=${KUBECTL_ARGS[$i]}")
+      FILTERED_ARGS+=("${KUBECTL_ARGS[$i]}")
+      i=$((i+1))
+      continue
+      ;;
+    --context=*|--kubeconfig=*|--cluster=*|--user=*|--server=*)
+      CLUSTER_ARGS+=("$arg")
       ;;
   esac
   FILTERED_ARGS+=("$arg")
@@ -374,16 +404,23 @@ WATCH_BIND="every($FZFK_REFRESH_INTERVAL):transform:[ \"\$(cat '$WATCH_STATE_FIL
 # back on also triggers an immediate reload so the list is up to date at once.
 WATCH_TOGGLE_BIND="alt-w:transform:if [ \"\$(cat '$WATCH_STATE_FILE')\" = on ]; then printf off >'$WATCH_STATE_FILE'; echo 'change-border-label( $WATCH_LABEL_OFF)'; else printf on >'$WATCH_STATE_FILE'; echo 'change-border-label( $WATCH_LABEL_ON)+reload-sync($LIST_CMD_RUN)'; fi"
 
-# Build the per-row preview command (kubectl describe under the cursor).
-if $ALL_NS; then
-  PREVIEW_CMD="kubectl describe $RESOURCE -n {1} {2}"
-elif [[ -n "$NAMESPACE" ]]; then
-  PREVIEW_CMD="kubectl describe $RESOURCE -n $NAMESPACE {1}"
-else
-  PREVIEW_CMD="kubectl describe $RESOURCE {1}"
+# Cluster selection flags, shell-quoted for embedding in the fzf command
+# strings below (empty when none were given).
+CLUSTER_ARGS_STR=""
+if [[ ${#CLUSTER_ARGS[@]} -gt 0 ]]; then
+  CLUSTER_ARGS_STR="$(printf ' %q' "${CLUSTER_ARGS[@]}")"
 fi
 
-ACTION="$SCRIPT __action"
+# Build the per-row preview command (kubectl describe under the cursor).
+if $ALL_NS; then
+  PREVIEW_CMD="kubectl$CLUSTER_ARGS_STR describe $RESOURCE -n {1} {2}"
+elif [[ -n "$NAMESPACE" ]]; then
+  PREVIEW_CMD="kubectl$CLUSTER_ARGS_STR describe $RESOURCE -n $NAMESPACE {1}"
+else
+  PREVIEW_CMD="kubectl$CLUSTER_ARGS_STR describe $RESOURCE {1}"
+fi
+
+ACTION="$SCRIPT __action$CLUSTER_ARGS_STR --"
 
 clear
 fzf \
