@@ -210,16 +210,242 @@ if [[ "$1" == "__action" ]]; then
   exit 0
 fi
 
+# ---------- Issues listing ----------
+#
+# Called as the list command in --issues mode (initially and on every reload):
+#   fzfk __issues <kind> <all_ns> [kubectl get args...]
+#
+# Fetches the resources once as JSON and prints only the unhealthy ones as an
+# aligned table, with the same leading columns as "kubectl get" (NAME, or
+# NAMESPACE + NAME with -A), so all fzf bindings work unchanged. <kind> is one
+# of the canonical kinds returned by issues_kind below. When nothing is
+# unhealthy a single message line is printed, which fzf shows as the header.
+#
+# The pod STATUS / READY / RESTARTS columns approximate kubectl's own printer
+# (init and sidecar containers, waiting / terminated reasons, Terminating);
+# whether a pod is reported does not depend on that approximation.
+
+if [[ "$1" == "__issues" ]]; then
+  kind="$2"
+  all_ns="$3"
+  shift 3
+
+  # Leave stderr alone: the caller merges it into the list, so kubectl errors
+  # are shown as the header instead of a misleading "no issues" message.
+  json="$(kubectl get "$kind" "$@" -o json)" || exit 1
+
+  # shellcheck disable=SC2016
+  filter='
+    # Kubernetes timestamp -> epoch seconds (fractional seconds stripped).
+    def ts: if . == null then null else sub("\\.[0-9]+"; "") | fromdateiso8601 end;
+
+    # Kubernetes timestamp -> human readable age, like kubectl HumanDuration.
+    def age:
+      if . == null then "<unknown>" else
+      ((now - ts) | floor) as $s
+      | if $s < -1 then "<invalid>"
+        elif $s < 0 then "0s"
+        elif $s < 120 then "\($s)s"
+        else (($s / 60) | floor) as $m
+        | if $m < 10 then (if $s % 60 == 0 then "\($m)m" else "\($m)m\($s % 60)s" end)
+          elif $m < 180 then "\($m)m"
+          else (($m / 60) | floor) as $h
+          | if $h < 8 then (if $m % 60 == 0 then "\($h)h" else "\($h)h\($m % 60)m" end)
+            elif $h < 48 then "\($h)h"
+            else (($h / 24) | floor) as $d
+            | if $h < 192 then (if $h % 24 == 0 then "\($d)d" else "\($d)d\($h % 24)h" end)
+              elif $h < 17520 then "\($d)d"
+              elif $h < 70080 then (if $d % 365 == 0 then "\(($d / 365) | floor)y" else "\(($d / 365) | floor)y\($d % 365)d" end)
+              else "\(($d / 365) | floor)y" end
+            end
+          end
+        end
+      end;
+
+    # Reason of a terminated container state, like kubectl.
+    def treason:
+      if (.reason // "") != "" then .reason
+      elif (.signal // 0) != 0 then "Signal:\(.signal)"
+      else "ExitCode:\(.exitCode // 0)" end;
+
+    # Pods: not Ready (and not Completed), or a container that restarted at
+    # least $threshold times and crashed within the last $window seconds.
+    def pod_row:
+      . as $p
+      | [($p.spec.initContainers // [])[] | select(.restartPolicy == "Always") | .name] as $sidecars
+      | ($p.status.initContainerStatuses // []) as $ics
+      | ($p.status.containerStatuses // []) as $cs
+      | ($p.status.phase // "") as $phase
+      | any($p.status.conditions[]?; .type == "Ready" and .status == "True") as $ready
+      | any($p.status.conditions[]?; .type == "Initialized" and .status == "True") as $initialized
+      | (if ($p.status.reason // "") != "" then $p.status.reason else $phase end) as $base
+      | (if any($p.status.conditions[]?; .type == "PodScheduled" and .reason == "SchedulingGated")
+         then "SchedulingGated" else $base end) as $base
+      | ([$ics | to_entries[] | .key as $i | .value as $c
+          | ($sidecars | any(. == $c.name)) as $sidecar
+          | if $c.state.terminated != null and $c.state.terminated.exitCode == 0 then empty
+            elif $sidecar and $c.started == true then empty
+            elif $c.state.terminated != null then "Init:" + ($c.state.terminated | treason)
+            elif ($c.state.waiting.reason // "") != "" and $c.state.waiting.reason != "PodInitializing"
+              then "Init:" + $c.state.waiting.reason
+            else "Init:\($i)/\($p.spec.initContainers | length)" end
+        ] | .[0]) as $init_reason
+      | (($init_reason == null) or $initialized) as $containers_started
+      | (if $containers_started then
+           ([$cs[]
+             | if (.state.waiting.reason // "") != "" then .state.waiting.reason
+               elif .state.terminated != null then (.state.terminated | treason)
+               else empty end
+           ] | .[0] // ($init_reason // $base)) as $reason
+           | ([$cs[]
+               | select((.state.waiting.reason // "") == "" and .state.terminated != null and .state.terminated.exitCode != 0)
+               | .state.terminated | treason
+             ] | .[0] // "") as $error_reason
+           | any($cs[]; .ready == true and .state.running != null) as $has_running
+           | if $reason != "Completed" then $reason
+             elif $has_running and $ready then "Running"
+             elif $error_reason != "" then $error_reason
+             elif $has_running then "NotReady"
+             else $reason end
+         else $init_reason end) as $status
+      | (if $p.metadata.deletionTimestamp != null and $p.status.reason == "NodeLost" then "Unknown"
+         elif $p.metadata.deletionTimestamp != null and $phase != "Failed" and $phase != "Succeeded" then "Terminating"
+         else $status end) as $status
+      | select(($phase == "Succeeded" and $status == "Completed") | not)
+      | (($ics + $cs)
+         | any(.[]; (.restartCount // 0) >= $threshold
+             and .lastState.terminated != null
+             and (.lastState.terminated.exitCode // 0) != 0
+             and ((.lastState.terminated.finishedAt | ts) // 0) > now - $window)
+        ) as $recent_crash
+      | select(($ready | not) or ($threshold > 0 and $recent_crash))
+      | (if $containers_started
+         then [($ics[] | select(.name as $n | $sidecars | any(. == $n))), $cs[]]
+         else $ics end) as $counted
+      | ([$counted[] | .restartCount // 0] | add // 0) as $restarts
+      | ([$counted[] | .lastState.terminated.finishedAt // empty] | max) as $last_restart
+      | ([$ics[] | select(.name as $n | $sidecars | any(. == $n)) | select(.started == true and .ready == true)] | length) as $ready_sidecars
+      | ([$cs[] | select(.ready == true and .state.running != null)] | length) as $ready_containers
+      | [
+          "\($ready_sidecars + $ready_containers)/\(($p.spec.containers | length) + ($sidecars | length))",
+          $status,
+          (if $restarts != 0 and $last_restart != null then "\($restarts) (\($last_restart | age) ago)" else "\($restarts)" end),
+          (.metadata.creationTimestamp | age)
+        ];
+
+    # Jobs: a Failed=True condition (BackoffLimitExceeded, DeadlineExceeded,
+    # PodFailurePolicy, MaxFailedIndexesExceeded, ...).
+    def job_row:
+      ([.status.conditions[]? | select(.type == "Failed" and .status == "True")] | .[0]) as $c
+      | select($c != null)
+      | [$c.reason, (.metadata.creationTimestamp | age), $c.message];
+
+    # Deployments / StatefulSets: ready, updated, available or current
+    # replicas differ from the desired replicas.
+    def replicas_row:
+      (.spec.replicas // 1) as $desired
+      | (.status.readyReplicas // 0) as $ready
+      | (.status.updatedReplicas // 0) as $updated
+      | (.status.availableReplicas // 0) as $available
+      | select([$ready, $updated, $available, (.status.replicas // 0)] | any(. != $desired))
+      | ["\($ready)/\($desired)", $updated, $available, (.metadata.creationTimestamp | age)];
+
+    # DaemonSets: current, ready, updated or available pods differ from the
+    # desired number, or pods run on nodes they should not run on.
+    def daemonset_row:
+      .status as $st
+      | ($st.desiredNumberScheduled // 0) as $desired
+      | select(
+          ([($st.currentNumberScheduled // 0), ($st.numberReady // 0), ($st.updatedNumberScheduled // 0), ($st.numberAvailable // 0)] | any(. != $desired))
+          or ($st.numberMisscheduled // 0) > 0)
+      | [$desired, ($st.currentNumberScheduled // 0), ($st.numberReady // 0), ($st.updatedNumberScheduled // 0), ($st.numberAvailable // 0), (.metadata.creationTimestamp | age)];
+
+    def kind_headers: {
+      pods: ["READY", "STATUS", "RESTARTS", "AGE"],
+      jobs: ["REASON", "AGE", "MESSAGE"],
+      deployments: ["READY", "UP-TO-DATE", "AVAILABLE", "AGE"],
+      statefulsets: ["READY", "UP-TO-DATE", "AVAILABLE", "AGE"],
+      daemonsets: ["DESIRED", "CURRENT", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"]
+    }[$kind];
+
+    def kind_row:
+      if $kind == "pods" then pod_row
+      elif $kind == "jobs" then job_row
+      elif $kind == "daemonsets" then daemonset_row
+      else replicas_row end;
+
+    def id_cells: (if $allns then [.metadata.namespace] else [] end) + [.metadata.name];
+
+    def cell: if . == null or . == "" then "<none>" else tostring end;
+
+    [(if has("items") then .items[] else . end)
+     | id_cells + kind_row
+     | map(cell)
+    ] as $rows
+    | if ($rows | length) == 0 then "No \($kind) with issues found."
+      else ((if $allns then ["NAMESPACE", "NAME"] else ["NAME"] end) + kind_headers), $rows[] | @tsv
+      end
+  '
+
+  printf '%s' "$json" | jq -r \
+    --arg kind "$kind" \
+    --argjson allns "$all_ns" \
+    --argjson threshold "${FZFK_ISSUES_RESTART_THRESHOLD:-3}" \
+    --argjson window "${FZFK_ISSUES_RESTART_WINDOW:-86400}" \
+    "$filter" \
+  | awk -F '\t' '
+      {
+        nf[NR] = NF
+        for (i = 1; i <= NF; i++) {
+          cell[NR, i] = $i
+          if (length($i) > width[i]) width[i] = length($i)
+        }
+      }
+      END {
+        for (r = 1; r <= NR; r++) {
+          line = ""
+          for (i = 1; i < nf[r]; i++) line = line sprintf("%-" (width[i] + 3) "s", cell[r, i])
+          print line cell[r, nf[r]]
+        }
+      }'
+  exit 0
+fi
+
+# Canonical kind for --issues mode, or failure when the resource is not
+# supported.
+issues_kind() {
+  case "$1" in
+    pods|pod|po) echo "pods" ;;
+    jobs|job|jobs.batch|job.batch) echo "jobs" ;;
+    deployments|deployment|deploy|deployments.apps|deployment.apps) echo "deployments" ;;
+    statefulsets|statefulset|sts|statefulsets.apps|statefulset.apps) echo "statefulsets" ;;
+    daemonsets|daemonset|ds|daemonsets.apps|daemonset.apps) echo "daemonsets" ;;
+    *) return 1 ;;
+  esac
+}
+
 # ---------- Main mode ----------
 
 usage() {
   cat <<'EOF'
 fzfk - Fuzzy Finder for Kubernetes
 
-Usage: fzfk <resource> [kubectl get args...]
+Usage: fzfk <resource> [--issues] [kubectl get args...]
 
 Browse Kubernetes resources with fzf, previewing their details and performing
 common actions, like describe, edit, delete, logs, exec, and port-forward.
+
+With --issues only unhealthy resources are listed (requires jq). Supported
+resources and when they are listed:
+  pods          : not Ready (and not Completed), or a container restarted at
+                  least FZFK_ISSUES_RESTART_THRESHOLD times and crashed within
+                  the last FZFK_ISSUES_RESTART_WINDOW seconds
+  jobs          : failed (e.g. BackoffLimitExceeded, DeadlineExceeded)
+  deployments,
+  statefulsets  : ready, up-to-date or available replicas differ from the
+                  desired replicas
+  daemonsets    : current, ready, up-to-date or available pods differ from the
+                  desired number, or pods are misscheduled
 
 Examples:
   fzfk pods
@@ -228,6 +454,8 @@ Examples:
   fzfk pods -n kube-system
   fzfk deployments -l app=foo
   fzfk pods --context prod -A
+  fzfk pods -A --issues -w
+  fzfk deployments --issues -n kube-system
 
 Keybindings:
   enter  : describe the resource under the cursor
@@ -250,7 +478,11 @@ Keybindings:
   alt-h  : show help
 
 Environment:
-  FZFK_REFRESH_INTERVAL : seconds between watch refreshes (default: 5)
+  FZFK_REFRESH_INTERVAL         : seconds between watch refreshes (default: 5)
+  FZFK_ISSUES_RESTART_THRESHOLD : minimum restarts for a Ready pod with a recent
+                                  crash to be listed; 0 disables (default: 3)
+  FZFK_ISSUES_RESTART_WINDOW    : seconds a crash counts as recent
+                                  (default: 86400)
 EOF
 }
 
@@ -275,6 +507,7 @@ KUBECTL_ARGS=("$@")
 NAMESPACE=""
 ALL_NS=false
 WATCH=false
+ISSUES=false
 FILTERED_ARGS=()
 CLUSTER_ARGS=()
 i=0
@@ -283,6 +516,11 @@ while [[ $i -lt ${#KUBECTL_ARGS[@]} ]]; do
   case "$arg" in
     -w|--watch)
       WATCH=true
+      i=$((i+1))
+      continue
+      ;;
+    --issues)
+      ISSUES=true
       i=$((i+1))
       continue
       ;;
@@ -317,8 +555,20 @@ while [[ $i -lt ${#KUBECTL_ARGS[@]} ]]; do
   FILTERED_ARGS+=("$arg")
   i=$((i+1))
 done
-# Arguments forwarded to kubectl, with fzfk's own -w / --watch removed.
+# Arguments forwarded to kubectl, with fzfk's own -w / --watch / --issues
+# removed.
 KUBECTL_ARGS=("${FILTERED_ARGS[@]}")
+
+if $ISSUES; then
+  if ! ISSUES_KIND="$(issues_kind "$RESOURCE")"; then
+    echo "fzfk: --issues is not supported for '$RESOURCE' (supported: pods, jobs, deployments, statefulsets, daemonsets)" >&2
+    exit 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "fzfk: --issues requires jq" >&2
+    exit 1
+  fi
+fi
 
 # Determine field positions used by the fzf bindings.
 #   - With -A / --all-namespaces the kubectl output starts with the
@@ -365,6 +615,16 @@ LIST_CMD="kubectl get $RESOURCE ${KUBECTL_ARGS[*]}"
 # display in the border label.
 LIST_CMD_RUN="$LIST_CMD 2>&1"
 
+# In --issues mode the list comes from the __issues handler instead, which
+# prints the unhealthy resources in the same column layout. The label keeps
+# showing the underlying kubectl command, marked as filtered.
+LIST_LABEL="$LIST_CMD"
+LIST_MODE=""
+if $ISSUES; then
+  LIST_CMD_RUN="$(printf '%q ' "$SCRIPT" __issues "$ISSUES_KIND" "$ALL_NS" "${KUBECTL_ARGS[@]}")2>&1"
+  LIST_MODE="issues, "
+fi
+
 # Interval (seconds) between watch refreshes of the listed resources
 # (override via FZFK_REFRESH_INTERVAL).
 FZFK_REFRESH_INTERVAL="${FZFK_REFRESH_INTERVAL:-5}"
@@ -385,8 +645,8 @@ WATCH_STATE_FILE="$(mktemp -t fzfk_watch.XXXXXX)"
 printf '%s' "$WATCH_INITIAL" >"$WATCH_STATE_FILE"
 trap 'rm -f "$WATCH_STATE_FILE"' EXIT
 
-WATCH_LABEL_ON="󱃾 $LIST_CMD  (watch: on) "
-WATCH_LABEL_OFF="󱃾 $LIST_CMD  (watch: off) "
+WATCH_LABEL_ON="󱃾 $LIST_LABEL  (${LIST_MODE}watch: on) "
+WATCH_LABEL_OFF="󱃾 $LIST_LABEL  (${LIST_MODE}watch: off) "
 if $WATCH; then
   WATCH_LABEL_INITIAL="$WATCH_LABEL_ON"
 else
