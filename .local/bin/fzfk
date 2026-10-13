@@ -6,10 +6,23 @@
 
 SCRIPT="$(realpath "$0")"
 
+# Why a resource of the given --issues kind is listed, for the details handed
+# to fzftasks (see the "task" action).
+issues_rule() {
+  case "$1" in
+    pods) echo "not Ready, or a container crashed recently after repeated restarts" ;;
+    jobs) echo "failed" ;;
+    deployments | statefulsets) echo "ready, up-to-date or available replicas differ from the desired replicas" ;;
+    daemonsets) echo "current, ready, up-to-date or available pods differ from the desired number, or pods are misscheduled" ;;
+    *) echo "unhealthy" ;;
+  esac
+}
+
 # ---------- Action handlers ----------
 #
 # Called recursively from fzf bindings as:
 #   fzfk __action [<cluster_flag>...] -- <action> <resource> <namespace_or_-> <name>
+#   fzfk __action [<cluster_flag>...] -- task <resource> <namespace_or_-> <name> <issues_kind_or_->
 #   fzfk __action [<cluster_flag>...] -- delete <resource> <all_ns> <fixed_ns_or_-> <row>...
 #
 # The optional <cluster_flag>s (e.g. --context=prod, --kubeconfig=/path) are
@@ -200,6 +213,73 @@ if [[ "$1" == "__action" ]]; then
       echo "Forwarding $resource/$name $local_port -> $port (Ctrl-C to stop)"
       kubectl "${cluster_args[@]}" port-forward "${ns_arg[@]}" "$resource/$name" "$local_port:$port"
       read -n 1 -s -r -p "Press any key to continue..."
+      ;;
+
+    task)
+      # Hand the resource to fzftasks under the key
+      #   k8s:<Kind>[.<group>]/[<namespace>/]<name>@<context>
+      # The kind and namespace are read from the object itself, so the key does
+      # not depend on how the resource was typed (po, pods, ...), the context
+      # default namespace ("-") is resolved, and cluster-scoped resources have
+      # no namespace. The context is the --context flag, or the current context
+      # at hand-off time. The details (kubectl flags pinned to the context and
+      # "kubectl describe") are stored as the item's snapshot. The optional 5th
+      # argument is the --issues kind the resource was listed by ("-" if none).
+      issues="$5"
+      if ! command -v fzftasks >/dev/null 2>&1; then
+        echo "fzftasks not found"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      if ! info="$(kubectl "${cluster_args[@]}" get "${ns_arg[@]}" "$resource" "$name" \
+        -o jsonpath='{.apiVersion}{"\t"}{.kind}{"\t"}{.metadata.namespace}' 2>&1)"; then
+        echo "$info"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+      IFS=$'\t' read -r api_version kind obj_ns <<<"$info"
+      group=""
+      [[ "$api_version" == */* ]] && group="${api_version%/*}"
+      kind_ref="$kind${group:+.$group}"
+
+      context=""
+      for a in "${cluster_args[@]}"; do
+        [[ "$a" == --context=* ]] && context="${a#--context=}"
+      done
+      kubectl_flags=("${cluster_args[@]}")
+      if [[ -z "$context" ]]; then
+        context="$(kubectl "${cluster_args[@]}" config current-context 2>/dev/null)"
+        kubectl_flags=("--context=$context" "${cluster_args[@]}")
+      fi
+      if [[ -z "$kind" || -z "$context" ]]; then
+        echo "Could not determine the kind or context of $resource/$name"
+        read -n 1 -s -r -p "Press any key to continue..."
+        exit 0
+      fi
+
+      if [[ -n "$obj_ns" ]]; then
+        key="k8s:$kind_ref/$obj_ns/$name@$context"
+        title="$kind $obj_ns/$name ($context)"
+        obj_ns_arg=(-n "$obj_ns")
+      else
+        key="k8s:$kind_ref/$name@$context"
+        title="$kind $name ($context)"
+        obj_ns_arg=()
+      fi
+
+      {
+        printf -- '- **Context:** `%s`\n' "$context"
+        printf -- '- **kubectl flags:** `%s`\n' "$(printf '%q ' "${kubectl_flags[@]}" | sed 's/ $//')"
+        printf -- '- **Resource:** `%s`\n' "$kind_ref"
+        [[ -n "$obj_ns" ]] && printf -- '- **Namespace:** `%s`\n' "$obj_ns"
+        printf -- '- **Name:** `%s`\n' "$name"
+        if [[ -n "$issues" && "$issues" != "-" ]]; then
+          printf -- '- **Listed by:** `fzfk --issues` (%s)\n' "$(issues_rule "$issues")"
+        fi
+        printf '\n## kubectl describe\n\n```text\n'
+        kubectl "${kubectl_flags[@]}" describe "${obj_ns_arg[@]}" "$kind_ref" "$name" 2>&1
+        printf '```\n'
+      } | fzftasks start "$key" --title "$title" --details -
       ;;
 
     *)
@@ -458,24 +538,25 @@ Examples:
   fzfk deployments --issues -n kube-system
 
 Keybindings:
-  enter  : describe the resource under the cursor
-  alt-p  : port-forward
-  alt-x  : exec into container
-  alt-l  : show container logs
-  alt-y  : open manifest
-  alt-e  : edit manifest
-  alt-d  : delete marked resources; the confirmation offers a force option
-           (--grace-period=0 --force)
-  alt-w  : toggle watch mode (auto-refresh) on/off
-  ctrl-r : reload list
-  ctrl-p : toggle preview
-  ctrl-d : scroll half page down
-  ctrl-u : scroll half page up
-  ctrl-f : scroll preview half page down
-  ctrl-b : scroll preview half page up
-  home   : scroll preview to top
-  end    : scroll preview to bottom
-  alt-h  : show help
+  enter     : describe the resource under the cursor
+  alt-p     : port-forward
+  alt-x     : exec into container
+  alt-l     : show container logs
+  alt-y     : open manifest
+  alt-e     : edit manifest
+  alt-enter : hand resource to fzftasks
+  alt-d     : delete marked resources; the confirmation offers a force option
+              (--grace-period=0 --force)
+  alt-w     : toggle watch mode (auto-refresh) on/off
+  ctrl-r    : reload list
+  ctrl-p    : toggle preview
+  ctrl-d    : scroll half page down
+  ctrl-u    : scroll half page up
+  ctrl-f    : scroll preview half page down
+  ctrl-b    : scroll preview half page up
+  home      : scroll preview to top
+  end       : scroll preview to bottom
+  alt-h     : show help
 
 Environment:
   FZFK_REFRESH_INTERVAL         : seconds between watch refreshes (default: 5)
@@ -713,6 +794,7 @@ fzf \
   --bind "alt-l:execute($ACTION logs $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-y:execute($ACTION yaml $RESOURCE $NS_FIELD $NAME_FIELD)" \
   --bind "alt-e:execute($ACTION edit $RESOURCE $NS_FIELD $NAME_FIELD)" \
+  --bind "alt-enter:execute($ACTION task $RESOURCE $NS_FIELD $NAME_FIELD ${ISSUES_KIND:--})" \
   --bind "alt-d:execute($ACTION delete $RESOURCE $ALL_NS $NS_TOKEN {+})+reload-sync($LIST_CMD_RUN)" \
   --preview-window "right:65%" \
   --preview "$PREVIEW_CMD" \

@@ -10,6 +10,11 @@
 #   pr:<owner>/<repo>#<number>      GitHub pull request
 #   jira:<KEY>                      Jira work item
 #   alert:<alertmanager>:<fp>       Alertmanager alert (name and fingerprint)
+#   k8s:<Kind>[.<group>]/[<namespace>/]<name>@<context>
+#                                   Kubernetes resource (handed over by fzfk);
+#                                   the namespace is omitted for cluster-scoped
+#                                   resources, everything after the first "@"
+#                                   is the kubeconfig context
 #   adhoc:<timestamp>-<slug>        ad-hoc task created via "fzftasks new"
 #
 # Every item maps to exactly one pi session (the session id is derived from the
@@ -253,8 +258,8 @@ workspace_pr() {
   WORKSPACE="$wt"
 }
 
-# Ad-hoc, Jira and alert items without a repository work in a scratch
-# directory. With a repository they get a worktree at
+# Ad-hoc, Jira, alert and Kubernetes items without a repository work in a
+# scratch directory. With a repository they get a worktree at
 # "$FZFTASKS_WORKTREE_DIR/<org>/<repo>/<branch>" on a new branch named like the
 # session id (e.g. "adhoc.<timestamp>-<slug>", "jira.CORE-123"), created from
 # the repository's default branch. An existing worktree is reused as is; it is
@@ -312,7 +317,7 @@ prepare_workspace() {
   BASE=""
   case "$(kind_of "$1")" in
     pr) workspace_pr "$1" || return 1 ;;
-    adhoc | jira | alert) workspace_task "$1" || return 1 ;;
+    adhoc | jira | alert | k8s) workspace_task "$1" || return 1 ;;
     *)
       echo "Unsupported item kind: $1"
       return 1
@@ -450,7 +455,7 @@ cmd_start() {
 
   kind="$(kind_of "$key")"
   case "$kind" in
-    pr | adhoc | jira | alert) ;;
+    pr | adhoc | jira | alert | k8s) ;;
     *) fail "Unsupported item kind: $key" ;;
   esac
 
@@ -471,8 +476,9 @@ cmd_start() {
       [[ -n "$title" ]] || die "start: --title is required for new items"
       tmp="$(mktemp "${TMPDIR:-/tmp}/fzftasks.XXXXXX")"
       [[ "$details_stdin" == 1 ]] && cat >"$tmp"
-      # Ad-hoc, Jira and alert items can work in a repository; ask for it
-      # unless the caller passed --repo (an empty value means "no repository").
+      # Ad-hoc, Jira, alert and Kubernetes items can work in a repository; ask
+      # for it unless the caller passed --repo (an empty value means "no
+      # repository").
       if [[ "$repo_given" == 0 && "$kind" != pr ]]; then
         if ! repo="$(choose_repo)"; then
           rm -f "$tmp"
@@ -808,7 +814,7 @@ cmd_preview() {
 }
 
 cmd_action() {
-  local action="$1" key="$2" answer rest title workspace repo
+  local action="$1" key="$2" answer rest title workspace repo ref ctx a b c
   [[ -n "$key" ]] || exit 0
   init
 
@@ -825,6 +831,24 @@ cmd_action() {
         alert)
           rest="${key#alert:}"
           fzfalertmanager view "${rest%:*}" "${rest##*:}"
+          ;;
+        k8s)
+          # "<Kind>[.<group>]/[<namespace>/]<name>@<context>": kind, namespace
+          # and name never contain "@" or "/", so the context is everything
+          # after the first "@". Opens fzfk on the single object (field
+          # selector on the name), with the kind lowercased as kubectl expects
+          # it in resource arguments ("deployment.apps"). Uses the default
+          # kubeconfig.
+          rest="${key#k8s:}"
+          ref="${rest%%@*}"
+          ctx="${rest#*@}"
+          IFS=/ read -r a b c <<<"$ref"
+          a="$(printf '%s' "$a" | tr '[:upper:]' '[:lower:]')"
+          if [[ -n "$c" ]]; then
+            fzfk "$a" --context "$ctx" -n "$b" --field-selector "metadata.name=$c"
+          else
+            fzfk "$a" --context "$ctx" --field-selector "metadata.name=$b"
+          fi
           ;;
         *)
           # Ad-hoc items have no source; their details are in the preview.
@@ -895,17 +919,17 @@ Usage:
   fzftasks new            create an ad-hoc item in $EDITOR, optionally in a
                           worktree of a repository
 
-Track work items (pull requests, Jira work items, alerts and ad-hoc tasks) and
-the pi agents working on them. Each item has its own pi session and workspace (a
-git worktree or a scratch directory). Agents run in the background; when they
-finish, the item moves to waiting and can be opened in Ghostty to continue the
-session.
+Track work items (pull requests, Jira work items, alerts, Kubernetes resources
+and ad-hoc tasks) and the pi agents working on them. Each item has its own pi
+session and workspace (a git worktree or a scratch directory). Agents run in the
+background; when they finish, the item moves to waiting and can be opened in
+Ghostty to continue the session.
 
 Keybindings:
   enter  : start a todo item (pick a prompt), open all other items
   alt-s  : switch the preview between summary and session transcript
-  alt-v  : view the item in its source (fzfgh view, ...); does nothing for
-           ad-hoc items
+  alt-v  : view the item in its source (fzfgh view, fzfk, ...); does nothing
+           for ad-hoc items
   alt-d  : mark item as done
   alt-r  : continue a waiting item in the background with a reply
   alt-w  : move a done item back to waiting
