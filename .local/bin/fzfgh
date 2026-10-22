@@ -1375,13 +1375,31 @@ if [[ "$1" == "__action" ]]; then
         # branch still points at whatever the PR head was back then, so a PR
         # that received new commits in the meantime would otherwise be reviewed
         # against stale state. Re-run `gh pr checkout` inside the worktree to
-        # fetch the current PR head. No --force: the worktree may be shared with
-        # an agent started via fzftasks, whose local changes must not be
-        # discarded, so a diverged (force-pushed / rebased) branch fails here.
+        # fetch the current PR head. A fast-forward is tried first. If that
+        # fails (e.g. after a force-push / rebase), the worktree is reset with
+        # --force only when that loses no work: it may be shared with an agent
+        # started via fzftasks, so it must have no uncommitted or untracked
+        # changes, and its HEAD and local PR branch must exist on GitHub (no
+        # unpushed commits; the commits API also finds commits of forks).
+        # If the refresh is not possible, the worktree is opened as it is after
+        # a warning, like fzftasks does.
         if ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" ); then
-          echo "Failed to refresh PR $repo#$number"
-          read -n 1 -s -r -p "Press any key to continue..."
-          exit 0
+          old_sha="$(git -C "$worktree_dir" rev-parse HEAD 2>/dev/null)"
+          tip_sha="$(git -C "$worktree_dir" rev-parse --verify --quiet "refs/heads/$head_ref")"
+          if [[ -n "$(git -C "$worktree_dir" status --porcelain 2>/dev/null)" ]]; then
+            echo "Worktree $worktree_dir has local changes, not refreshing PR $repo#$number; opening it as is"
+            read -n 1 -s -r -p "Press any key to continue..."
+          elif [[ -z "$old_sha" ]] ||
+            ! gh api "repos/$repo/commits/$old_sha" --silent >/dev/null 2>&1 ||
+            { [[ -n "$tip_sha" ]] && ! gh api "repos/$repo/commits/$tip_sha" --silent >/dev/null 2>&1; }; then
+            echo "Worktree $worktree_dir has unpushed commits (or GitHub is unreachable), not refreshing PR $repo#$number; opening it as is"
+            read -n 1 -s -r -p "Press any key to continue..."
+          elif ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" --force ); then
+            echo "Failed to refresh PR $repo#$number; opening the worktree as is"
+            read -n 1 -s -r -p "Press any key to continue..."
+          else
+            echo "Reset $worktree_dir from ${old_sha:0:7} to the force-pushed head of PR $repo#$number"
+          fi
         fi
       fi
 
@@ -2324,7 +2342,9 @@ Pull Request Keybindings:
   alt-g     : check out pull request into a new git worktree at
               ~/.worktrees/<org>/<repo>/<branch> and open it in a new Ghostty
               tab running nvim with the :GitDiff command (an existing worktree
-              is reused and refreshed to the PR's current head without --force)
+              is reused and refreshed to the PR's current head; after a
+              force-push it is reset only without local changes or unpushed
+              commits; otherwise it is opened as is after a warning)
   alt-enter : hand pull request to fzftasks
   ctrl-r    : reload list
   ctrl-p    : toggle preview

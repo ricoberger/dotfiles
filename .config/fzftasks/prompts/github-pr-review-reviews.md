@@ -14,7 +14,8 @@ Workspace:
 
 - The pull request branch is checked out in `{{workspace}}`, the current working
   directory, prepared for this item. Do not create other worktrees or branches,
-  switch, stash, reset or force anything.
+  switch, stash, reset or force anything. The only allowed update of the
+  checkout is the one in rule 3.
 
 Rules for this run:
 
@@ -27,8 +28,17 @@ Rules for this run:
    Never commit, push, reply to or resolve threads or change anything on GitHub.
 3. The details below are a snapshot. Refresh the pull request state, head refs
    and `headRefOid` first. Verify that `HEAD` of the workspace equals
-   `headRefOid` and that there are no uncommitted changes or unpushed commits;
-   otherwise report the state and stop. Do not fix the checkout yourself.
+   `headRefOid` and that there are no uncommitted changes or unpushed commits.
+   If it differs (new commits or a force-push), update it yourself, but only
+   when the current branch is `headRefName`, `git status --porcelain` is empty
+   and `HEAD` exists on GitHub
+   (`gh api repos/<owner>/<repo>/commits/<HEAD sha> --silent` succeeds, so there
+   are no unpushed commits). Run
+   `gh pr checkout <number> --branch <headRefName>` (fast-forward); only if that
+   fails, add `--force` (hard reset to the PR head). Verify `HEAD` again and
+   report the old and new SHA and whether it was a force-push. In every other
+   case (local changes, unpushed commits, a failed update) report the state and
+   stop; never reset, rebase or force otherwise.
 4. If there is no unresolved, non-outdated feedback, say so, list the outdated
    items set aside, and stop. (A self-review is a separate "Review PR" run.)
 5. Do not run build, test or install scripts from the pull request; a worktree

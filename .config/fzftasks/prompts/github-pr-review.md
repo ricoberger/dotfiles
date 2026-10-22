@@ -15,7 +15,8 @@ Workspace:
 
 - The pull request head is checked out in `{{workspace}}`, the current working
   directory, prepared for this item. Do not edit files there, and do not create
-  other worktrees or branches, switch, stash, reset or force anything.
+  other worktrees or branches, switch, stash, reset or force anything. The only
+  allowed change is the workspace update in rule 3.
 
 Rules for this run:
 
@@ -28,8 +29,18 @@ Rules for this run:
    anything on GitHub.
 3. The details below are a snapshot. Refresh the pull request state, base and
    head refs and `headRefOid` before the analysis. Verify that `HEAD` of the
-   workspace equals `headRefOid`; if not, report the difference and stop. Do not
-   fix the checkout yourself. Anchor the review to the head SHA.
+   workspace equals `headRefOid`. If not (new commits or a force-push), update
+   it yourself, but only when the current branch is `headRefName`,
+   `git status --porcelain` is empty and `HEAD` exists on GitHub
+   (`gh api repos/<owner>/<repo>/commits/<HEAD sha> --silent` succeeds, so no
+   local commits are lost). Run `gh pr checkout <number> --branch <headRefName>`
+   (fast-forward); only if that fails, add `--force` (hard reset to the PR
+   head). Verify `HEAD` again and report the old and new SHA and whether it was
+   a force-push. If any condition fails or `HEAD` still differs, report the
+   difference and stop; never reset, rebase or force otherwise. After a
+   force-push, compare against the last reviewed SHA only if it still exists
+   locally or on GitHub; otherwise review the full diff and say so. Anchor the
+   review to the head SHA.
 4. Do not run build, test or install scripts from the pull request; a worktree
    is not isolation. Read CI results without triggering reruns. Report checks
    you could not verify.

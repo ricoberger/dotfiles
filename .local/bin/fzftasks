@@ -216,10 +216,12 @@ flush_notifications() {
 
 # Check out a pull request into "$FZFTASKS_WORKTREE_DIR/<org>/<repo>/<branch>".
 # An existing worktree is refreshed to the PR's current head, unless it has
-# local changes. The refresh never uses --force, so local commits of an agent
-# are never discarded; a diverged branch is kept as is.
+# local changes. A fast-forward is tried first; if that fails (e.g. after a
+# force-push), the worktree is reset to the new head only when it has no
+# unpushed commits (its HEAD and local branch exist on GitHub), so local
+# commits of an agent are never discarded.
 workspace_pr() {
-  local repo_dir info head wt
+  local repo_dir info head wt old tip
   parse_pr_key "$1"
 
   repo_dir="$FZFTASKS_GITHUB_DIR/$PR_REPO"
@@ -251,11 +253,28 @@ workspace_pr() {
     echo "Worktree $wt has local changes, not refreshing it"
     WARN=1
   elif ! (cd "$wt" && gh pr checkout "$PR_NUMBER" --branch "$head"); then
-    echo "Failed to refresh $wt, using it as is"
-    WARN=1
+    # Not a fast-forward (or a failed fetch): reset only without unpushed work.
+    old="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
+    tip="$(git -C "$wt" rev-parse --verify --quiet "refs/heads/$head")"
+    if ! commit_on_github "$PR_REPO" "$old" ||
+      { [[ -n "$tip" ]] && ! commit_on_github "$PR_REPO" "$tip"; }; then
+      echo "Worktree $wt has unpushed commits (or GitHub is unreachable), not refreshing it"
+      WARN=1
+    elif ! (cd "$wt" && gh pr checkout "$PR_NUMBER" --branch "$head" --force); then
+      echo "Failed to refresh $wt, using it as is"
+      WARN=1
+    else
+      echo "Reset $wt from ${old:0:7} to the force-pushed head of $PR_REPO#$PR_NUMBER"
+    fi
   fi
 
   WORKSPACE="$wt"
+}
+
+# Succeed if the commit exists on GitHub (in the repository or its fork
+# network), i.e. it was pushed and moving a branch away from it loses no work.
+commit_on_github() {
+  [[ -n "$2" ]] && gh api "repos/$1/commits/$2" --silent >/dev/null 2>&1
 }
 
 # Ad-hoc, Jira, alert and Kubernetes items without a repository work in a
