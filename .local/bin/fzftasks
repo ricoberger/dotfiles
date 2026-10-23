@@ -362,27 +362,23 @@ prompt_field() {
 }
 
 # Let the user pick one of all prompt templates (every "*.md" in the prompts
-# directory). Prints the template path, or "track" for the "Track" entry when
-# allowed. Returns 1 when cancelled.
+# directory) or a built-in entry. Prints the template path, "open" for the
+# "Open" entry, or "track" for the "Track" entry when allowed. Returns 1 when
+# cancelled.
 choose_prompt() {
   local key="$1" allow_track="$2" rows="" f title sel path
 
+  # Built-in entries have no template (column 2) but an action (column 3).
   if [[ "$allow_track" == 1 ]]; then
-    rows="$(printf '%-30s %s' "Track" "Track as new todo")"$'\t'$'\n'
+    rows="$(printf '%-30s %s' "Track" "Track as new todo")"$'\t\t'"track"$'\n'
   fi
+  rows+="$(printf '%-30s %s' "Open" "Open an interactive pi without a background run")"$'\t\t'"open"$'\n'
   for f in "$PROMPTS"/*.md; do
     [[ -f "$f" ]] || continue
     title="$(prompt_field "$f" title)"
     [[ -n "$title" ]] || title="$(basename "$f" .md)"
     rows+="$(printf '%-30s %s' "$title" "$(prompt_field "$f" description)")"$'\t'"$f"$'\n'
   done
-  if [[ -z "$rows" ]]; then
-    # stdout is captured by the caller, so the message goes to stderr.
-    echo "No prompts found in $PROMPTS" >&2
-    pause >&2
-    return 1
-  fi
-
   sel="$(printf '%s' "$rows" | fzf \
     --delimiter $'\t' \
     --with-nth 1 \
@@ -400,7 +396,7 @@ choose_prompt() {
 
   path="$(printf '%s' "$sel" | cut -f2)"
   if [[ -z "$path" ]]; then
-    echo track
+    printf '%s\n' "$sel" | cut -f3
   else
     printf '%s\n' "$path"
   fi
@@ -490,6 +486,10 @@ cmd_start() {
       ;;
     todo)
       tpl="$(choose_prompt "$key" 0)" || return 0
+      if [[ "$tpl" == open ]]; then
+        cmd_open "$key"
+        return
+      fi
       ;;
     "")
       [[ -n "$title" ]] || die "start: --title is required for new items"
@@ -514,6 +514,10 @@ cmd_start() {
       if [[ "$tpl" == track ]]; then
         echo "Tracking $key"
         return 0
+      fi
+      if [[ "$tpl" == open ]]; then
+        cmd_open "$key"
+        return
       fi
       ;;
   esac
@@ -924,8 +928,9 @@ fzftasks - Track work items and the pi agents working on them
 Usage:
   fzftasks                browse all items
   fzftasks start <key>    start a new item: pick a repository (not for PRs and
-                          not when --repo is given), a prompt (or "Track") and
-                          run pi in the background; opens an existing item
+                          not when --repo is given), a prompt and run pi in
+                          the background, or "Open" an interactive pi without
+                          a run (or "Track" it as todo); opens an existing item
                           instead; new items require --title, --repo sets the
                           repository (empty for none) and --details - reads the
                           details from stdin
@@ -945,7 +950,7 @@ background; when they finish, the item moves to waiting and can be opened in
 Ghostty to continue the session.
 
 Keybindings:
-  enter  : start a todo item (pick a prompt), open all other items
+  enter  : start a todo item (pick a prompt or "Open"), open all other items
   alt-s  : switch the preview between summary and session transcript
   alt-v  : view the item in its source (fzfgh view, fzfk, ...); does nothing
            for ad-hoc items
