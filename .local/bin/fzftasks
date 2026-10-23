@@ -3,7 +3,7 @@
 # fzftasks - Track work items and the pi agents working on them
 #
 # Usage: fzftasks [start <key> | open <key> | reply <key> | done <key> |
-#                  reopen <key> | new]
+#                  reopen <key> | new [--cwd]]
 #
 # Work items are identified by a key, which encodes the item's kind:
 #
@@ -22,7 +22,9 @@
 # with a selected repository, a scratch directory otherwise. Starting an item
 # that already exists never creates a new session or workspace; it opens the
 # existing one instead. Deleting a done item removes its session and workspace
-# (worktrees only without local changes; their branches are kept).
+# (worktrees only without local changes; their branches are kept). Ad-hoc items
+# created with "fzftasks new --cwd" use the current directory as an external
+# workspace instead, which fzftasks never prepares or removes.
 #
 # State is stored in a SQLite database. Items are in one of these states:
 #
@@ -137,6 +139,10 @@ SQL
   # Databases created before the repo column existed. Fails (ignored) when the
   # column is already there.
   sql "ALTER TABLE items ADD COLUMN repo TEXT;" >/dev/null 2>&1 || true
+  # 1 when the workspace is an existing directory chosen by the user ("new
+  # --cwd"), which is never prepared or removed by fzftasks. Added later, see
+  # the repo column.
+  sql "ALTER TABLE items ADD COLUMN external_workspace INTEGER;" >/dev/null 2>&1 || true
 }
 
 item_field() {
@@ -334,6 +340,15 @@ workspace_task() {
 prepare_workspace() {
   WORKSPACE=""
   BASE=""
+  # External workspaces are used as they are.
+  if [[ "$(item_field "$1" external_workspace)" == 1 ]]; then
+    WORKSPACE="$(item_field "$1" workspace)"
+    if [[ -z "$WORKSPACE" || ! -d "$WORKSPACE" ]]; then
+      echo "Workspace not found: $WORKSPACE"
+      return 1
+    fi
+    return 0
+  fi
   case "$(kind_of "$1")" in
     pr) workspace_pr "$1" || return 1 ;;
     adhoc | jira | alert | k8s) workspace_task "$1" || return 1 ;;
@@ -449,9 +464,10 @@ render_prompt() {
 # ---------- Commands ----------
 
 cmd_start() {
-  local key="" title="" repo="" repo_given=0 details_stdin=0 kind state tmp tpl
+  local key="" title="" repo="" repo_given=0 details_stdin=0 cwd="" kind state tmp tpl
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --cwd) cwd="$PWD"; shift ;;
       --title=*) title="${1#*=}"; shift ;;
       --title) title="$2"; shift 2 ;;
       --repo=*) repo="${1#*=}"; repo_given=1; shift ;;
@@ -495,6 +511,17 @@ cmd_start() {
       [[ -n "$title" ]] || die "start: --title is required for new items"
       tmp="$(mktemp "${TMPDIR:-/tmp}/fzftasks.XXXXXX")"
       [[ "$details_stdin" == 1 ]] && cat >"$tmp"
+      # With --cwd the current directory is the workspace: no repository and
+      # no prompt, the item is always opened. Background runs are not offered,
+      # because the prompts assume a workspace prepared for the item.
+      if [[ -n "$cwd" ]]; then
+        [[ "$kind" == adhoc ]] || die "start: --cwd is only supported for ad-hoc items"
+        title="$(printf '%s' "$title" | tr '\t\n' '  ')"
+        sql "INSERT INTO items (key, title, details, workspace, external_workspace, state, updated_at) VALUES ($(q "$key"), $(q "$title"), CAST(readfile($(q "$tmp")) AS TEXT), $(q "$cwd"), 1, 'todo', $(now));"
+        rm -f "$tmp"
+        cmd_open "$key"
+        return
+      fi
       # Ad-hoc, Jira, alert and Kubernetes items can work in a repository; ask
       # for it unless the caller passed --repo (an empty value means "no
       # repository").
@@ -610,9 +637,15 @@ cmd_reopen() {
 
 # Create an ad-hoc item in $EDITOR: the first non-empty line is the title, the
 # rest the details. An empty file cancels. Afterwards a repository can be
-# selected, in which the item gets its own worktree.
+# selected, in which the item gets its own worktree. With --cwd the current
+# directory is used as the workspace and the item is opened directly.
 cmd_new() {
-  local tmp title details slug key repo
+  local tmp title details slug key repo cwd=()
+  case "$1" in
+    "") ;;
+    --cwd) cwd=(--cwd) ;;
+    *) die "new: unknown flag: $1" ;;
+  esac
   tmp="$(mktemp "${TMPDIR:-/tmp}/fzftasks-new.XXXXXX")" || die "cannot create a temporary file"
   mv "$tmp" "$tmp.md" && tmp="$tmp.md"
   "${EDITOR:-nvim}" "$tmp"
@@ -624,7 +657,7 @@ cmd_new() {
 
   slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g' -e 's/^-//' | cut -c1-40 | sed 's/-*$//')"
   key="adhoc:$(date +%Y%m%d-%H%M%S)${slug:+-$slug}"
-  printf '%s\n' "$details" | cmd_start "$key" --title "$title" --details -
+  printf '%s\n' "$details" | cmd_start "$key" --title "$title" --details - "${cwd[@]}"
 }
 
 # Start a background run of an item claimed by this process with the given
@@ -899,8 +932,11 @@ cmd_action() {
       # removed without --force (refuses on local changes). The branch is kept.
       # The item is only deleted when the workspace is gone, so it can be
       # retried.
+      # External workspaces ("new --cwd") are never removed.
       workspace="$(item_field "$key" workspace)"
-      if [[ -n "$workspace" && -d "$workspace" ]]; then
+      if [[ "$(item_field "$key" external_workspace)" == 1 ]]; then
+        :
+      elif [[ -n "$workspace" && -d "$workspace" ]]; then
         if [[ "$workspace" == "$WORKSPACES"/* ]]; then
           rm -rf "$workspace"
         else
@@ -942,6 +978,10 @@ Usage:
   fzftasks reopen <key>   move a done item back to waiting
   fzftasks new            create an ad-hoc item in $EDITOR, optionally in a
                           worktree of a repository
+  fzftasks new --cwd      create an ad-hoc item in $EDITOR that works in the
+                          current directory and open it directly (no
+                          repository or prompt; deleting the item keeps the
+                          directory)
 
 Track work items (pull requests, Jira work items, alerts, Kubernetes resources
 and ad-hoc tasks) and the pi agents working on them. Each item has its own pi
@@ -957,7 +997,8 @@ Keybindings:
   alt-d  : mark item as done
   alt-r  : continue a waiting item in the background with a reply
   alt-w  : move a done item back to waiting
-  alt-x  : delete a done item, its session and workspace
+  alt-x  : delete a done item, its session and workspace (external workspaces
+           of "new --cwd" items are kept)
   alt-n  : new ad-hoc item
   ctrl-r : reload list (the list also reloads automatically, see
            FZFTASKS_REFRESH_INTERVAL)
@@ -1036,7 +1077,7 @@ case "${1:-}" in
   done) cmd_done "$2" ;;
   reply) cmd_reply "$2" ;;
   reopen) cmd_reopen "$2" ;;
-  new) cmd_new ;;
+  new) cmd_new "$2" ;;
   __list) cmd_list ;;
   __preview)
     shift
