@@ -2,8 +2,8 @@
 
 # fzftasks - Track work items and the pi agents working on them
 #
-# Usage: fzftasks [start <key> | open <key> | reply <key> | done <key> |
-#                  reopen <key> | new [--cwd]]
+# Usage: fzftasks [start <key> | open <key> | reply <key> | done <key>... |
+#                  reopen <key>... | new [--cwd]]
 #
 # Work items are identified by a key, which encodes the item's kind:
 #
@@ -622,17 +622,26 @@ cmd_open() {
     fail "Failed to open a new Ghostty split"
 }
 
-cmd_done() {
-  [[ -n "$1" ]] || die "done: missing key"
-  init
-  sql "UPDATE items SET state = 'done', updated_at = $(now) WHERE key = $(q "$1");"
+# Build an SQL list of string literals from the arguments: "('a', 'b')".
+sql_list() {
+  local list="" k
+  for k in "$@"; do
+    list+="${list:+, }$(q "$k")"
+  done
+  printf '(%s)' "$list"
 }
 
-# Move a done item back to waiting. Other states are left unchanged.
-cmd_reopen() {
-  [[ -n "$1" ]] || die "reopen: missing key"
+cmd_done() {
+  [[ $# -gt 0 && -n "$1" ]] || die "done: missing key"
   init
-  sql "UPDATE items SET state = 'waiting', updated_at = $(now) WHERE key = $(q "$1") AND state = 'done';"
+  sql "UPDATE items SET state = 'done', updated_at = $(now) WHERE key IN $(sql_list "$@");"
+}
+
+# Move done items back to waiting. Other states are left unchanged.
+cmd_reopen() {
+  [[ $# -gt 0 && -n "$1" ]] || die "reopen: missing key"
+  init
+  sql "UPDATE items SET state = 'waiting', updated_at = $(now) WHERE key IN $(sql_list "$@") AND state = 'done';"
 }
 
 # Create an ad-hoc item in $EDITOR: the first non-empty line is the title, the
@@ -869,8 +878,45 @@ cmd_preview() {
   } | md_render
 }
 
+# Delete a done item, its session and workspace. Prints the reason and returns
+# 1 when the item is kept.
+delete_item() {
+  local key="$1" workspace repo
+  if [[ "$(item_field "$key" state)" != done ]]; then
+    echo "$key is not done, mark it as done first (alt-d)"
+    return 1
+  fi
+
+  # Remove the workspace: scratch directories are deleted, worktrees are
+  # removed without --force (refuses on local changes). The branch is kept.
+  # The item is only deleted when the workspace is gone, so it can be retried.
+  # External workspaces ("new --cwd") are never removed.
+  workspace="$(item_field "$key" workspace)"
+  if [[ "$(item_field "$key" external_workspace)" == 1 ]]; then
+    :
+  elif [[ -n "$workspace" && -d "$workspace" ]]; then
+    if [[ "$workspace" == "$WORKSPACES"/* ]]; then
+      rm -rf "$workspace"
+    else
+      if [[ "$(kind_of "$key")" == pr ]]; then
+        parse_pr_key "$key"
+        repo="$PR_REPO"
+      else
+        repo="$(item_field "$key" repo)"
+      fi
+      if ! git -C "$FZFTASKS_GITHUB_DIR/$repo" worktree remove "$workspace"; then
+        echo "Failed to remove the worktree $workspace (local changes?), $key is kept"
+        return 1
+      fi
+    fi
+  fi
+  find "$SESSIONS" -type f -name "*_$(session_id "$key").jsonl" -delete
+  rm -f "$NOTIFY/$(session_id "$key")"
+  sql "DELETE FROM items WHERE key = $(q "$key");"
+}
+
 cmd_action() {
-  local action="$1" key="$2" answer rest title workspace repo ref ctx a b c
+  local action="$1" key="$2" answer rest label ref ctx a b c k failed=0
   [[ -n "$key" ]] || exit 0
   init
 
@@ -913,46 +959,35 @@ cmd_action() {
       ;;
 
     delete)
-      [[ "$(item_field "$key" state)" == done ]] ||
-        fail "Only done items can be deleted, mark it as done first (alt-d)"
-      title="$(item_field "$key" title)"
+      # All selected items (or the current one): "__action delete <key>...".
+      shift
+      for k in "$@"; do
+        [[ "$(item_field "$k" state)" == done ]] ||
+          fail "Only done items can be deleted, mark $k as done first (alt-d)"
+      done
+      if [[ $# -eq 1 ]]; then
+        label="$(item_field "$key" title)"
+      else
+        label="$# items"
+      fi
       answer="$(printf '%s\n' "No" "Yes" | fzf \
         --bind "ctrl-d:half-page-down" \
         --bind "ctrl-u:half-page-up" \
         --bind "alt-h:execute($SCRIPT --help | less -R)" \
-        --prompt "$ICON_TRASH Delete $title: " \
+        --prompt "$ICON_TRASH Delete $label: " \
         --height 100% \
         --reverse \
         --border rounded \
-        --border-label " $ICON_TRASH Delete $title " \
+        --border-label " $ICON_TRASH Delete $label " \
         --border-label-pos center)"
       [[ "$answer" != "Yes" ]] && exit 0
 
-      # Remove the workspace: scratch directories are deleted, worktrees are
-      # removed without --force (refuses on local changes). The branch is kept.
-      # The item is only deleted when the workspace is gone, so it can be
-      # retried.
-      # External workspaces ("new --cwd") are never removed.
-      workspace="$(item_field "$key" workspace)"
-      if [[ "$(item_field "$key" external_workspace)" == 1 ]]; then
-        :
-      elif [[ -n "$workspace" && -d "$workspace" ]]; then
-        if [[ "$workspace" == "$WORKSPACES"/* ]]; then
-          rm -rf "$workspace"
-        else
-          if [[ "$(kind_of "$key")" == pr ]]; then
-            parse_pr_key "$key"
-            repo="$PR_REPO"
-          else
-            repo="$(item_field "$key" repo)"
-          fi
-          git -C "$FZFTASKS_GITHUB_DIR/$repo" worktree remove "$workspace" ||
-            fail "Failed to remove the worktree $workspace (local changes?), the item is kept"
-        fi
-      fi
-      find "$SESSIONS" -type f -name "*_$(session_id "$key").jsonl" -delete
-      rm -f "$NOTIFY/$(session_id "$key")"
-      sql "DELETE FROM items WHERE key = $(q "$key");"
+      # Items whose workspace cannot be removed are kept; the others are
+      # still deleted.
+      for k in "$@"; do
+        delete_item "$k" || failed=1
+      done
+      [[ "$failed" == 1 ]] && pause
       ;;
   esac
 }
@@ -972,10 +1007,11 @@ Usage:
                           details from stdin
   fzftasks open <key>     open the item in Ghostty with an interactive pi on its
                           session
-  fzftasks done <key>     mark an item as done
+  fzftasks done <key>...  mark items as done
   fzftasks reply <key>    continue a waiting item in the background with a
                           reply written in $EDITOR
-  fzftasks reopen <key>   move a done item back to waiting
+  fzftasks reopen <key>...
+                          move done items back to waiting
   fzftasks new            create an ad-hoc item in $EDITOR, optionally in a
                           worktree of a repository
   fzftasks new --cwd      create an ad-hoc item in $EDITOR that works in the
@@ -994,11 +1030,11 @@ Keybindings:
   alt-s  : switch the preview between summary and session transcript
   alt-v  : view the item in its source (fzfgh view, fzfk, ...); does nothing
            for ad-hoc items
-  alt-d  : mark item as done
+  alt-d  : mark items as done
   alt-r  : continue a waiting item in the background with a reply
-  alt-w  : move a done item back to waiting
-  alt-x  : delete a done item, its session and workspace (external workspaces
-           of "new --cwd" items are kept)
+  alt-w  : move done items back to waiting
+  alt-x  : delete done items, their sessions and workspaces (external
+           workspaces of "new --cwd" items are kept)
   alt-n  : new ad-hoc item
   ctrl-r : reload list (the list also reloads automatically, see
            FZFTASKS_REFRESH_INTERVAL)
@@ -1038,6 +1074,7 @@ cmd_pick() {
     --reverse \
     --height 100% \
     --info right \
+    --multi \
     --track \
     --id-nth 1 \
     --prompt "$ICON_TASKS Tasks: " \
@@ -1052,15 +1089,17 @@ cmd_pick() {
     --bind "home:preview-top" \
     --bind "end:preview-bottom" \
     --bind "ctrl-p:toggle-preview" \
+    --bind "tab:toggle+down" \
+    --bind "shift-tab:toggle+up" \
     --bind "alt-s:transform($SCRIPT __preview-toggle)" \
     --bind "ctrl-r:reload-sync($SCRIPT __list)+refresh-preview" \
     --bind "every($FZFTASKS_REFRESH_INTERVAL):reload-sync($SCRIPT __list)+refresh-preview" \
     --bind "enter:execute($SCRIPT start {1})+reload-sync($SCRIPT __list)" \
     --bind "alt-v:execute($SCRIPT __action view {1})" \
-    --bind "alt-d:execute-silent($SCRIPT done {1})+reload-sync($SCRIPT __list)" \
+    --bind "alt-d:execute-silent($SCRIPT done {+1})+deselect-all+reload-sync($SCRIPT __list)" \
     --bind "alt-r:execute($SCRIPT reply {1})+reload-sync($SCRIPT __list)" \
-    --bind "alt-w:execute-silent($SCRIPT reopen {1})+reload-sync($SCRIPT __list)" \
-    --bind "alt-x:execute($SCRIPT __action delete {1})+reload-sync($SCRIPT __list)" \
+    --bind "alt-w:execute-silent($SCRIPT reopen {+1})+deselect-all+reload-sync($SCRIPT __list)" \
+    --bind "alt-x:execute($SCRIPT __action delete {+1})+deselect-all+reload-sync($SCRIPT __list)" \
     --bind "alt-n:execute($SCRIPT new)+reload-sync($SCRIPT __list)" \
     --preview-window "right:65%" \
     --preview "$SCRIPT __preview {1}"
@@ -1074,9 +1113,15 @@ case "${1:-}" in
     cmd_start "$@"
     ;;
   open) cmd_open "$2" ;;
-  done) cmd_done "$2" ;;
+  done)
+    shift
+    cmd_done "$@"
+    ;;
   reply) cmd_reply "$2" ;;
-  reopen) cmd_reopen "$2" ;;
+  reopen)
+    shift
+    cmd_reopen "$@"
+    ;;
   new) cmd_new "$2" ;;
   __list) cmd_list ;;
   __preview)
