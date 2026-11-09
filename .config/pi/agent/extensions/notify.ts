@@ -3,6 +3,7 @@
  *
  * Sends a native terminal notification when Pi agent is done and waiting for input.
  * Supports multiple terminal protocols:
+ * - Rex: no notification, Rex notifies based on pi's program status (OSC 7501)
  * - OSC 777: Ghostty, iTerm2, WezTerm, rxvt-unicode
  * - OSC 99: Kitty
  * - Windows toast: Windows Terminal (WSL)
@@ -43,7 +44,11 @@ function notifyWindows(title: string, body: string): void {
 }
 
 function notify(title: string, body: string): void {
-  if (process.env.WT_SESSION) {
+  if (process.env.TERM_PROGRAM === "rex") {
+    // Rex sends its own macOS notification for the program status (OSC 7501)
+    // reported by pi, so a second notification would be a duplicate.
+    return;
+  } else if (process.env.WT_SESSION) {
     notifyWindows(title, body);
   } else if (process.env.KITTY_WINDOW_ID) {
     notifyOSC99(title, body);

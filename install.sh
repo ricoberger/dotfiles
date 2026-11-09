@@ -71,6 +71,7 @@ cp -r $(pwd)/.config/pi/agent/themes ~/.pi/agent
 cp -r $(pwd)/.config/pi/agent/agents ~/.pi/agent
 cp -r $(pwd)/.config/pi/agent/extensions ~/.pi/agent
 (cd ~/.pi/agent/extensions/web-fetch && npm ci --ignore-scripts --no-audit --no-fund --silent)
+cp $(pwd)/.config/pi/agent/mcp.json ~/.pi/agent/mcp.json
 cp $(pwd)/.config/pi/agent/settings.json ~/.pi/agent/settings.json
 cp $(pwd)/.config/pi/agent/AGENTS.md ~/.pi/agent/AGENTS.md
 

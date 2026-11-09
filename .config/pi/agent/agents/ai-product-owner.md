@@ -1,7 +1,7 @@
 ---
 name: ai-product-owner
-model: github-copilot/gpt-6-astra
-thinking: high
+model: github-copilot/claude-fable-5.1
+thinking: medium
 description:
   Requirements engineer of the AI dev team. Compiles a task and codebase context
   into a spec with acceptance criteria that the developer agent can implement

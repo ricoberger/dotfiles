@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "safari-mcp": {
+      "command": "/usr/bin/safaridriver",
+      "args": [
+        "--mcp"
+      ]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 ---
 name: ai-reviewer
 model: github-copilot/gpt-6-astra
-thinking: high
+thinking: medium
 description:
   Code reviewer of the AI dev team. Reviews a branch against a spec and writes
   findings to a review file with a machine-readable verdict for the ai-team. Use

@@ -13,7 +13,19 @@
   ],
   "theme": "catppuccin-macchiato",
   "compaction": {
-    "enabled": true
+    "enabled": true,
+    "keepRecentTokens": 30000,
+    "modelOverrides": {
+      "github-copilot/claude-sonnet-5.5": {
+        "reserveTokens": 750000
+      },
+      "github-copilot/claude-opus-5.5": {
+        "reserveTokens": 750000
+      },
+      "github-copilot/claude-fable-5.1": {
+        "reserveTokens": 750000
+      }
+    }
   },
   "terminal": {
     "showTerminalProgress": true,
