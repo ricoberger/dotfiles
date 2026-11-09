@@ -20,7 +20,11 @@ FZFGH_NOTIF_CACHE="${FZFGH_NOTIF_CACHE:-${TMPDIR:-/tmp}/fzfgh-notifications.json
 # run. Each entry is "Name|query". Override the whole list at runtime via the
 # FZFGH_PR_FILTERS / FZFGH_ISSUE_FILTERS env vars (newline-separated "Name|query"
 # entries); otherwise these baked defaults are used.
+# Start date (YYYY-MM-DD) for the "Recent" filter: 14 days ago. Uses BSD date
+# (macOS) and falls back to GNU date.
+FZFGH_RECENT_SINCE="$(date -v-14d +%F 2>/dev/null || date -d '14 days ago' +%F)"
 FZFGH_PR_DEFAULT_FILTERS=(
+  "Recent|archived:false is:open (review-requested:$FZFGH_USER OR author:$FZFGH_USER) -author:app/dependabot created:>=$FZFGH_RECENT_SINCE"
   "Involves|archived:false is:open involves:$FZFGH_USER"
   "Created|archived:false is:open author:$FZFGH_USER"
   "Assigned|archived:false is:open assignee:$FZFGH_USER"
@@ -133,11 +137,13 @@ if [[ "$1" == "__list" ]]; then
         # treats tokens like "is:open" or "involves:user" as search qualifiers
         # when they are passed as separate arguments; a single quoted string is
         # matched as free-text keywords instead, which silently returns the wrong
-        # pull requests.
+        # pull requests. The qualifiers are passed after "--" so negated
+        # qualifiers (e.g. "-author:app/dependabot") are not parsed as flags.
         read -ra query_args <<< "$query"
-        out="$(gh search prs "${query_args[@]}" \
+        out="$(gh search prs \
           --limit "$FZFGH_LIMIT" \
-          --json number,title,repository,author,state,isDraft,createdAt,url 2>"$err")"
+          --json number,title,repository,author,state,isDraft,createdAt,url \
+          -- "${query_args[@]}" 2>"$err")"
         status=$?
       fi
       if [[ $status -ne 0 ]]; then
@@ -1299,133 +1305,6 @@ if [[ "$1" == "__action" ]]; then
         fzftasks start "pr:$repo#$number" --title "${title:-$repo#$number}" --repo "$repo" --details -
       ;;
 
-    pr-checkout)
-      repo="$1"
-      number="$2"
-      [[ -z "$repo" || -z "$number" ]] && exit 0
-
-      # Locate the local clone of the PR's repository. Repositories live under
-      # "$FZFGH_GITHUB_DIR/<owner>/<repo>" (default ~/Documents/GitHub), and
-      # "$repo" is already "<owner>/<repo>", so the path is the base plus $repo.
-      # The clone must exist so its head ref can be fetched from origin and the
-      # worktree is created for the right repository. Fail fast before any
-      # network calls if the clone is missing.
-      github_base="${FZFGH_GITHUB_DIR:-$HOME/Documents/GitHub}"
-      repo_dir="$github_base/$repo"
-      if [[ ! -d "$repo_dir" ]]; then
-        echo "Local clone not found at $repo_dir"
-        read -n 1 -s -r -p "Press any key to continue..."
-        exit 0
-      fi
-
-      # Run all subsequent git commands from within the clone. The handler exits
-      # at the end, so this directory change has no side effects elsewhere.
-      if ! cd "$repo_dir"; then
-        echo "Failed to enter local clone at $repo_dir"
-        read -n 1 -s -r -p "Press any key to continue..."
-        exit 0
-      fi
-
-      # Determine the PR's head branch, which becomes the worktree's branch, and
-      # its title, which is used for the Ghostty tab title.
-      pr_info="$(gh pr view "$number" --repo "$repo" --json headRefName,title 2>/dev/null)"
-      head_ref="$(jq -r '.headRefName' <<<"$pr_info" 2>/dev/null)"
-      pr_title="$(jq -r '.title' <<<"$pr_info" 2>/dev/null)"
-      if [[ -z "$head_ref" ]]; then
-        echo "Could not determine the head branch for PR $repo#$number"
-        read -n 1 -s -r -p "Press any key to continue..."
-        exit 0
-      fi
-
-      # Build the worktree path exactly like the `gitwta` shell function:
-      #   $HOME/.worktrees/<org>/<repo>/<branch>
-      # deriving <org> and <repo> from the common git dir so it works from any
-      # worktree. Slashes in the branch name are replaced with dashes so the
-      # branch maps to a single directory instead of nested directories.
-      common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-      if [[ -z "$common" ]]; then
-        echo "Not inside a git worktree"
-        read -n 1 -s -r -p "Press any key to continue..."
-        exit 0
-      fi
-      repo_name="$(basename "$(dirname "$common")")"
-      org_name="$(basename "$(dirname "$(dirname "$common")")")"
-      worktree_dir="$HOME/.worktrees/$org_name/$repo_name/${head_ref//\//-}"
-
-      # Create the worktree for the PR head, reusing it if it already exists.
-      # Create it detached first, then run `gh pr checkout` inside it so gh
-      # configures the branch's upstream / push remote. This keeps fork PRs
-      # pushable (git push from the worktree updates the fork's PR branch); a
-      # plain refs/pull/<n>/head fetch would leave the branch read-only.
-      if [[ ! -d "$worktree_dir" ]]; then
-        if ! git worktree add --detach "$worktree_dir"; then
-          echo "Failed to create worktree at $worktree_dir"
-          read -n 1 -s -r -p "Press any key to continue..."
-          exit 0
-        fi
-        if ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" ); then
-          # Roll back the empty worktree we just created.
-          git worktree remove --force "$worktree_dir" 2>/dev/null
-          echo "Failed to check out PR $repo#$number"
-          read -n 1 -s -r -p "Press any key to continue..."
-          exit 0
-        fi
-      else
-        # The worktree already exists from an earlier checkout of this PR. Its
-        # branch still points at whatever the PR head was back then, so a PR
-        # that received new commits in the meantime would otherwise be reviewed
-        # against stale state. Re-run `gh pr checkout` inside the worktree to
-        # fetch the current PR head. A fast-forward is tried first. If that
-        # fails (e.g. after a force-push / rebase), the worktree is reset with
-        # --force only when that loses no work: it may be shared with an agent
-        # started via fzftasks, so it must have no uncommitted or untracked
-        # changes, and its HEAD and local PR branch must exist on GitHub (no
-        # unpushed commits; the commits API also finds commits of forks).
-        # If the refresh is not possible, the worktree is opened as it is after
-        # a warning, like fzftasks does.
-        if ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" ); then
-          old_sha="$(git -C "$worktree_dir" rev-parse HEAD 2>/dev/null)"
-          tip_sha="$(git -C "$worktree_dir" rev-parse --verify --quiet "refs/heads/$head_ref")"
-          if [[ -n "$(git -C "$worktree_dir" status --porcelain 2>/dev/null)" ]]; then
-            echo "Worktree $worktree_dir has local changes, not refreshing PR $repo#$number; opening it as is"
-            read -n 1 -s -r -p "Press any key to continue..."
-          elif [[ -z "$old_sha" ]] ||
-            ! gh api "repos/$repo/commits/$old_sha" --silent >/dev/null 2>&1 ||
-            { [[ -n "$tip_sha" ]] && ! gh api "repos/$repo/commits/$tip_sha" --silent >/dev/null 2>&1; }; then
-            echo "Worktree $worktree_dir has unpushed commits (or GitHub is unreachable), not refreshing PR $repo#$number; opening it as is"
-            read -n 1 -s -r -p "Press any key to continue..."
-          elif ! ( cd "$worktree_dir" && gh pr checkout "$number" --branch "$head_ref" --force ); then
-            echo "Failed to refresh PR $repo#$number; opening the worktree as is"
-            read -n 1 -s -r -p "Press any key to continue..."
-          else
-            echo "Reset $worktree_dir from ${old_sha:0:7} to the force-pushed head of PR $repo#$number"
-          fi
-        fi
-      fi
-
-      # Diff against the PR's up-to-date base branch (matching GitHub's "Files
-      # changed" tab). Fetch the base ref so origin/<base> is current; worktrees
-      # share the object store, so the new worktree sees it too. If the fetch
-      # fails (offline, base branch deleted, ...) fall back to the plain GitDiff.
-      base_ref="$(gh pr view "$number" --repo "$repo" --json baseRefName -q .baseRefName 2>/dev/null)"
-      if [[ -n "$base_ref" ]] && git fetch origin "$base_ref" 2>/dev/null; then
-        nvim_cmd="nvim -c \"GitDiff HEAD origin/$base_ref\""
-      else
-        nvim_cmd="nvim -c GitDiff"
-      fi
-
-      # Open the worktree in a new Ghostty tab and run the Neovim command there.
-      # Delegated to the "ghostty-new" helper, which uses Ghostty's AppleScript
-      # API (1.3.0+) to create a new tab in the front window with the worktree
-      # as its working directory and type the Neovim command into the tab's
-      # shell so the login shell environment is loaded before nvim starts.
-      if ! ghostty-new --working-dir "$worktree_dir" --command "$nvim_cmd" --title "$repo#$number: $pr_title"; then
-        echo "Failed to open a new Ghostty tab"
-        read -n 1 -s -r -p "Press any key to continue..."
-        exit 0
-      fi
-      ;;
-
     issue-browse)
       repo="$1"
       number="$2"
@@ -2339,12 +2218,6 @@ Pull Request Keybindings:
               browser; alt-y - yank path to file; alt-r - reply to thread,
               alt-x - resolve / unresolve thread; alt-c - new thread on a line
               or range (nvim opens pre-filled with a ```suggestion``` block)
-  alt-g     : check out pull request into a new git worktree at
-              ~/.worktrees/<org>/<repo>/<branch> and open it in a new Ghostty
-              tab running nvim with the :GitDiff command (an existing worktree
-              is reused and refreshed to the PR's current head; after a
-              force-push it is reset only without local changes or unpushed
-              commits; otherwise it is opened as is after a warning)
   alt-enter : hand pull request to fzftasks
   ctrl-r    : reload list
   ctrl-p    : toggle preview
@@ -2437,7 +2310,6 @@ run_prs() {
     --bind "alt-l:execute($ACTION pr-labels {1} {2})+refresh-preview" \
     --bind "alt-e:execute($ACTION pr-edit {1} {2})+reload($SCRIPT __list prs)+refresh-preview" \
     --bind "alt-d:execute($ACTION pr-diff {1} {2})" \
-    --bind "alt-g:execute($ACTION pr-checkout {1} {2})" \
     --bind "alt-enter:execute($ACTION pr-task {1} {2})" \
     --bind "alt-v:execute($ACTION pr-review {1} {2})+refresh-preview" \
     --bind "alt-q:execute($ACTION pr-request-review {1} {2})+refresh-preview" \
