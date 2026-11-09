@@ -15,19 +15,41 @@ cache/heap model instead of raw working set. Also recognises
 page-cache-sensitive services (Vault, etcd, Loki) that thrash without OOM/PSI,
 using major page faults as the memory guard.
 
+## Reliability and Efficiency
+
+The skill pursues two goals: no container starves, **and** the fleet's requested
+CPU/memory tracks what is actually used so clusters do not grow nodes for
+headroom nobody consumes. Per-container sizing rules alone bias toward the first
+goal (raises need one signal, cuts need several), so every report and PR carries
+a **Fleet Impact** section: Σ Δrequests × replicas per cluster, as absolute and
+% of allocatable, the cluster's requested ÷ allocatable before and after, and
+the reclaim candidates the safety guards held back. Net capacity increases are
+reported as such, never as "improved utilization". CPU raises on no-CPU-limit
+clusters require container or node contention evidence (PSI), not merely usage
+above request; the hot-role rule for HA sets is unconditional for memory but
+PSI-gated for CPU; large changes in either direction are staged with a named
+re-check criterion when the step is worth a rollout; and cause fixes (leaks,
+index/cache ratios, engine config) rank above symptomatic raises. An optional
+capacity budget (e.g. "net requests ≤ 0 per cluster") forces raises to be offset
+by cuts within the same selection. Where OpenCost node pricing series
+(`node_cpu_hourly_cost`, `node_ram_hourly_cost`) exist — including managed
+installs without `opencost_build_info` — the fleet impact is also priced as a
+labelled monthly estimate next to the cluster's idle spend; cost is reporting
+context only and never drives or vetoes a sizing decision.
+
 ## Shared Git and PR History
 
 The skill uses path-scoped Git history and PR descriptions, discussions and
 reviews to find previous changes and decisions, including overlapping open PRs,
-rollbacks and changes to shared configuration. It does not depend on a particular
-developer's local files. Missing labels, incomplete checkout history or GitHub
-access failures are reported as limitations, not proof that nothing changed.
-Without a known repository, fresh live analysis can still proceed.
+rollbacks and changes to shared configuration. It does not depend on a
+particular developer's local files. Missing labels, incomplete checkout history
+or GitHub access failures are reported as limitations, not proof that nothing
+changed. Without a known repository, fresh live analysis can still proceed.
 
 There is **no mandatory local run/state file, database or tracking issue**.
 Unpublished discussions, rejections and no-change outcomes remain personal
-conversation context and may be suggested again later. Published rejections
-are surfaced with their reasons, not treated as permanent prohibitions. Recent
+conversation context and may be suggested again later. Published rejections are
+surfaced with their reasons, not treated as permanent prohibitions. Recent
 changes are advisory; there is no hard cooldown.
 
 When you approve publication, commits explain the change and the PR description
@@ -38,11 +60,11 @@ criteria. Repository PR templates are preserved. Full raw metrics dumps and
 session-relative scripts are not required shared artifacts.
 
 Ask to "verify the rightsizing from <PR URL or commit>" after at least seven
-comparable post-rollout days. The skill reads shared evidence, establishes actual
-rollout/configuration and compares against the baseline. Missing or expired
-historical evidence can make the result inconclusive; no personal file is
-required. Verification results stay in chat unless you approve posting a dated
-PR comment. Commit/merge dates and labels are not deployment evidence.
+comparable post-rollout days. The skill reads shared evidence, establishes
+actual rollout/configuration and compares against the baseline. Missing or
+expired historical evidence can make the result inconclusive; no personal file
+is required. Verification results stay in chat unless you approve posting a
+dated PR comment. Commit/merge dates and labels are not deployment evidence.
 
 The [history reference](references/history.md) describes discovery, shared
 evidence and publication. Restart comparisons still use equal windows or
@@ -54,9 +76,9 @@ pressure.
 
 Configuration edits always require your approval of the complete patch shown
 **before any target file is changed**, not a diff generated after writing.
-Approvals stay in the conversation, not a file-based ledger. Evidence, controller,
-source-isolation and validation requirements still apply. **Pushes, PR
-creation/updates and comments require publication approval** of the relevant
+Approvals stay in the conversation, not a file-based ledger. Evidence,
+controller, source-isolation and validation requirements still apply. **Pushes,
+PR creation/updates and comments require publication approval** of the relevant
 diff/scope and shared content. The skill never mutates live cluster resources.
 
 Use independent sessions for separate efforts; there is no batch scheduler or

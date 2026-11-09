@@ -11,21 +11,21 @@ All variables below: `$NS` namespace, `$WL` workload name, `$WLTYPE` one of
 
 ## Result Identity and Reproducibility
 
-Before collecting usage, resolve the 30-day window to fixed UTC timestamps.
-Use the same bounds and instant evaluation time (`end`) for every target and
-retry. Keep exact executed queries, bindings, timestamps and results in the
-session analysis. Include supporting baselines in approved PR content following
+Before collecting usage, resolve the 30-day window to fixed UTC timestamps. Use
+the same bounds and instant evaluation time (`end`) for every target and retry.
+Keep exact executed queries, bindings, timestamps and results in the session
+analysis. Include supporting baselines in approved PR content following
 [Reproducible Evidence](history.md#reproducible-evidence); no local journal is
 required. A moving `now-30d`/`now` pair or a deleted helper script is not a
 reproducible shared baseline.
 
-Assign a descriptive `refId` unique to each target/metric in a batch and save
-it with the query ID/bindings. Extract the response by that ID, then identify
-the numeric value field from the frame schema, not an assumed column index
-(the time field is numeric too). Check target labels and expected cardinality;
-do not silently select the first frame when several targets were returned.
-Keep a named result mapping through calculation and report generation,
-including raw value, unit and status. Round only for presentation.
+Assign a descriptive `refId` unique to each target/metric in a batch and save it
+with the query ID/bindings. Extract the response by that ID, then identify the
+numeric value field from the frame schema, not an assumed column index (the time
+field is numeric too). Check target labels and expected cardinality; do not
+silently select the first frame when several targets were returned. Keep a named
+result mapping through calculation and report generation, including raw value,
+unit and status. Round only for presentation.
 
 Check both request-level and per-refId errors/status before reading values.
 After required retries/selector checks, an absent series is `unavailable`, a
@@ -38,8 +38,8 @@ reason, not zero. An unexpected frame shape/cardinality is an error to resolve.
 
 Check compatible statistics satisfy `p50 <= p95 <= p99 <= max`, comparing only
 the same target, window, unit and aggregation. Do not mix fleet-average
-percentiles and hottest-replica peaks as if they describe the same series.
-Trace claims of pressure to that pressure metric, not a coincident restart count.
+percentiles and hottest-replica peaks as if they describe the same series. Trace
+claims of pressure to that pressure metric, not a coincident restart count.
 
 ## Preferred Metric Source — `kube-prometheus` Mixin Recording Rules
 
@@ -266,11 +266,12 @@ max_over_time((max(rate(container_pressure_cpu_stalled_seconds_total{$SEL}[5m]))
 
 Interpret as a CPU verdict/risk input:
 
-| CPU PSI shape (30d)                  | Meaning                                     | Action                                                    |
-| ------------------------------------ | ------------------------------------------- | --------------------------------------------------------- |
-| some/full p95 high or sustained      | **chronic CPU starvation** (usage censored) | raise the **request**; usage-p95 understates real demand  |
-| p95 ≈ 0 with brief peaks             | occasional node contention, not starved     | request is fine; note the contention                      |
-| ≈ 0 everywhere + usage-p95 ≪ request | genuine **headroom**                        | safe to **trim** the request — PSI confirms slack is real |
+| CPU PSI shape (30d)                  | Meaning                                     | Action                                                                                                                |
+| ------------------------------------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| some/full p95 high or sustained      | **chronic CPU starvation** (usage censored) | raise the **request**; usage-p95 understates real demand                                                              |
+| p95 ≈ 0 with brief peaks             | occasional node contention, not starved     | request is fine; note the contention                                                                                  |
+| ≈ 0 everywhere + usage-p95 ≫ request | harmless **bursting** into idle node CPU    | do **not** raise on a no-CPU-limit cluster; report the gap as scheduling accuracy only (see Cluster Capacity Context) |
+| ≈ 0 everywhere + usage-p95 ≪ request | genuine **headroom**                        | safe to **trim** the request — PSI confirms slack is real                                                             |
 
 CPU PSI only rises while the **node** is contended, so a quiet-period zero does
 not prove peak adequacy — size the request off the usage p95 (`avg`-aggregated)
@@ -280,8 +281,8 @@ and use PSI to (a) detect real starvation episodes and (b) gate any downsizing
 ### OOMKills and Restarts
 
 Keep OOM event counters, last-termination **evidence**, and restart counters
-separate. `kube_pod_container_status_last_terminated_reason` is a gauge:
-**never use `increase()` or `rate()` on it to count OOMKills.**
+separate. `kube_pod_container_status_last_terminated_reason` is a gauge: **never
+use `increase()` or `rate()` on it to count OOMKills.**
 
 For these window-wide queries, use historical ownership so pods that vanished
 before `end` are not dropped. Substitute this expression as `$OWNERS_30D` below:
@@ -298,8 +299,8 @@ If owner rules are absent, use the cross-checked kind-specific pod selector
 above and state that attribution is weaker. Scope both sides to the selected
 cluster when a datasource spans clusters. Deduplicate scrape copies without
 merging distinct pod/container incarnations. Apply `increase` to original
-counter series before aggregation. If historical ownership or incarnation
-labels are incomplete, report the count's coverage limitation.
+counter series before aggregation. If historical ownership or incarnation labels
+are incomplete, report the count's coverage limitation.
 
 **OOM event counter, when available.** Probe `container_oom_events_total` for
 the selected containers and confirm counter/identity labels before using it:
@@ -317,7 +318,8 @@ sum by (container) (
 Here `id` distinguishes cAdvisor container incarnations; adapt to the actual
 exporter's identity labels. Counter increases are estimates over scraped
 history, not exact event logs; record gaps and short-lived containers that may
-be missed. Do not call a generic OOM-event counter an exact killed-process count.
+be missed. Do not call a generic OOM-event counter an exact killed-process
+count.
 
 **Last-termination evidence, including when no event counter is available:**
 
@@ -333,14 +335,14 @@ max by (namespace, pod, uid, container) (
 
 A positive gauge means an OOM termination reason was observed, **not** how many
 OOMs occurred or when. The underlying termination can predate the window and
-repeated OOMs may leave the gauge unchanged. Use a matching termination timestamp
-or retained event evidence to establish occurrence time; otherwise say timing
-and count are unknown. Do not sum this with OOM event counts.
+repeated OOMs may leave the gauge unchanged. Use a matching termination
+timestamp or retained event evidence to establish occurrence time; otherwise say
+timing and count are unknown. Do not sum this with OOM event counts.
 
 **Latest observed OOM termination timestamp.** Match reason and timestamp at
 each observation **before** reducing over time. Never join independently
-computed 30-day maxima of timestamp and reason: an OOM on Monday followed by
-an `Error` on Friday would incorrectly become a Friday OOM.
+computed 30-day maxima of timestamp and reason: an OOM on Monday followed by an
+`Error` on Friday would incorrectly become a Friday OOM.
 
 ```promql
 # Per-pod latest observed OOM termination time (Unix seconds, not a count)
@@ -356,22 +358,22 @@ max by (namespace, pod, uid, container) (
 * on (namespace, pod) group_left $OWNERS_30D
 ```
 
-This example assumes both gauges have the same pod UID and scrape-source
-labels. Confirm that schema; retain any additional labels needed to pair the
-same source, and filter to the selected cluster. Do not collapse different
-scrape sources or pod UIDs before matching. If identity or consistent paired
-samples cannot be established, use retained events or a pod's matching
+This example assumes both gauges have the same pod UID and scrape-source labels.
+Confirm that schema; retain any additional labels needed to pair the same
+source, and filter to the selected cluster. Do not collapse different scrape
+sources or pod UIDs before matching. If identity or consistent paired samples
+cannot be established, use retained events or a pod's matching
 `lastState.terminated.reason` and `.finishedAt`, or mark timing unknown.
 
 The `1m` subquery step is illustrative: use no coarser than the source scrape
 interval, not the CPU/memory `10m` statistics step, and save the actual
-resolution. Even then, short-lived reasons can be missed between scrapes.
-After querying, retain only event timestamps in the selected `(start, end]`
-interval; a carried-forward pre-window OOM is not a new OOM. For verification,
-use the post-rollout interval for both lookbacks and these timestamp bounds.
-Report this as the **latest observed** OOM, not proof that every OOM was seen.
-No matching samples means no observed evidence, not a verified zero when
-coverage is insufficient.
+resolution. Even then, short-lived reasons can be missed between scrapes. After
+querying, retain only event timestamps in the selected `(start, end]` interval;
+a carried-forward pre-window OOM is not a new OOM. For verification, use the
+post-rollout interval for both lookbacks and these timestamp bounds. Report this
+as the **latest observed** OOM, not proof that every OOM was seen. No matching
+samples means no observed evidence, not a verified zero when coverage is
+insufficient.
 
 **Restarts across the workload**, deduplicated by pod identity before summing:
 
@@ -564,6 +566,175 @@ terminated-pod series:
 `cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests`,
 `cluster:namespace:pod_memory:active:kube_pod_container_resource_requests`, and
 the matching `…:kube_pod_container_resource_limits`.
+
+## Cluster Capacity Context (Fleet Impact)
+
+Per-container numbers say nothing about whether a cluster can absorb them or
+whether a raise buys anything. Pull these **per cluster** once (instant queries
+at the window end, plus a 30-day p95 where noted) and feed them into the Fleet
+Impact section of the report. Prefer the mixin recording rules when present;
+fall back to the raw `kube_*`/`node_*` series.
+
+> **Cluster-wide sums over 30 days are expensive.** A `sum(...)` over every
+> container in the cluster at `[30d:10m]` can exceed VictoriaMetrics' per-query
+> sample limit (verified live). Default these cluster-level `*_over_time`
+> queries to **`[30d:1h]`** — the p95 of a fleet total barely moves between 10m
+> and 1h steps — and only if that still fails split the window into chunks (e.g.
+> 5 × 6d) and combine the per-chunk percentiles conservatively (take the max of
+> the chunk p95s). State the step/chunking used.
+
+```promql
+# allocatable (schedulable capacity), excluding control-plane / tainted pools if
+# the target cannot land there — state which node selector was used
+sum(kube_node_status_allocatable{resource="cpu"})
+sum(kube_node_status_allocatable{resource="memory"})
+
+# requested by running/pending pods (mixin :active: rules ignore terminated pods)
+sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests)
+sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_requests)
+# fallback
+sum(kube_pod_container_resource_requests{resource="cpu"}    * on (namespace, pod) group_left max by (namespace, pod) (kube_pod_status_phase{phase=~"Running|Pending"} == 1))
+sum(kube_pod_container_resource_requests{resource="memory"} * on (namespace, pod) group_left max by (namespace, pod) (kube_pod_status_phase{phase=~"Running|Pending"} == 1))
+
+# actually used, p95 over the window (coarse step — see the note above)
+quantile_over_time(0.95, (sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m))[30d:1h])
+quantile_over_time(0.95, (sum(node_namespace_pod_container:container_memory_working_set_bytes))[30d:1h])
+
+# node-level CPU contention on the nodes that hosted the target's pods
+# (node PSI; cgroup v2 + node-exporter pressure collector). Join the target's
+# pods to their nodes via kube_pod_info, then take p95 / peak of the some-wait
+# fraction across those nodes.
+#
+# PREFERRED join: kube-prometheus relabels the Kubernetes node name onto
+# node-exporter targets as a `node` label (from __meta_kubernetes_pod_node_name),
+# so no label surgery is needed. Probe: count(node_pressure_cpu_waiting_seconds_total{node!=""}) > 0
+quantile_over_time(0.95, (
+  max(
+    rate(node_pressure_cpu_waiting_seconds_total[5m])
+    and on (node) (count by (node) (kube_pod_info{namespace="$NS", pod=~"$WL-.*"}) > 0)
+  )
+)[30d:1h])
+
+# FALLBACK join when node-exporter has no `node` label: go through the node's
+# internal IP (kube_node_info.internal_ip == node-exporter instance host), which
+# is case-safe. Do NOT join on node_uname_info{nodename}: on AKS and other
+# providers the uname hostname differs in case from the Kubernetes node name and
+# the join silently drops nodes (verified live).
+quantile_over_time(0.95, (
+  max(
+    label_replace(rate(node_pressure_cpu_waiting_seconds_total[5m]), "internal_ip", "$1", "instance", "([^:]+):?.*")
+    * on (internal_ip) group_left (node) kube_node_info
+    and on (node) (count by (node) (kube_pod_info{namespace="$NS", pod=~"$WL-.*"}) > 0)
+  )
+)[30d:1h])
+# (VictoriaMetrics only: label_lowercase(...) on both sides of a name-based join
+# is a last resort if neither label is available.)
+
+# fallback when node PSI is absent: node CPU busy fraction on those nodes
+# (same join as above; the preferred `node`-label form shown)
+quantile_over_time(0.95, (
+  max(
+    1 - avg by (node) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+    and on (node) (count by (node) (kube_pod_info{namespace="$NS", pod=~"$WL-.*"}) > 0)
+  )
+)[30d:1h])
+```
+
+Always cross-check the join: the number of nodes matched must equal the number
+of distinct `node` values in `kube_pod_info` for the target over the window. A
+smaller count means the join dropped nodes and the PSI figure is unreliable.
+
+Derive and report, per cluster:
+
+| Figure                           | Formula                               | Use                                                         |
+| -------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| requested ÷ allocatable          | Σ requests / Σ allocatable            | bin-packing / cost; what node count follows                 |
+| used ÷ allocatable               | p95 Σ usage / Σ allocatable           | true node efficiency; the figure rightsizing should raise   |
+| used ÷ requested                 | p95 Σ usage / Σ requests              | accuracy; >100% = hidden overcommit, ≪100% = reserved slack |
+| Δrequest of this change          | Σ(new − old) × replicas, per resource | the headline fleet impact, also as % of allocatable         |
+| node CPU PSI (hosting nodes) p95 | query above                           | gate for CPU raises on a no-CPU-limit cluster               |
+
+Interpretation for the CPU raise gate (no CPU limits):
+
+| Container CPU PSI | Node CPU PSI / busy | Verdict                                                                                                                                                            |
+| ----------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| elevated          | any                 | starved — raise the request (staged if > ~50%)                                                                                                                     |
+| ≈ 0               | elevated            | contended node, container currently winning — raise is defensible, say so                                                                                          |
+| ≈ 0               | borderline (≈ 3–5%) | approaching contention — raise to the typical p95 × 1.15 is **defensible, user's call**; say the container's own usage-above-request is part of that node pressure |
+| ≈ 0               | ≈ 0 / low (< ~3%)   | harmless bursting — **no raise**; report usage-above-request as accuracy only                                                                                      |
+
+The replica multiplier matters: for a StatefulSet with 3 replicas a +2.5-core
+per-pod raise is +7.5 cores of requests; for an autoscaled Deployment report the
+impact at the observed average **and** peak replica counts (verified live: a
++2Gi/pod gateway raise was +32Gi at the 16-pod average and +98Gi at the 49-pod
+peak).
+
+### Cost (OpenCost Node Pricing) — Optional, Probe First
+
+When OpenCost (or a managed variant such as the AKS cost-analysis add-on) ships
+its node pricing series, convert the fleet impact into a monthly amount. The
+managed installs do **not** expose `opencost_build_info`, so probe for the
+pricing series itself:
+
+```promql
+count(node_cpu_hourly_cost)
+count(node_ram_hourly_cost)
+```
+
+Empty → omit the cost column and say "OpenCost pricing series absent". Present →
+pull, per cluster:
+
+```promql
+# unit prices: per core-hour and per GiB-hour (the RAM series is per GB of RAM,
+# opencost/opencost pkg/costmodel/metrics.go), averaged over the nodes the target
+# can be scheduled on (join through kube_pod_info -> node as in the PSI query, or
+# average the whole cluster and say so). The series carry NO currency label: the
+# amount is in the currency the installation is configured for (managed installs
+# such as the AKS add-on use the subscription's billing currency).
+avg(node_cpu_hourly_cost)
+avg(node_ram_hourly_cost)
+
+# whole-cluster node spend and idle (unrequested) share, instant at the window end
+sum(node_total_hourly_cost) * 730
+(
+  (sum(kube_node_status_allocatable{resource="cpu"})    - sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests))                * avg(node_cpu_hourly_cost)
++ (sum(kube_node_status_allocatable{resource="memory"}) - sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_requests)) / 1024^3     * avg(node_ram_hourly_cost)
+) * 730
+
+# optional cross-check: OpenCost's own allocation for the target over the window
+avg_over_time((sum(container_cpu_allocation{namespace="$NS", pod=~"$WL-.*"}))[30d:1h])
+avg_over_time((sum(container_memory_allocation_bytes{namespace="$NS", pod=~"$WL-.*"}))[30d:1h])
+```
+
+Derive:
+
+| Figure              | Formula                                                                     |
+| ------------------- | --------------------------------------------------------------------------- |
+| Δ cost / month      | `(Σ ΔCPU cores × cpu_hourly + Σ Δmem GiB × ram_hourly) × 730`               |
+| idle cost / month   | `(allocatable − requested) × unit price × 730`, before and after the change |
+| Δ cost as % of idle | how much of the cluster's unrequested spend the change consumes / frees     |
+
+Rules:
+
+- **Reporting only.** Price never enters a sizing decision; it sits next to the
+  reliability evidence so the trade-off is visible. A cost figure is not a veto
+  on an OOM fix, and a cheap pod is not thereby "fine".
+- **It is a marginal estimate, not a bill.** Unit prices are list / on-demand
+  rates as the installation is configured (reserved instances, spot and savings
+  plans are usually not reflected); the true marginal cost materializes only
+  when the cluster autoscaler adds or removes a node. Label every amount
+  "estimate (OpenCost node pricing, <currency>)" and name the pricing source if
+  known.
+- **Currency.** The series do not state it. Use a currency the user has
+  confirmed once for the installation (ask, or take it from an earlier PR in the
+  repository's history); until then write "<amount> (provider currency)" and
+  never print a currency symbol you have not confirmed.
+- **State the node scope.** If the target is confined to a node pool (taints /
+  selectors), price against that pool's nodes, not the cluster average.
+- Sanity-check magnitudes once per cluster: `node_total_hourly_cost` for a node
+  should ≈ `node_cpu_hourly_cost × cores + node_ram_hourly_cost × GiB` (plus
+  GPU). If it is off by orders of magnitude, the installation reports a
+  different unit — fix the factor before publishing a number.
 
 ## Gotchas
 

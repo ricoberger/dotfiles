@@ -92,10 +92,15 @@ Analysis window: <UTC start> to <UTC end>.
 | <cluster> | <namespace> | <actual workload> | <container> | <paths>             |
 
 Changes and rationale: <live before -> proposed/applied after, why, caveats>.
-Configuration: <commit and target mapping once committed; rollout unverified>.
-Decisions: <accepted changes and relevant rejected/deferred alternatives, who
-decided, date and stated reason, or reason not given>. Previous changes:
-<relevant commit/PR/comment links>.
+Fleet impact: <per cluster Σ ΔCPU / Δmemory requests × replicas (avg and peak
+replicas for autoscaled workloads), as absolute and % of allocatable; requested
+÷ allocatable before -> after; reclaim candidates held back and the blocking
+guard; whether this change adds or frees capacity net; when OpenCost pricing is
+present, the estimated Δ cost/month and idle spend before -> after, labelled
+estimate with currency and pricing source>. Configuration: <commit and target
+mapping once committed; rollout unverified>. Decisions: <accepted changes and
+relevant rejected/deferred alternatives, who decided, date and stated reason, or
+reason not given>. Previous changes: <relevant commit/PR/comment links>.
 
 Evidence: <named baseline values, units/status, exact queries or templates and
 actual bindings, datasource and fixed UTC evaluation bounds>.
@@ -167,6 +172,16 @@ headroom target to 80% during publication.
 - Match OOM reasons and timestamps at the same observation, preserve identity
   and filter occurrence time to the window. Unknown coverage prevents proving
   zero OOMs from absent evidence.
+- For a staged change (raise or cut), the published criterion is the one that
+  decides the next step (e.g. "primary CPU PSI some-wait p95 < 3% keeps 6000m; ≥
+  5% steps to 8000m"; for a cut, "container and node PSI p95 < 3% allows the
+  second step"). For a symptomatic raise paired with a deferred cause fix,
+  include the demand signal (working-set growth per pod-day, read-into-cache
+  rate, index ÷ cache ratio) so a later run can tell whether the cause was fixed
+  or the headroom was merely consumed.
+- Report the cluster's requested ÷ allocatable and used ÷ allocatable at
+  verification time next to the baseline values, so the efficiency effect of the
+  change is visible, not only its safety effect.
 
 Read the selected PR/commit and discussion to recover the published
 configuration, baseline, queries and criteria. No local run file is needed.
