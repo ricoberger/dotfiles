@@ -21,7 +21,7 @@ return {
         library = { vim.env.VIMRUNTIME .. "/lua" },
       },
       telemetry = { enable = false },
-      diagnostics = { globals = { "vim" } },
+      diagnostics = { globals = { "vim", "rex" } },
       format = { enable = false },
     },
   },

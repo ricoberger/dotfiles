@@ -66,7 +66,7 @@ vim.opt.scrolloff = 4 -- Lines of context
 vim.opt.sessionoptions = { "buffers", "curdir", "folds", "tabpages", "winsize" }
 vim.opt.shiftround = true -- Round indent
 vim.opt.shiftwidth = 2 -- Size of an indent
-vim.opt.shortmess = "I" -- Disable the intro message
+vim.opt.shortmess:append("I") -- Disable the intro message
 vim.opt.showtabline = 0 -- Disable tabline
 vim.opt.sidescrolloff = 8 -- Columns of context
 vim.opt.signcolumn = "yes" -- Always show the signcolumn, otherwise it would shift the text each time
@@ -118,21 +118,12 @@ vim.cmd([[let &t_Cs = "\e[4:3m"]])
 vim.cmd([[let &t_Ce = "\e[4:0m"]])
 
 -- Enable the new Neovim UI, which is currently experimental.
---
--- The new, experimental Neovim UI ("vim._core.ui2", formerly "vim._extui") is
--- currently disabled because enabling it breaks treesitter highlighting: when
--- the UI is enabled the startup buffer ends up without treesitter highlighting
--- (i.e. no colors at all). This is an upstream regression in the experimental
--- feature, tracked under the "ui2" label (see e.g. neovim/neovim#36245), and it
--- happens whenever the UI is enabled - deferring the call to "VimEnter" does not
--- help. Re-enable this once the experimental UI no longer disrupts treesitter.
---
--- require("vim._core.ui2").enable({
---   enable = true,
---   msg = {
---     targets = "msg",
---   },
--- })
+require("vim._core.ui2").enable({
+  enable = true,
+  msg = {
+    targets = "msg",
+  },
+})
 
 --------------------------------------------------------------------------------
 -- FILETYPE HANDLING
