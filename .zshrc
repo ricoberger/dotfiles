@@ -133,6 +133,18 @@ zstyle ':fzf-tab:*' fzf-flags --bind ctrl-n:ignore --bind alt-b:ignore --bind al
 
 
 ################################################################################
+### gcloud
+################################################################################
+
+# The next line updates PATH for the Google Cloud SDK.
+if [ -f '/Users/ricoberger/Downloads/google-cloud-sdk/path.zsh.inc' ]; then . '/Users/ricoberger/Downloads/google-cloud-sdk/path.zsh.inc'; fi
+
+# The next line enables shell command completion for gcloud.
+if [ -f '/Users/ricoberger/Downloads/google-cloud-sdk/completion.zsh.inc' ]; then . '/Users/ricoberger/Downloads/google-cloud-sdk/completion.zsh.inc'; fi
+
+
+
+################################################################################
 ### FZF
 ################################################################################
 
