@@ -1037,6 +1037,9 @@ vim.pack.add({
 }, { confirm = false, load = true })
 
 require("gitsigns").setup({
+  -- Also attach to untracked files, so that they are shown as added and are
+  -- included in the quickfix list of the "GitDiff" command.
+  attach_to_untracked = true,
   signs = {
     add = { text = icons_git.added },
     change = { text = icons_git.modified },
