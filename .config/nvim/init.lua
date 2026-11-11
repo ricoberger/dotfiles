@@ -1037,8 +1037,7 @@ vim.pack.add({
 }, { confirm = false, load = true })
 
 require("gitsigns").setup({
-  -- Also attach to untracked files, so that they are shown as added and are
-  -- included in the quickfix list of the "GitDiff" command.
+  -- Also attach to untracked files, so that they are shown as added.
   attach_to_untracked = true,
   signs = {
     add = { text = icons_git.added },
@@ -1119,7 +1118,9 @@ require("gitsigns").setup({
     end, { buffer = bufnr })
 
     -- Git diff.
-    vim.keymap.set("n", "<leader>gsd", gitsigns.diffthis, { buffer = bufnr })
+    vim.keymap.set("n", "<leader>gsd", function()
+      gitsigns.diffthis("@")
+    end, { buffer = bufnr })
 
     -- Show hunks in quickfix list.
     vim.keymap.set("n", "<leader>gsq", function()
@@ -1135,37 +1136,46 @@ require("gitsigns").setup({
   end,
 })
 
--- The "GitDiff <base> <head>" command shows the diff of two branches via
--- gitsigns. If no branches are provided the diff between the current branch
--- and the default branch is shown. It also populates the quickfix list with the
--- hunks.
-vim.api.nvim_create_user_command("GitDiff", function(opts)
-  local base = ""
-  local head = ""
+vim.keymap.set("n", "<leader>gsD", function()
+  require("gitsigns").diff()
+end)
 
-  if #vim.fn.split(opts.args, " ") == 2 then
-    base = vim.fn.split(opts.args, " ")[1]
-    head = vim.fn.split(opts.args, " ")[2]
-  else
-    base = vim.fn.system("git branch --show-current"):gsub("[\r\n]", "")
-    head = vim.fn
-      .system("git remote show origin | sed -n '/HEAD branch/s/.*: //p'")
-      :gsub("[\r\n]", "")
+-- The "GitDiff <base> <head>" command shows the diff of two branches via
+-- gitsigns. If no branches are provided the diff between HEAD and the default
+-- branch of the remote (origin/HEAD) is shown. The changes between the merge
+-- base and the working tree, including uncommitted changes, are shown in the
+-- gitsigns diff panel (":Gitsigns diff").
+vim.api.nvim_create_user_command("GitDiff", function(opts)
+  local base = "HEAD"
+  local head = "origin/HEAD"
+
+  if #opts.fargs == 2 then
+    base = opts.fargs[1]
+    head = opts.fargs[2]
+  elseif #opts.fargs ~= 0 then
+    vim.notify("Usage: GitDiff [<base> <head>]", vim.log.levels.ERROR)
+    return
   end
 
   local result = vim.system({ "git", "merge-base", base, head }):wait()
   if result.code ~= 0 then
+    vim.notify(
+      string.format(
+        "GitDiff: no merge base for %s and %s: %s",
+        base,
+        head,
+        vim.trim(result.stderr or "")
+      ),
+      vim.log.levels.ERROR
+    )
     return
   end
 
   local commit = vim.fn.trim(result.stdout)
 
   local gitsigns = require("gitsigns")
-  gitsigns.change_base(commit, true)
-  gitsigns.setqflist("all")
+  gitsigns.diff(commit)
 end, { nargs = "*" })
-
-vim.keymap.set("n", "<leader>gsD", "<cmd>GitDiff<cr>")
 
 -- Find all merge conflicts in the current Git repository and display them in
 -- the quickfix list.
