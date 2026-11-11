@@ -5,6 +5,11 @@ echo "\n- Copy Ghostty Configuration"
 mkdir -p ~/.config
 cp -r $(pwd)/.config/ghostty ~/.config
 
+# Rex
+echo "\n- Copy Rex Configuration"
+mkdir -p ~/.config
+cp -r $(pwd)/.config/rex ~/.config
+
 # Zsh
 echo "\n- Copy Zsh Configuration"
 cp $(pwd)/.zshenv ~/.zshenv
@@ -74,6 +79,10 @@ cp -r $(pwd)/.config/pi/agent/extensions ~/.pi/agent
 cp $(pwd)/.config/pi/agent/mcp.json ~/.pi/agent/mcp.json
 cp $(pwd)/.config/pi/agent/settings.json ~/.pi/agent/settings.json
 cp $(pwd)/.config/pi/agent/AGENTS.md ~/.pi/agent/AGENTS.md
+if [ -x ~/.pi/agent/bin/pi ] && [ ! -e ~/.local/bin/pi ] && [ ! -L ~/.local/bin/pi ]; then
+  mkdir -p ~/.local/bin
+  ln -s ../../.pi/agent/bin/pi ~/.local/bin/pi
+fi
 
 echo "\n- Copy Copilot Configuration"
 mkdir -p ~/.copilot

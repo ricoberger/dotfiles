@@ -549,7 +549,7 @@ build_pr_preview() {
     local refs pv
     refs="$(build_references_section "$repo" "$number" pr)"
     pv="$(gh pr view "$number" --repo "$repo" \
-      --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,mergeable,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
+      --json number,title,state,isDraft,author,createdAt,assignees,labels,additions,deletions,baseRefName,headRefName,mergeable,mergeStateStatus,reviewDecision,reviewRequests,body,reviews,comments,reactionGroups \
       2>/dev/null)"
     # Inline review comments (comments on files / lines) are not part of
     # "gh pr view". They come from the review threads (fetched via GraphQL, the
@@ -575,6 +575,10 @@ build_pr_preview() {
            + (if .mergeable == "CONFLICTING" then "conflicting"
               elif .mergeable == "MERGEABLE" then "yes"
               else (.mergeable|ascii_downcase) end)
+           # The merge state also covers branch protection, checks and drafts,
+           # e.g. "yes (blocked)" when a required review is missing.
+           + (if (.mergeStateStatus // "UNKNOWN" | IN("UNKNOWN", "DIRTY")) then ""
+              else " (" + (.mergeStateStatus|ascii_downcase|gsub("_";" ")) + ")" end)
            else empty end),
         (if (.reviewDecision // "") != "" then "- **Review:** " + (.reviewDecision|ascii_downcase|gsub("_";" ")) else empty end),
         (if (.reviewRequests|length) > 0

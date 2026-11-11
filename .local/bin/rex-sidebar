@@ -1,0 +1,710 @@
+#!/usr/bin/env bash
+
+# rex-sidebar - Sidebar panes for Rex (git status / git commits / pull request)
+#
+# Usage: rex-sidebar [git-status | git-commits | pr]
+#
+# The panes are opened by the "sidebar_toggle" action in ~/.config/rex/init.lua
+# in the directory of the focused pane. Larger views (files, diffs, logs, ...)
+# are opened in a floating layer via the "sidebar_float" action.
+#
+# Requires bash 4+ (associative arrays), fzf, git, gh and jq.
+
+SCRIPT="$(realpath "$0")"
+FZFGH="$(dirname "$SCRIPT")/fzfgh"
+REX="${REX_BIN_DIR:+$REX_BIN_DIR/}rex"
+
+# Refresh interval of the panes in seconds. The pull request data is cached per
+# repository and branch for slightly less than its refresh interval, so that
+# several tabs on the same branch share one request.
+REX_SIDEBAR_GIT_INTERVAL="${REX_SIDEBAR_GIT_INTERVAL:-5}"
+REX_SIDEBAR_PR_INTERVAL="${REX_SIDEBAR_PR_INTERVAL:-60}"
+# Maximum number of commits shown in the git-commits pane.
+REX_SIDEBAR_COMMITS_LIMIT="${REX_SIDEBAR_COMMITS_LIMIT:-100}"
+REX_SIDEBAR_CACHE="${REX_SIDEBAR_CACHE:-${TMPDIR:-/tmp}/rex-sidebar}"
+
+# Icons in the pane titles, the same as in the git-status and fzfgh pickers.
+ICON_GIT=$'\xef\x90\x98'           # git branch (git-status)
+ICON_PR=$'\xef\x90\x87'            # pull request (fzfgh)
+
+usage() {
+  cat <<'EOF'
+rex-sidebar - Sidebar panes for Rex (git status / git commits / pull request)
+
+Usage: rex-sidebar [git-status | git-commits | pr]
+
+git-status:
+  Shows the uncommitted changes and, on a branch other than the base branch
+  (the pull request's base branch or the default branch), the files changed on
+  the branch since its merge-base.
+
+  enter  : stage / unstage selection (uncommitted changes only)
+  alt-o  : open selection in nvim (floating layer)
+  alt-d  : show diff (floating layer): of the uncommitted changes, or of the
+           branch for branch files
+  alt-b  : show blame (floating layer)
+  alt-g  : open git-status (floating layer)
+
+git-commits:
+  enter  : show commit (floating layer)
+
+pr:
+  enter  : open pull request (fzfgh view), all checks (fzfgh checks view) or
+           check logs (floating layer)
+  alt-r  : rerun failed jobs of the selected check
+  alt-o  : open pull request / check in the browser
+
+Common:
+  ctrl-d : scroll half page down
+  ctrl-u : scroll half page up
+  alt-h  : show help
+EOF
+}
+
+# Run a command in a floating layer of the current Rex window, in the current
+# directory (see the "sidebar_float" action in ~/.config/rex/init.lua). When the
+# command exits, the sidebar pane is focused again; otherwise Rex focuses
+# another pane once the floating layer is closed.
+float() {
+  local block
+  block="$("$REX" do sidebar_float --json --args "$(jq -nc --arg cwd "$PWD" \
+    '{cwd: $cwd, command: $ARGS.positional}' --args "$@")" 2>/dev/null |
+    jq -r '.block_id // empty' 2>/dev/null)"
+  [[ -z "$block" || -z "$REX_BLOCK" ]] && return
+  (
+    "$REX" wait "$block"
+    sleep 0.2
+    "$REX" focus "$REX_BLOCK"
+  ) </dev/null >/dev/null 2>&1 &
+  disown
+}
+
+# Refresh a pane in the background: every <interval> seconds the list is
+# generated again, and fzf (listening on <socket>) reloads it when it changed.
+# A reload binding that sleeps would keep fzf in a pending reload, which blocks
+# the cursor movement while --track is used.
+refresh() {
+  local socket="$1" interval="$2" view="$3" last current
+  last="$("$SCRIPT" __list "$view" | cksum)"
+  while sleep "$interval"; do
+    [[ -S "$socket" ]] || continue
+    current="$("$SCRIPT" __list "$view" | cksum)"
+    if [[ "$current" != "$last" ]]; then
+      curl -s --unix-socket "$socket" -X POST http://localhost \
+        -d "reload-sync($SCRIPT __list $view)" >/dev/null 2>&1
+      last="$current"
+    fi
+  done
+}
+
+# Run fzf for a view with a background refresh. All arguments are passed to
+# fzf.
+run_fzf() {
+  local view="$1" interval="$2" socket pid
+  shift 2
+  mkdir -p "$REX_SIDEBAR_CACHE"
+  socket="$REX_SIDEBAR_CACHE/$view-$$.sock"
+  refresh "$socket" "$interval" "$view" &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null; rm -f "$socket"' EXIT
+  "$SCRIPT" __list "$view" | fzf --listen "$socket" "$@"
+}
+
+# ---------- Git ----------
+
+# Path of the pull request cache file of the current branch (see pr_data).
+pr_cache_file() {
+  local git_root branch key
+  git_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  branch="$(git branch --show-current)"
+  [[ -z "$branch" ]] && return 1
+  key="$(printf '%s:%s' "$git_root" "$branch" | cksum | cut -d ' ' -f 1)"
+  printf '%s\n' "$REX_SIDEBAR_CACHE/pr-$key.json"
+}
+
+# Print the base branch of the current branch: the base branch of its pull
+# request (from the pull request cache, which is never fetched here), else the
+# remote's default branch (origin/HEAD), falling back to origin/main,
+# origin/master, main and master. Prints nothing when none of them exists.
+git_base_ref() {
+  local cache pr_base base
+  if cache="$(pr_cache_file)" && [[ -s "$cache" ]]; then
+    pr_base="$(jq -r '.pr.baseRefName // empty' "$cache" 2>/dev/null)"
+    if [[ -n "$pr_base" ]] && git rev-parse --verify --quiet "origin/$pr_base" >/dev/null; then
+      printf '%s\n' "origin/$pr_base"
+      return
+    fi
+  fi
+  base="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"
+  if [[ -z "$base" ]]; then
+    for base in origin/main origin/master main master ""; do
+      [[ -n "$base" ]] && git rev-parse --verify --quiet "$base" >/dev/null && break
+    done
+  fi
+  [[ -n "$base" ]] && printf '%s\n' "$base"
+  return 0
+}
+
+# Print the merge-base of HEAD with the base branch, when a branch other than
+# the base branch is checked out.
+git_branch_merge_base() {
+  local base branch
+  base="$(git_base_ref)"
+  branch="$(git branch --show-current)"
+  [[ -n "$base" && -n "$branch" && "$branch" != "${base#origin/}" ]] || return 1
+  git merge-base "$base" HEAD 2>/dev/null
+}
+
+# Read the output of "git diff --numstat -z" from stdin into the associative
+# array named by $1: path -> "added\tdeleted". With -z, renames are printed as
+# "added\tdeleted\t\0old\0new\0".
+read_numstat() {
+  local -n numstat_out="$1"
+  local entry stat path
+  while IFS= read -r -d '' entry; do
+    stat="${entry%$'\t'*}"
+    path="${entry##*$'\t'}"
+    if [[ -z "$path" ]]; then
+      IFS= read -r -d '' _
+      IFS= read -r -d '' path
+    fi
+    numstat_out["$path"]="$stat"
+  done
+}
+
+# Format the "added\tdeleted" stat of a file as " +N -M" (or " bin").
+format_stat() {
+  local add del
+  [[ -z "$1" ]] && return
+  add="${1%%$'\t'*}"
+  del="${1##*$'\t'}"
+  if [[ "$add" == "-" ]]; then
+    printf ' %sbin%s' "$GIT_GRAY" "$GIT_RESET"
+  else
+    printf ' %s+%s %s-%s%s' "$GIT_NEW" "$add" "$GIT_OLD" "$del" "$GIT_RESET"
+  fi
+}
+
+# ---------- Git status ----------
+
+# Status icons, the same as the git icons in ~/.config/nvim/init.lua.
+declare -A GIT_ICONS=(
+  [A]="✚"
+  [M]="○"
+  [T]="○"
+  [D]="✖"
+  [R]=$'\U000f0055'
+  [C]=$'\U000f0055'
+  [U]=$'\ue727'
+  [?]=$'\uf128'
+  [" "]=" "
+)
+GIT_ICON_STAGED=$'\U000f0c52'
+GIT_ICON_UNSTAGED=$'\U000f0131'
+GIT_ICON_COMMIT=$'\U000f0718'
+GIT_RESET=$'\e[0m'
+GIT_GRAY=$'\e[90m'
+GIT_BOLD=$'\e[1m'
+# Colors of added / deleted lines, set from the git config by list_git_status.
+GIT_NEW=$'\e[32m'
+GIT_OLD=$'\e[31m'
+
+# Print the git status list as "<id>\t<path>\t<display>" lines: the
+# uncommitted changes ("c:<path>" ids) and, when a branch other than the base
+# branch is checked out, the files the branch changed since its merge-base with
+# the base branch ("b:<path>" ids, the files of its pull request). Each section
+# with files gets a header row ("header:*" ids).
+# The colors are the ones git uses for "git status --short" and "git diff".
+#
+# The id is used by fzf to keep the cursor on the same item across reloads
+# (--track --id-nth 1) and by the actions to tell the sections apart. It must
+# never be empty, because fzf blocks the list forever ("+T*") when it tracks an
+# item with an empty id, so placeholder rows use "info" as id and an empty path.
+list_git_status() {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'info\t\t\e[90mNot a git repository\e[0m\n'
+    return
+  fi
+
+  local staged changed untracked unmerged reset="$GIT_RESET"
+  staged="$(git config --get-color color.status.added "$(git config color.status.updated || echo green)")"
+  changed="$(git config --get-color color.status.changed red)"
+  untracked="$(git config --get-color color.status.untracked red)"
+  unmerged="$(git config --get-color color.status.unmerged red)"
+  GIT_NEW="$(git config --get-color color.diff.new green)"
+  GIT_OLD="$(git config --get-color color.diff.old red)"
+
+  # Lines added / deleted per file (staged and unstaged changes against HEAD).
+  local -A stats=()
+  read_numstat stats < <(git diff --numstat -z HEAD 2>/dev/null)
+
+  local rows=() entry path stat xy x y box
+  while IFS= read -r -d '' entry; do
+    xy="${entry:0:2}"
+    path="${entry:3}"
+    # Renames and copies are followed by the original path.
+    [[ "$xy" == R* || "$xy" == C* ]] && IFS= read -r -d '' _
+    x="${xy:0:1}"
+    y="${xy:1:1}"
+    stat="$(format_stat "${stats[$path]}")"
+    # A checked checkbox when all changes of a file are staged, followed by the
+    # type of the change.
+    case "$xy" in
+      "??")
+        rows+=("c:$path"$'\t'"$path"$'\t'"$untracked$GIT_ICON_UNSTAGED ${GIT_ICONS[?]}$reset $path")
+        ;;
+      DD | AU | UD | UA | DU | AA | UU)
+        rows+=("c:$path"$'\t'"$path"$'\t'"$unmerged$GIT_ICON_UNSTAGED ${GIT_ICONS[U]}$reset $path$stat")
+        ;;
+      *)
+        if [[ "$y" == " " ]]; then
+          rows+=("c:$path"$'\t'"$path"$'\t'"$staged$GIT_ICON_STAGED ${GIT_ICONS[$x]:-$x}$reset $path$stat")
+        else
+          # Partly staged files get an unchecked checkbox in the staged color.
+          [[ "$x" == " " ]] && box="$changed" || box="$staged"
+          rows+=("c:$path"$'\t'"$path"$'\t'"$box$GIT_ICON_UNSTAGED $changed${GIT_ICONS[$y]:-$y}$reset $path$stat")
+        fi
+        ;;
+    esac
+  done < <(git status --porcelain=v1 -z --untracked-files=all)
+
+  # Files changed on the branch (committed changes since the merge-base).
+  local mb base branch_rows=() status color files=0 added=0 deleted=0
+  local -A branch_stats=()
+  if mb="$(git_branch_merge_base)"; then
+    read_numstat branch_stats < <(git diff --numstat -z "$mb" HEAD 2>/dev/null)
+    while IFS= read -r -d '' status; do
+      IFS= read -r -d '' path
+      # Renames and copies are followed by the new path.
+      [[ "$status" == R* || "$status" == C* ]] && IFS= read -r -d '' path
+      status="${status:0:1}"
+      case "$status" in
+        A) color="$staged" ;;
+        D) color="$GIT_OLD" ;;
+        *) color="$changed" ;;
+      esac
+      stat="${branch_stats[$path]}"
+      if [[ -n "$stat" && "${stat%%$'\t'*}" != "-" ]]; then
+        added=$((added + ${stat%%$'\t'*}))
+        deleted=$((deleted + ${stat##*$'\t'}))
+      fi
+      files=$((files + 1))
+      branch_rows+=("b:$path"$'\t'"$path"$'\t'"  $color${GIT_ICONS[$status]:-$status}$reset $path$(format_stat "$stat")")
+    done < <(git diff --name-status -z "$mb" HEAD 2>/dev/null)
+  fi
+
+  if [[ ${#rows[@]} -eq 0 && ${#branch_rows[@]} -eq 0 ]]; then
+    printf 'info\t\t%sNo changes%s\n' "$GIT_GRAY" "$reset"
+    return 0
+  fi
+  if [[ ${#rows[@]} -gt 0 ]]; then
+    printf 'header:changes\t\t%sChanges%s\n' "$GIT_BOLD" "$reset"
+  fi
+  if [[ ${#branch_rows[@]} -gt 0 ]]; then
+    base="$(git_base_ref)"
+    rows+=("header:branch"$'\t\t'"${GIT_BOLD}Branch${reset} ${GIT_GRAY}· ${base#origin/} · $files file$([[ $files -ne 1 ]] && echo s)${reset} ${GIT_NEW}+$added ${GIT_OLD}-$deleted${reset}")
+    rows+=("${branch_rows[@]}")
+  fi
+  printf '%s\n' "${rows[@]}"
+}
+
+# Stage the files of the given git status ids, or unstage them when all their
+# changes are staged. Only uncommitted changes ("c:<path>" ids) are staged;
+# branch files and headers are ignored.
+git_toggle_stage() {
+  local id file status
+  for id in "$@"; do
+    [[ "$id" == c:* ]] || continue
+    file="${id#c:}"
+    status="$(git status --porcelain=v1 -- "$file" | head -n 1)"
+    if [[ "${status:1:1}" == " " ]]; then
+      git reset -q -- "$file"
+    else
+      git add -A -- "$file"
+    fi
+  done
+}
+
+# Show the diff (against HEAD), the branch diff (against the merge-base with the
+# base branch), the blame of a file or a commit in less. Called inside the
+# floating layer.
+git_show() {
+  local kind="$1" file="$2" out
+  case "$kind" in
+    diff)
+      out="$(git diff --no-ext-diff --color=always HEAD -- "$file" 2>/dev/null)"
+      [[ -z "$out" ]] && out="$(git diff --no-ext-diff --color=always --no-index -- /dev/null "$file" 2>/dev/null)"
+      ;;
+    blame)
+      out="$(git -c color.ui=always blame --color-by-age -- "$file" 2>&1)"
+      ;;
+    branch-diff)
+      # The changes of the branch (its pull request) to the file.
+      local mb
+      mb="$(git_branch_merge_base)" &&
+        out="$(git diff --no-ext-diff --color=always "$mb" HEAD -- "$file" 2>/dev/null)"
+      ;;
+    commit)
+      out="$(git show --no-ext-diff --color=always --stat --patch "$file" 2>&1)"
+      ;;
+  esac
+  printf '%s\n' "${out:-No $kind for $file}" | less -R
+}
+
+run_git_status() {
+  local git_root
+  git_root="$(git rev-parse --show-toplevel 2>/dev/null)" && cd "$git_root" || true
+
+  run_fzf git-status "$REX_SIDEBAR_GIT_INTERVAL" \
+    --ansi \
+    --multi \
+    --reverse \
+    --no-sort \
+    --track \
+    --height 100% \
+    --info right \
+    --delimiter $'\t' \
+    --with-nth 3 \
+    --id-nth 1 \
+    --prompt " " \
+    --border rounded \
+    --border-label " $ICON_GIT Git Status " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "enter:execute-silent($SCRIPT __git-action stage {+1})+clear-selection+reload-sync($SCRIPT __list git-status)" \
+    --bind "alt-o:execute-silent($SCRIPT __git-action open {1})" \
+    --bind "alt-d:execute-silent($SCRIPT __git-action diff {1})" \
+    --bind "alt-b:execute-silent($SCRIPT __git-action blame {1})" \
+    --bind "alt-g:execute-silent($SCRIPT __git-action git-status)"
+}
+
+# ---------- Git commits ----------
+
+# Print the commits of the current branch as "<sha>\t<sha>\t<display>" (id,
+# value and display, see list_git_status): the commits since the merge-base with
+# the default branch, or the last commits when the default branch itself is
+# checked out. Commits which are not pushed to the upstream branch are marked.
+list_git_commits() {
+  if ! git rev-parse --verify --quiet HEAD >/dev/null; then
+    printf 'info\t\t\e[90mNo commits\e[0m\n'
+    return
+  fi
+
+  local base branch range=() sha="" unpushed=""
+  base="$(git_base_ref)"
+  branch="$(git branch --show-current)"
+
+  if [[ -n "$base" && "$branch" != "${base#origin/}" ]]; then
+    range=("$base..HEAD")
+  else
+    range=(HEAD)
+  fi
+
+  # Commits which are not in the upstream branch, or without an upstream branch,
+  # which are not in any remote branch.
+  if git rev-parse --verify --quiet '@{upstream}' >/dev/null 2>&1; then
+    unpushed=" $(git rev-list '@{upstream}..HEAD' | tr '\n' ' ')"
+  else
+    unpushed=" $(git rev-list HEAD --not --remotes | tr '\n' ' ')"
+  fi
+
+  local commit_color date_color pushed_color unpushed_color reset=$'\e[0m'
+  commit_color="$(git config --get-color color.diff.commit yellow)"
+  date_color=$'\e[90m'
+  pushed_color=$'\e[90m'
+  unpushed_color="$(git config --get-color color.status.untracked red)"
+
+  local rows=() short subject date icon
+  while IFS=$'\t' read -r sha short date subject; do
+    # "2 hours ago" -> "2h", "1 year, 2 months ago" -> "1y"
+    date="${date%%,*}"
+    date="${date% ago}"
+    case "$date" in
+      *second*) date="${date%% *}s" ;;
+      *minute*) date="${date%% *}m" ;;
+      *hour*) date="${date%% *}h" ;;
+      *day*) date="${date%% *}d" ;;
+      *week*) date="${date%% *}w" ;;
+      *month*) date="${date%% *}mo" ;;
+      *year*) date="${date%% *}y" ;;
+    esac
+    if [[ "$unpushed" == *" $sha "* ]]; then
+      icon="${unpushed_color}↑${reset}"
+    else
+      icon="${pushed_color}${GIT_ICON_COMMIT}${reset}"
+    fi
+    rows+=("$sha"$'\t'"$sha"$'\t'"$icon ${commit_color}${short}${reset} ${date_color}${date}${reset} $subject")
+  done < <(git log --max-count="$REX_SIDEBAR_COMMITS_LIMIT" --format='%H%x09%h%x09%cr%x09%s' "${range[@]}" --)
+
+  if [[ ${#rows[@]} -eq 0 ]]; then
+    printf 'info\t\t\e[90mNo commits on %s\e[0m\n' "${branch:-HEAD}"
+  else
+    printf '%s\n' "${rows[@]}"
+  fi
+}
+
+run_git_commits() {
+  local git_root
+  git_root="$(git rev-parse --show-toplevel 2>/dev/null)" && cd "$git_root" || true
+
+  run_fzf git-commits "$REX_SIDEBAR_GIT_INTERVAL" \
+    --ansi \
+    --reverse \
+    --no-sort \
+    --track \
+    --height 100% \
+    --info right \
+    --delimiter $'\t' \
+    --with-nth 3 \
+    --id-nth 1 \
+    --prompt " " \
+    --border rounded \
+    --border-label " $GIT_ICON_COMMIT Git Commits " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "enter:execute-silent($SCRIPT __git-action commit {2})"
+}
+
+# ---------- Pull request ----------
+
+# Print the cached pull request data (JSON) of the current branch, fetching it
+# when the cache is missing or older than the refresh interval. Pass "force" to
+# always fetch.
+pr_data() {
+  local force="$1" branch cache mtime pr url repo number checks counts tmp
+
+  cache="$(pr_cache_file)" || return 1
+  branch="$(git branch --show-current)"
+  if [[ "$force" != "force" && -s "$cache" ]]; then
+    mtime="$(stat -f %m "$cache" 2>/dev/null || stat -c %Y "$cache" 2>/dev/null)"
+    if (($(date +%s) - ${mtime:-0} < REX_SIDEBAR_PR_INTERVAL - 5)); then
+      cat "$cache"
+      return 0
+    fi
+  fi
+
+  mkdir -p "$REX_SIDEBAR_CACHE"
+  if pr="$(gh pr view --json number,title,url,state,isDraft,reviewDecision,mergeable,mergeStateStatus,baseRefName 2>/dev/null)"; then
+    # Derive the repository from the pull request's url (the base repository),
+    # so it also works for pull requests coming from a fork.
+    url="$(jq -r '.url' <<<"$pr")"
+    repo="${url#https://github.com/}"
+    repo="${repo%%/pull/*}"
+    number="$(jq -r '.number' <<<"$pr")"
+
+    checks="$(gh pr checks "$number" --repo "$repo" --json bucket,link,name,workflow 2>/dev/null)"
+    [[ -z "$checks" ]] && checks="[]"
+
+    # Number of comments (issue and review comments) and review threads.
+    counts="$(gh api graphql \
+      -F owner="${repo%%/*}" -F name="${repo#*/}" -F number="$number" \
+      -f query='
+        query($owner: String!, $name: String!, $number: Int!) {
+          repository(owner: $owner, name: $name) {
+            pullRequest(number: $number) {
+              comments { totalCount }
+              reviewThreads(first: 100) {
+                totalCount
+                nodes { isResolved comments { totalCount } }
+              }
+            }
+          }
+        }' \
+      --jq '.data.repository.pullRequest | {
+        comments: (.comments.totalCount + ([.reviewThreads.nodes[].comments.totalCount] | add // 0)),
+        threads: .reviewThreads.totalCount,
+        unresolved: ([.reviewThreads.nodes[] | select(.isResolved | not)] | length)
+      }' 2>/dev/null)"
+    [[ -z "$counts" ]] && counts="null"
+
+    jq -nc --arg repo "$repo" --argjson pr "$pr" --argjson checks "$checks" --argjson counts "$counts" \
+      '{repo: $repo, pr: $pr, checks: $checks, counts: $counts}' >"$cache.$$"
+  else
+    jq -nc --arg branch "$branch" '{branch: $branch, pr: null}' >"$cache.$$"
+  fi
+  mv "$cache.$$" "$cache"
+  cat "$cache"
+}
+
+# Print the pull request list as "<type>\t<repo>\t<link>\t<id>\t<display>".
+list_pr() {
+  local data
+  if ! data="$(pr_data "$1")"; then
+    printf 'info\t\t\tinfo\t\e[90mNo branch checked out\e[0m\0'
+    return
+  fi
+
+  # The items are NUL-terminated (fzf --read0), so that the pull request can be
+  # one multi-line item above the checks.
+  jq -j '
+    def color(c): "\u001b[" + {green:"32",yellow:"33",red:"31",mauve:"35",gray:"90"}[c] + "m";
+    def reset: "\u001b[0m";
+    def gray(text): color("gray") + text + reset;
+    def field(name): name + ": ";
+    .repo as $repo
+    | def row(type; link; id; text): ([type, $repo, link, id, text] | join("\t")) + "\u0000";
+
+    if .pr == null then
+      row("info"; ""; "info"; color("gray") + "No pull request for " + .branch + reset)
+    else
+      .pr as $pr
+      | (.counts // {}) as $c
+      | ([.checks[] | select(.bucket == "fail" or .bucket == "cancel")] | length) as $failed
+      | ([.checks[] | select(.bucket == "pending")] | length) as $running
+      | ([.checks[] | select(.bucket == "pass")] | length) as $passed
+      | row("pr"; $pr.url; "pr"; [
+          "\u001b[1m#\($pr.number)" + reset + " " + $pr.title,
+          # The same wording as the pull request preview in fzfgh.
+          ([
+            field("State") + (if $pr.state == "MERGED" then color("mauve")
+                              elif $pr.state == "CLOSED" then color("red")
+                              else color("green") end) + ($pr.state // "?") + reset
+              + (if $pr.isDraft then gray(" · ") + color("gray") + "draft" + reset else "" end)
+          ] | join("")),
+          (if ($pr.mergeable // "") != "" then field("Mergeable")
+               + (if $pr.mergeable == "CONFLICTING" then color("red") + "conflicting"
+                  elif $pr.mergeable == "MERGEABLE" then color("green") + "yes"
+                  else color("gray") + ($pr.mergeable | ascii_downcase) end) + reset
+               + (if ($pr.mergeStateStatus // "UNKNOWN" | IN("UNKNOWN", "DIRTY")) then ""
+                  else " " + ({CLEAN: color("green"), HAS_HOOKS: color("green"), DRAFT: color("gray")}[$pr.mergeStateStatus]
+                              // color("yellow"))
+                    + "(" + ($pr.mergeStateStatus | ascii_downcase | gsub("_"; " ")) + ")" + reset end)
+             else empty end),
+          (if ($pr.reviewDecision // "") != "" then field("Review")
+               + (if $pr.reviewDecision == "APPROVED" then color("green")
+                  elif $pr.reviewDecision == "CHANGES_REQUESTED" then color("red")
+                  else color("yellow") end)
+               + ($pr.reviewDecision | ascii_downcase | gsub("_"; " ")) + reset
+             else empty end),
+          field("Comments") + "\($c.comments // "?")",
+          field("Threads") + "\($c.unresolved // "?")/\($c.threads // "?") unresolved",
+          # fzf drops trailing empty lines of an item, so use a blank
+          # character (U+2800) for the empty line above the checks.
+          "\u2800"
+        ] | join("\n")),
+        row("checks"; $pr.url; "checks";
+          field("Checks") + color("red") + "✖ \($failed) " + color("yellow") + "● \($running) "
+          + color("green") + "✓ \($passed)" + reset),
+        (.checks
+         | map(. + {order: ({fail: 0, cancel: 1, pending: 2, pass: 3, skipping: 4}[.bucket] // 5)})
+         | sort_by(.order, .workflow, .name)
+         | .[]
+         | (if .bucket == "fail" then color("red") + "✖"
+            elif .bucket == "cancel" then color("gray") + "⊘"
+            elif .bucket == "pending" then color("yellow") + "●"
+            elif .bucket == "pass" then color("green") + "✓"
+            else color("gray") + "○" end) as $icon
+         | (if (.workflow // "") == "" then .name else .workflow + " / " + .name end) as $label
+         | row("check"; .link // ""; "check:" + $label; $icon + reset + " " + $label))
+    end
+  ' <<<"$data"
+}
+
+run_pr() {
+  local git_root
+  git_root="$(git rev-parse --show-toplevel 2>/dev/null)" && cd "$git_root" || true
+
+  run_fzf pr "$REX_SIDEBAR_PR_INTERVAL" \
+    --read0 \
+    --ansi \
+    --reverse \
+    --no-sort \
+    --track \
+    --height 100% \
+    --info right \
+    --delimiter $'\t' \
+    --with-nth 5 \
+    --id-nth 4 \
+    --prompt " " \
+    --border rounded \
+    --border-label " $ICON_PR Pull Request " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "enter:execute-silent($SCRIPT __pr-action view {1} {2} {3})" \
+    --bind "alt-r:execute($SCRIPT __pr-action rerun {1} {2} {3})+reload-sync($SCRIPT __list pr force)" \
+    --bind "alt-o:execute-silent($SCRIPT __pr-action browse {1} {2} {3})"
+}
+
+# ---------- Commands ----------
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    ;;
+
+  __list)
+    case "$2" in
+      git-status) list_git_status ;;
+      git-commits) list_git_commits ;;
+      pr) list_pr "$3" ;;
+    esac
+    ;;
+
+  __git-action)
+    action="$2"
+    shift 2
+    case "$action" in
+      stage) git_toggle_stage "$@" ;;
+      # Git status ids: "c:<path>" (uncommitted change), "b:<path>" (file
+      # changed on the branch); the git commits pane passes the commit.
+      open)
+        [[ "$1" == [cb]:* ]] && float nvim -- "${1:2}"
+        ;;
+      diff)
+        [[ "$1" == c:* ]] && float "$SCRIPT" __git-show diff "${1#c:}"
+        [[ "$1" == b:* ]] && float "$SCRIPT" __git-show branch-diff "${1#b:}"
+        ;;
+      blame)
+        [[ "$1" == [cb]:* ]] && float "$SCRIPT" __git-show blame "${1:2}"
+        ;;
+      commit) [[ -n "$1" ]] && float "$SCRIPT" __git-show commit "$1" ;;
+      git-status) float git-status ;;
+    esac
+    ;;
+
+  __git-show)
+    git_show "$2" "$3"
+    ;;
+
+  # Called as: rex-sidebar __pr-action <view|rerun|browse> <type> <repo> <link>
+  __pr-action)
+    action="$2"
+    type="$3"
+    repo="$4"
+    link="$5"
+    [[ -z "$link" ]] && exit 0
+    case "$action:$type" in
+      view:pr) float fzfgh view "$link" ;;
+      view:check) float fzfgh __checks-action view "$repo" "$link" ;;
+      rerun:check) "$FZFGH" __checks-action rerun "$repo" "$link" ;;
+      view:checks)
+        number="$(pr_data | jq -r '.pr.number // empty')"
+        [[ -n "$number" ]] && float fzfgh __checks "$repo" "$number"
+        ;;
+      browse:*) open "$link" ;;
+    esac
+    ;;
+
+  git-status)
+    run_git_status
+    ;;
+
+  git-commits)
+    run_git_commits
+    ;;
+
+  pr)
+    run_pr
+    ;;
+
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac

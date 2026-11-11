@@ -24,7 +24,8 @@
 # existing one instead. Deleting a done item removes its session and workspace
 # (worktrees only without local changes; their branches are kept). Ad-hoc items
 # created with "fzftasks new --cwd" use the current directory as an external
-# workspace instead, which fzftasks never prepares or removes.
+# workspace instead, which fzftasks never prepares or removes; their first run
+# starts in the current terminal.
 #
 # State is stored in a SQLite database. Items are in one of these states:
 #
@@ -173,6 +174,8 @@ reset_stale() {
   while IFS=$'\t' read -r key pid; do
     if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
       sql "UPDATE items SET state = 'waiting', pid = NULL, updated_at = $(now) WHERE key = $(q "$key") AND state = 'running';"
+      # Remove the item's "working" record from the picker's terminal.
+      queue_notification "$key" clear ""
     fi
   done < <(sql "SELECT key, pid FROM items WHERE $where;")
 }
@@ -193,25 +196,72 @@ md_render() {
   fi
 }
 
-# Queue a notification for an item. The picker shows it via OSC 777 in its own
-# Ghostty tab, so clicking the notification focuses fzftasks.
+# Queue a notification for an item: the program status (done, error or clear,
+# see status_item) and a message. The picker shows the message via OSC 777 in
+# its own Ghostty tab, so clicking the notification focuses fzftasks, and
+# reports the status via OSC 7501. Notifications without a message only update
+# the status.
 queue_notification() {
   local f
   f="$NOTIFY/$(session_id "$1")"
-  printf '%s' "$2" >"$f.tmp" && mv "$f.tmp" "$f"
+  printf '%s\t%s\t%s' "$2" "$1" "$3" >"$f.tmp" && mv "$f.tmp" "$f"
 }
 
 # Show and remove all queued notifications. Writes to /dev/tty, because stdout
 # is the list read by fzf.
 flush_notifications() {
-  local f msg
+  local f state key msg
   (exec >/dev/tty) 2>/dev/null || return 0
   for f in "$NOTIFY"/*; do
     [[ -f "$f" && "$f" != *.tmp ]] || continue
-    msg="$(tr -d '\000-\037' <"$f")"
+    IFS=$'\t' read -r state key msg <"$f"
     rm -f "$f"
-    printf '\033]777;notify;fzftasks;%s\007' "$msg" >/dev/tty
+    msg="$(printf '%s' "$msg" | tr -d '\000-\037')"
+    [[ -n "$msg" ]] && printf '\033]777;notify;fzftasks;%s\007' "$msg" >/dev/tty
+    [[ -n "$key" ]] && status_item "$key" "$state" "$msg"
   done
+}
+
+# ---------- Program status ----------
+#
+# The picker reports the agents of the items to its terminal with the Program
+# Status Protocol (OSC 7501, see
+# https://www.superlogical.com/rex/docs/build/program-status), so terminals like
+# Rex can show running and finished runs, e.g. in the session picker and the tab
+# header. The root record identifies fzftasks, every item has its own record:
+# "working" while pi runs, "done" or "error" when a background run finished
+# (until the item is opened, marked as done or deleted). Terminals without
+# support ignore the sequences.
+
+# Write a report to the terminal. Does nothing without a terminal.
+status_report() {
+  (exec >/dev/tty) 2>/dev/null || return 0
+  printf '\033]7501;%s\033\\' "$1" >/dev/tty
+}
+
+# Encode text as a single-line base64 value without control characters,
+# shortened to $2 characters.
+status_text() {
+  local text
+  text="$(printf '%s' "$1" | tr -d '\000-\037\177')"
+  printf '%s' "${text:0:$2}" | base64 | tr -d '\n'
+}
+
+# Report the status (working, done, error or clear) of an item's record. Record
+# ids allow only 32 characters per segment, so the id is a hash of the key.
+status_item() {
+  local key="$1" state="$2" msg="${3:-}" report
+  case "$state" in
+    working | done | error | clear) ;;
+    *) return 0 ;;
+  esac
+  report="state=$state:id=$(printf '%s' "$key" | shasum | cut -c1-16)"
+  if [[ "$state" != clear ]]; then
+    # Titles may have at most 192 bytes, i.e. 48 characters of up to 4 bytes.
+    report+=":title=$(status_text "$(item_field "$key" title)" 48)"
+    [[ -n "$msg" ]] && report+=":msg=$(status_text "$msg" 200)"
+  fi
+  status_report "$report"
 }
 
 # ---------- Workspaces ----------
@@ -377,11 +427,12 @@ prompt_field() {
 }
 
 # Let the user pick one of all prompt templates (every "*.md" in the prompts
-# directory) or a built-in entry. Prints the template path, "open" for the
-# "Open" entry, or "track" for the "Track" entry when allowed. Returns 1 when
+# directory) or a built-in entry. Prints the template path ("foreground:<path>"
+# when it was picked with alt-enter, to run it in an interactive pi), "open" for
+# the "Open" entry, or "track" for the "Track" entry when allowed. Returns 1 when
 # cancelled.
 choose_prompt() {
-  local key="$1" allow_track="$2" rows="" f title sel path
+  local key="$1" allow_track="$2" rows="" f title out pressed sel path
 
   # Built-in entries have no template (column 2) but an action (column 3).
   if [[ "$allow_track" == 1 ]]; then
@@ -394,11 +445,12 @@ choose_prompt() {
     [[ -n "$title" ]] || title="$(basename "$f" .md)"
     rows+="$(printf '%-30s %s' "$title" "$(prompt_field "$f" description)")"$'\t'"$f"$'\n'
   done
-  sel="$(printf '%s' "$rows" | fzf \
+  out="$(printf '%s' "$rows" | fzf \
     --delimiter $'\t' \
     --with-nth 1 \
     --reverse \
     --height 100% \
+    --expect alt-enter \
     --prompt "$ICON_PROMPT Prompt: " \
     --border rounded \
     --border-label " $ICON_PROMPT Prompt for $key " \
@@ -409,9 +461,14 @@ choose_prompt() {
     --preview-window "right:65%" \
     --preview '[ -n {2} ] && cat {2}')" || return 1
 
+  # With --expect the first line is the pressed key (empty for enter).
+  pressed="$(sed -n 1p <<<"$out")"
+  sel="$(sed -n 2p <<<"$out")"
   path="$(printf '%s' "$sel" | cut -f2)"
   if [[ -z "$path" ]]; then
     printf '%s\n' "$sel" | cut -f3
+  elif [[ "$pressed" == alt-enter ]]; then
+    printf 'foreground:%s\n' "$path"
   else
     printf '%s\n' "$path"
   fi
@@ -512,15 +569,15 @@ cmd_start() {
       tmp="$(mktemp "${TMPDIR:-/tmp}/fzftasks.XXXXXX")"
       [[ "$details_stdin" == 1 ]] && cat >"$tmp"
       # With --cwd the current directory is the workspace: no repository and
-      # no prompt, the item is always opened. Background runs are not offered,
-      # because the prompts assume a workspace prepared for the item.
+      # no prompt, the item's interactive pi starts in the current terminal.
+      # Background runs are not offered, because the prompts assume a workspace
+      # prepared for the item.
       if [[ -n "$cwd" ]]; then
         [[ "$kind" == adhoc ]] || die "start: --cwd is only supported for ad-hoc items"
         title="$(printf '%s' "$title" | tr '\t\n' '  ')"
         sql "INSERT INTO items (key, title, details, workspace, external_workspace, state, updated_at) VALUES ($(q "$key"), $(q "$title"), CAST(readfile($(q "$tmp")) AS TEXT), $(q "$cwd"), 1, 'todo', $(now));"
         rm -f "$tmp"
-        cmd_open "$key"
-        return
+        exec "$SCRIPT" __run "$key"
       fi
       # Ad-hoc, Jira, alert and Kubernetes items can work in a repository; ask
       # for it unless the caller passed --repo (an empty value means "no
@@ -549,6 +606,12 @@ cmd_start() {
       ;;
   esac
 
+  # A template picked with alt-enter runs in an interactive pi.
+  if [[ "$tpl" == foreground:* ]]; then
+    cmd_open "$key" "${tpl#foreground:}"
+    return
+  fi
+
   start_run "$key" "$tpl"
 }
 
@@ -573,12 +636,63 @@ start_run() {
   return 0
 }
 
+# Succeed if fzftasks runs in a Rex terminal, which sets TERM_PROGRAM and
+# REX_SESSION and puts the rex CLI on the PATH.
+in_rex() {
+  [[ "${TERM_PROGRAM:-}" == rex && -n "${REX_SESSION:-}" ]] && command -v rex >/dev/null 2>&1
+}
+
+# Type a command into the shell of a Rex block and run it. Like ghostty-new, the
+# command is typed instead of passed to "rex new" / "rex split", so it runs in
+# the interactive shell with its configuration (e.g. the PATH from ~/.zshrc).
+rex_type_command() {
+  printf '%s' "$3" | rex send -s "$1" -b "$2" && rex send-key -s "$1" -b "$2" enter
+}
+
+# Open the item's layout in a new Rex session labelled LABEL: a terminal in the
+# workspace running CMD and, if SPLIT_CMD is given, a split on the right running
+# SPLIT_CMD. With SIDEBAR set, the Rex sidebar (sidebar_toggle action in
+# ~/.config/rex/init.lua) is shown for the workspace. Afterwards the Rex app
+# switches to the session, which requires "Remote Control" in the Rex settings;
+# without it, a message is shown instead.
+open_rex() {
+  local label="$1" cmd="$2" split_cmd="$3" sidebar="$4" out session block
+  out="$(rex new "$label" -c "$WORKSPACE" --json)" || return 1
+  session="$(jq -r '.session_id // empty' <<<"$out")"
+  block="$(jq -r '.initial_windows[0].block_ids[0] // empty' <<<"$out")"
+  [[ -n "$session" && -n "$block" ]] || return 1
+  rex_type_command "$session" "$block" "$cmd" || return 1
+
+  if [[ -n "$split_cmd" ]]; then
+    out="$(rex split -s "$session" -b "$block" --split=right -c "$WORKSPACE" --json)" || return 1
+    block="$(jq -r '.block_ids[0] // empty' <<<"$out")"
+    [[ -n "$block" ]] || return 1
+    rex_type_command "$session" "$block" "$split_cmd" || return 1
+  fi
+
+  if ! rex do session.select session_id="$session" >/dev/null 2>&1; then
+    echo "Opened the Rex session \"$label\", but could not switch to it"
+    echo "(turn on \"Remote Control\" in the Rex settings under \"Server > Client Info\")"
+    pause
+  fi
+
+  # The sidebar is opened once the session is shown, so that it gets its width
+  # from the real size of the window. Errors are ignored, e.g. when the Rex
+  # configuration has no sidebar.
+  if [[ -n "$sidebar" ]]; then
+    sleep 0.5
+    rex do -s "$session" -b "$block" sidebar_toggle dir="$WORKSPACE" >/dev/null 2>&1 || true
+  fi
+}
+
 # Open the item's layout: for items with a repository (pull requests and other
-# items with a selected repository) a Ghostty tab with nvim showing the
-# diff against the base branch and a split with an interactive pi; otherwise a
-# tab with pi.
+# items with a selected repository) nvim showing the diff against the base
+# branch and a split with an interactive pi; otherwise only pi. In Rex the
+# layout is opened in a new session, otherwise in a new Ghostty tab. With a
+# prompt template TPL, the rendered prompt is sent as the first message of the
+# interactive pi (a foreground run).
 cmd_open() {
-  local key="$1" state title repo run_cmd nvim_cmd tab_title
+  local key="$1" tpl="$2" state title repo run_cmd nvim_cmd tab_title prompt_file
   [[ -n "$key" ]] || die "open: missing key"
   WARN=""
 
@@ -594,6 +708,11 @@ cmd_open() {
   title="$(item_field "$key" title)"
   repo="$(item_field "$key" repo)"
   run_cmd="$(printf '%q ' "$SCRIPT" __run "$key")"
+  if [[ -n "$tpl" ]]; then
+    prompt_file="$(mktemp "${TMPDIR:-/tmp}/fzftasks-prompt.XXXXXX")"
+    render_prompt "$tpl" "$key" "$title" "$WORKSPACE" "$(item_field "$key" details)" "$repo" >"$prompt_file"
+    run_cmd="$(printf '%q ' "$SCRIPT" __run "$key" --message-file "$prompt_file")"
+  fi
 
   if [[ "$(kind_of "$key")" == pr ]]; then
     parse_pr_key "$key"
@@ -607,14 +726,22 @@ cmd_open() {
   fi
 
   if [[ -z "$repo" ]]; then
-    ghostty-new --working-dir "$WORKSPACE" --title "$tab_title" --command "$run_cmd" ||
-      fail "Failed to open a new Ghostty tab"
+    if in_rex; then
+      open_rex "$tab_title" "$run_cmd" || fail "Failed to open a new Rex session"
+    else
+      ghostty-new --working-dir "$WORKSPACE" --title "$tab_title" --command "$run_cmd" ||
+        fail "Failed to open a new Ghostty tab"
+    fi
     return
   fi
 
   nvim_cmd="nvim -c GitDiff"
   if [[ -n "$BASE" ]] && git -C "$WORKSPACE" fetch origin "$BASE" >/dev/null 2>&1; then
     nvim_cmd="nvim -c \"GitDiff HEAD origin/$BASE\""
+  fi
+  if in_rex; then
+    open_rex "$tab_title" "$nvim_cmd" "$run_cmd" sidebar || fail "Failed to open a new Rex session"
+    return
   fi
   ghostty-new --working-dir "$WORKSPACE" --title "$tab_title" --command "$nvim_cmd" ||
     fail "Failed to open a new Ghostty tab"
@@ -632,9 +759,13 @@ sql_list() {
 }
 
 cmd_done() {
+  local k
   [[ $# -gt 0 && -n "$1" ]] || die "done: missing key"
   init
   sql "UPDATE items SET state = 'done', updated_at = $(now) WHERE key IN $(sql_list "$@");"
+  for k in "$@"; do
+    status_item "$k" clear
+  done
 }
 
 # Move done items back to waiting. Other states are left unchanged.
@@ -647,7 +778,8 @@ cmd_reopen() {
 # Create an ad-hoc item in $EDITOR: the first non-empty line is the title, the
 # rest the details. An empty file cancels. Afterwards a repository can be
 # selected, in which the item gets its own worktree. With --cwd the current
-# directory is used as the workspace and the item is opened directly.
+# directory is used as the workspace and the item's pi starts in the current
+# terminal.
 cmd_new() {
   local tmp title details slug key repo cwd=()
   case "$1" in
@@ -720,10 +852,16 @@ cmd_reply() {
 
 # Run pi for an item and track its state. With --prompt-file the run is a
 # background run started (and already claimed) by "start" or "reply"; otherwise an
-# interactive pi is started on the item's session.
+# interactive pi is started on the item's session, with --message-file sending
+# the file's content as the first message (a foreground run).
 cmd_run() {
-  local key="$1" prompt_file="" prev workspace sid rc errf="" new
+  local key="$1" prompt_file="" message_file="" message=() prev workspace sid rc errf="" new
   [[ "$2" == "--prompt-file" ]] && prompt_file="$3"
+  if [[ "$2" == "--message-file" ]]; then
+    message_file="$3"
+    [[ -f "$message_file" ]] && message=(-- "$(cat "$message_file")")
+    rm -f "$message_file"
+  fi
   [[ -n "$key" ]] || die "__run: missing key"
 
   init
@@ -749,7 +887,7 @@ cmd_run() {
     "$FZFTASKS_PI" "${args[@]}" -p <"$prompt_file" >/dev/null 2>"$errf"
     rc=$?
   else
-    "$FZFTASKS_PI" "${args[@]}"
+    "$FZFTASKS_PI" "${args[@]}" "${message[@]}"
     rc=$?
   fi
 
@@ -768,10 +906,14 @@ cmd_run() {
 
   if [[ -n "$prompt_file" ]]; then
     if [[ "$rc" == 0 ]]; then
-      queue_notification "$key" "Finished: $(item_field "$key" title)"
+      queue_notification "$key" done "Finished: $(item_field "$key" title)"
     else
-      queue_notification "$key" "Failed (exit $rc): $(item_field "$key" title)"
+      queue_notification "$key" error "Failed (exit $rc): $(item_field "$key" title)"
     fi
+  else
+    # Interactive runs are reported by pi itself in their own terminal; only
+    # remove the item's "working" record from the picker's terminal.
+    queue_notification "$key" clear ""
   fi
 }
 
@@ -805,6 +947,11 @@ cmd_list() {
       printf '%s\t%s %-7s\033[0m \033[36m%-5s\033[0m %s \033[90m%s\033[0m\n' \
         "$key" "$icon" "$state" "$kind" "$title" "$(age $((ts - updated)))"
     done
+  # Report all running items as "working". Finished runs are reported by the
+  # notifications afterwards.
+  while IFS= read -r key; do
+    status_item "$key" working "Running pi"
+  done < <(sql "SELECT key FROM items WHERE state = 'running';")
   flush_notifications
 }
 
@@ -912,6 +1059,7 @@ delete_item() {
   fi
   find "$SESSIONS" -type f -name "*_$(session_id "$key").jsonl" -delete
   rm -f "$NOTIFY/$(session_id "$key")"
+  status_item "$key" clear
   sql "DELETE FROM items WHERE key = $(q "$key");"
 }
 
@@ -1000,13 +1148,15 @@ Usage:
   fzftasks                browse all items
   fzftasks start <key>    start a new item: pick a repository (not for PRs and
                           not when --repo is given), a prompt and run pi in
-                          the background, or "Open" an interactive pi without
+                          the background (alt-enter: in the foreground, in an
+                          interactive pi), or "Open" an interactive pi without
                           a run (or "Track" it as todo); opens an existing item
                           instead; new items require --title, --repo sets the
                           repository (empty for none) and --details - reads the
                           details from stdin
-  fzftasks open <key>     open the item in Ghostty with an interactive pi on its
-                          session
+  fzftasks open <key>     open the item in a new Ghostty tab (or a new Rex
+                          session when running in Rex) with an interactive pi
+                          on its session
   fzftasks done <key>...  mark items as done
   fzftasks reply <key>    continue a waiting item in the background with a
                           reply written in $EDITOR
@@ -1015,18 +1165,19 @@ Usage:
   fzftasks new            create an ad-hoc item in $EDITOR, optionally in a
                           worktree of a repository
   fzftasks new --cwd      create an ad-hoc item in $EDITOR that works in the
-                          current directory and open it directly (no
-                          repository or prompt; deleting the item keeps the
-                          directory)
+                          current directory and start its pi in the current
+                          terminal (no repository or prompt; deleting the
+                          item keeps the directory)
 
 Track work items (pull requests, Jira work items, alerts, Kubernetes resources
 and ad-hoc tasks) and the pi agents working on them. Each item has its own pi
 session and workspace (a git worktree or a scratch directory). Agents run in the
 background; when they finish, the item moves to waiting and can be opened in
-Ghostty to continue the session.
+Ghostty or Rex to continue the session.
 
 Keybindings:
-  enter  : start a todo item (pick a prompt or "Open"), open all other items
+  enter  : start a todo item (pick a prompt or "Open"; alt-enter on a prompt
+           runs it in the foreground), open all other items
   alt-s  : switch the preview between summary and session transcript
   alt-v  : view the item in its source (fzfgh view, fzfk, ...); does nothing
            for ad-hoc items
@@ -1067,6 +1218,8 @@ cmd_pick() {
   # Only runs that finish while the picker is open are notified.
   rm -f "$NOTIFY"/*
   clear
+  # Identify fzftasks as the program of the item records (see status_item).
+  status_report "state=idle:app=fzftasks"
   "$SCRIPT" __list | fzf \
     --ansi \
     --delimiter $'\t' \
@@ -1103,8 +1256,16 @@ cmd_pick() {
     --bind "alt-n:execute($SCRIPT new)+reload-sync($SCRIPT __list)" \
     --preview-window "right:65%" \
     --preview "$SCRIPT __preview {1}"
+  # Remove all records of the picker from the terminal.
+  status_report "state=clear"
 }
 
+# The dispatch is wrapped in a group with an "exit", so bash parses it
+# completely before running it. Otherwise a long-running command (picker, pi)
+# would continue reading this file at its old offset after it returns, which
+# fails with syntax errors when the file was replaced in the meantime (e.g. by
+# install.sh).
+{
 case "${1:-}" in
   "") cmd_pick ;;
   start)
@@ -1143,3 +1304,5 @@ case "${1:-}" in
     exit 1
     ;;
 esac
+exit
+}
