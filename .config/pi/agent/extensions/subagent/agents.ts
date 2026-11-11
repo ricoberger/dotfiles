@@ -116,7 +116,15 @@ function loadAgentsFromDir(
       continue;
     }
 
-    const { frontmatter, body } = parseFrontmatter<AgentFrontmatter>(content);
+    // An invalid frontmatter (YAML error) skips only this agent instead of
+    // breaking the discovery of all agents.
+    let parsed: ReturnType<typeof parseFrontmatter<AgentFrontmatter>>;
+    try {
+      parsed = parseFrontmatter<AgentFrontmatter>(content);
+    } catch {
+      continue;
+    }
+    const { frontmatter, body } = parsed;
 
     if (
       typeof frontmatter.name !== "string" ||

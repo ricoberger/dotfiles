@@ -17,6 +17,10 @@
  *     result reports its session ID. Passing `sessionId` (single mode) resumes
  *     that agent's session, so it keeps its context across follow-up messages.
  *   - Children run without the `subagent` tool to prevent recursive delegation.
+ *   - `background: true` (single mode) runs the agent as an interactive pi in a
+ *     minimized Rex pane without blocking; its results are delivered as
+ *     follow-up messages and the `subagent_control` tool checks on, steers or
+ *     stops it (see background.ts and bridge.ts).
  */
 
 import { spawn } from "node:child_process";
@@ -40,6 +44,10 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import {
+  BackgroundWorkers,
+  backgroundUnavailableReason,
+} from "./background.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -51,6 +59,10 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 // Sessions currently in use by a running subagent in this process. Two
 // children appending to the same session file would corrupt its history.
 const activeSessions = new Set<string>();
+
+// Whether a background worker (Rex pane) currently runs a session; set by the
+// extension once the background workers are created.
+let isPaneWorkerActive: (sessionId: string) => boolean = () => false;
 
 function safeAgentName(agentName: string): string {
   return (
@@ -436,6 +448,10 @@ async function runSingleAgent(
   }
   if (activeSessions.has(sessionId))
     return failure(`Subagent session "${sessionId}" is already running.`);
+  if (isPaneWorkerActive(sessionId))
+    return failure(
+      `Subagent session "${sessionId}" is running in a background Rex pane. Use subagent_control to steer it.`,
+    );
 
   const inheritsDispatchConfig = !agent.model;
   const model = agent.model ?? dispatchDefaults.model;
@@ -659,9 +675,87 @@ const SubagentParams = Type.Object({
         "Resume a previous subagent session (single mode). Use the session ID reported by an earlier run of the same agent; the task is sent as the next message.",
     }),
   ),
+  background: Type.Optional(
+    Type.Boolean({
+      description:
+        "Single mode only: run the agent as an interactive pi in a minimized Rex pane that the user can open, watch and chat with, without blocking. Returns immediately; the result is delivered later as a follow-up message. Prefer it for longer tasks (e.g. of the worker agent) in interactive sessions, so the user can follow the agent, and keep working while it runs; skip it when you need the result before you can continue. Falls back to a normal (blocking) run outside Rex.",
+    }),
+  ),
+});
+
+const ControlParams = Type.Object({
+  action: StringEnum(["status", "steer", "stop"] as const, {
+    description:
+      "status: show background subagents started from this session (or one with sessionId); steer: send a message to a background subagent (starts a new run when it is idle); stop: interrupt its current run (the pane and session stay)",
+  }),
+  sessionId: Type.Optional(
+    Type.String({
+      description:
+        "Session ID of the background subagent (required for steer and stop)",
+    }),
+  ),
+  message: Type.Optional(Type.String({ description: "Message for steer" })),
 });
 
 export default function (pi: ExtensionAPI) {
+  const workers = new BackgroundWorkers(pi, {
+    sessionDir: SESSION_DIR,
+    sessionIdPattern: SESSION_ID_PATTERN,
+    safeAgentName,
+    newSessionId,
+    findSessionFile,
+    getPiInvocation,
+    isSessionRunning: (sessionId) => activeSessions.has(sessionId),
+  });
+  isPaneWorkerActive = (sessionId) => workers.isActive(sessionId);
+
+  // Reconnect to the background workers started from this session.
+  pi.on("session_start", async (_event, ctx) => {
+    workers.restore(ctx);
+  });
+  pi.on("session_shutdown", async () => {
+    workers.stop();
+  });
+
+  pi.registerTool({
+    name: "subagent_control",
+    label: "Subagent Control",
+    description: [
+      "Check on, steer or stop background subagents (started with subagent background: true) of this session.",
+      "Their results are delivered automatically as follow-up messages; do not poll status while waiting for a result.",
+    ].join(" "),
+    parameters: ControlParams,
+
+    async execute(_toolCallId, params) {
+      const result =
+        params.action === "steer"
+          ? workers.steer(params.sessionId, params.message)
+          : params.action === "stop"
+            ? workers.stopRun(params.sessionId)
+            : await workers.status(params.sessionId);
+      return {
+        content: [{ type: "text", text: result.text }],
+        details: {},
+        isError: result.isError,
+      };
+    },
+
+    renderCall(args, theme, _context) {
+      let text =
+        theme.fg("toolTitle", theme.bold("subagent_control ")) +
+        theme.fg("accent", String(args.action ?? "..."));
+      if (args.sessionId) text += theme.fg("dim", ` ${args.sessionId}`);
+      if (args.message) {
+        const message =
+          args.message.length > 60
+            ? `${args.message.slice(0, 60)}...`
+            : args.message;
+        text += `\n  ${theme.fg("dim", message)}`;
+      }
+      return new Text(text, 0, 0);
+    },
+  });
+
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
@@ -671,6 +765,7 @@ export default function (pi: ExtensionAPI) {
       `Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
       `To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
       "Every result reports a subagent session ID; to send a follow-up to the same agent with its context intact, call single mode again with the same agent and that sessionId.",
+      "With background: true (single mode, in Rex) the agent runs in a minimized Rex pane without blocking; its result arrives later as a follow-up message, and subagent_control checks on, steers or stops it.",
     ].join(" "),
     parameters: SubagentParams,
 
@@ -766,6 +861,59 @@ export default function (pi: ExtensionAPI) {
                 hasChain ? "chain" : hasTasks ? "parallel" : "single",
               )([]),
             };
+        }
+      }
+
+      let fallbackNote = "";
+      if (params.background) {
+        if (!hasSingle)
+          return {
+            content: [
+              {
+                type: "text",
+                text: "background is only supported in single mode (agent + task).",
+              },
+            ],
+            details: makeDetails(hasChain ? "chain" : "parallel")([]),
+            isError: true,
+          };
+        const reason = backgroundUnavailableReason(ctx);
+        if (reason) {
+          fallbackNote = `[background run not available (${reason}); the agent ran in the foreground]\n\n`;
+        } else {
+          const agent = agents.find((a) => a.name === params.agent);
+          if (!agent) {
+            const available =
+              agents.map((a) => `"${a.name}"`).join(", ") || "none";
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Unknown agent: "${params.agent}". Available agents: ${available}.`,
+                },
+              ],
+              details: makeDetails("single")([]),
+              isError: true,
+            };
+          }
+          const inheritsDispatchConfig = !agent.model;
+          const started = await workers.start({
+            agent,
+            task: params.task as string,
+            cwd: params.cwd ?? ctx.cwd,
+            resumeSessionId: params.sessionId,
+            model: agent.model ?? dispatchDefaults.model,
+            thinking:
+              agent.thinking ??
+              (inheritsDispatchConfig
+                ? dispatchDefaults.thinkingLevel
+                : undefined),
+          });
+          return {
+            content: [{ type: "text", text: started.text }],
+            details: makeDetails("single")([]),
+            isError: started.isError,
+          };
         }
       }
 
@@ -965,10 +1113,12 @@ export default function (pi: ExtensionAPI) {
             content: [
               {
                 type: "text",
-                text: withSessionId(
-                  `Agent ${result.stopReason || "failed"}: ${errorMsg}`,
-                  result,
-                ),
+                text:
+                  fallbackNote +
+                  withSessionId(
+                    `Agent ${result.stopReason || "failed"}: ${errorMsg}`,
+                    result,
+                  ),
               },
             ],
             details: makeDetails("single")([result]),
@@ -979,10 +1129,12 @@ export default function (pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: withSessionId(
-                getFinalOutput(result.messages) || "(no output)",
-                result,
-              ),
+              text:
+                fallbackNote +
+                withSessionId(
+                  getFinalOutput(result.messages) || "(no output)",
+                  result,
+                ),
             },
           ],
           details: makeDetails("single")([result]),
@@ -1050,7 +1202,8 @@ export default function (pi: ExtensionAPI) {
         theme.fg("toolTitle", theme.bold("subagent ")) +
         theme.fg("accent", agentName) +
         theme.fg("muted", ` [${scope}]`) +
-        (args.sessionId ? theme.fg("dim", ` resume ${args.sessionId}`) : "");
+        (args.sessionId ? theme.fg("dim", ` resume ${args.sessionId}`) : "") +
+        (args.background ? theme.fg("warning", " background") : "");
       text += `\n  ${theme.fg("dim", preview)}`;
       return new Text(text, 0, 0);
     },

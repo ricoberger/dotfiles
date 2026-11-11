@@ -5,6 +5,14 @@
       "args": [
         "--mcp"
       ]
+    },
+    "slack": {
+      "url": "https://mcp.slack.com/mcp",
+      "oauth": {
+        "clientId": "1601185624273.8899143856786",
+        "callbackUrl": "http://localhost:3118/callback",
+        "scope": "channels:history groups:history im:history mpim:history channels:read emoji:read files:read groups:read im:read mpim:read reactions:read users:read users:read.email chat:write reactions:write search:read.public search:read.private search:read.mpim search:read.im search:read.files search:read.users"
+      }
     }
   }
 }
