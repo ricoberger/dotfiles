@@ -10,6 +10,60 @@ echo "\n- Copy Rex Configuration"
 mkdir -p ~/.config
 cp -r $(pwd)/.config/rex ~/.config
 
+# Rex settings which can only be changed via the UI are stored in the
+# com.superlogical.rex defaults domain. The custom themes, which are referenced
+# by the darkThemeID and lightThemeID, are stored as JSON data. Restart Rex to
+# apply the settings.
+echo "\n- Write Rex Settings"
+REX=com.superlogical.rex
+defaults write $REX Workspace.customThemes -data "$(xxd -p $(pwd)/.config/rex/custom-themes.json | tr -d '\n')"
+defaults write $REX Workspace.activePaneBorderColor -string "accent"
+defaults write $REX Workspace.activityGrouping -string "session"
+defaults write $REX Workspace.animationStyle -string "natural"
+defaults write $REX Workspace.appearance -string "system"
+defaults write $REX Workspace.balancesSplitsOnCreation -bool true
+defaults write $REX Workspace.cursorShader -string "warp"
+defaults write $REX Workspace.cursorShadersEnabled -bool true
+defaults write $REX Workspace.darkThemeID -string "custom-2867883A-4D1E-4941-B18B-293E56F71E78"
+defaults write $REX Workspace.experiments.usesNewQuickSwitcher -bool true
+defaults write $REX Workspace.focusFollowsMouse -bool false
+defaults write $REX Workspace.inactivePaneFadeMode -string "both"
+defaults write $REX Workspace.interfaceStyle -string "useTheme"
+defaults write $REX Workspace.lightThemeID -string "custom-B29CD67E-8C01-40D2-9604-A5370F4429DB"
+defaults write $REX Workspace.paneDensity -string "comfortable"
+defaults write $REX Workspace.showsActivePaneBorder -bool true
+defaults write $REX Workspace.showsPaneHeaders -bool true
+defaults write $REX Workspace.showsWindowOnLaunch -bool false
+defaults write $REX Workspace.sidebarCollapsed -bool false
+defaults write $REX Workspace.sidebarPosition -string "left"
+defaults write $REX Workspace.sidebarShowsActivity -bool false
+defaults write $REX Workspace.tabIconCount -int 0
+defaults write $REX Workspace.tabIconTintMode -string "off"
+defaults write $REX Workspace.tabStyle -string "horizontal"
+defaults write $REX Workspace.tabsFillAvailableSpace -bool false
+defaults write $REX Workspace.terminalCursorBlinkIntervalMilliseconds -int 0
+defaults write $REX Workspace.terminalCursorBlinkUsesCustomInterval -bool false
+defaults write $REX Workspace.terminalCustomSchemeLinks -string "ask"
+defaults write $REX Workspace.terminalFontName -string "Cascadia Mono NF"
+defaults write $REX Workspace.terminalFontPointSize -float 12
+defaults write $REX Workspace.terminalImproveTextContrast -bool false
+defaults write $REX Workspace.terminalOptionKeyBehavior -string "actsAsAlt"
+defaults write $REX Workspace.terminalPaddingX -float 8
+defaults write $REX Workspace.terminalPaddingY -float 8
+defaults write $REX Workspace.terminalUseThemePalette -bool false
+defaults write $REX Workspace.tintsPanesWithProgramBackground -bool true
+defaults write $REX Workspace.usesStandardInactiveWindowPaneStyles -bool true
+defaults write $REX rex.agents.names-sessions -bool false
+defaults write $REX rex.client.remoteControl -bool true
+defaults write $REX rex.developer-mode-enabled -bool true
+defaults write $REX rex.server.automatic-restart-enabled -bool true
+defaults write $REX rex.server.block-plugin-reload-enabled -bool false
+defaults write $REX rex.server.run-mode -string "bundled"
+defaults write $REX rex.server.tailnet-enabled -bool true
+defaults write $REX rex.server.web-client-origin-patterns -array "https://rex.superlogical.com"
+defaults write $REX SUAutomaticallyUpdate -bool true
+defaults write $REX SUEnableAutomaticChecks -bool true
+
 # Zsh
 echo "\n- Copy Zsh Configuration"
 cp $(pwd)/.zshenv ~/.zshenv
