@@ -61,6 +61,13 @@ fi
 # export FZFSLACK_WORKSPACE_URL=
 # export FZFSLACK_XOXD=
 # export FZFSLACK_XOXC=
+#
+# # Homelab
+# export HOMELAB_K3S_TOKEN=
+# export HOMELAB_CLOUDFLARE_API_TOKEN=
+# export HOMELAB_GRAFANA_ADMIN_USER=
+# export HOMELAB_GRAFANA_ADMIN_PASSWORD=
+# export HOMELAB_GRAFANA_RENDERING_RENDERER_TOKEN=
 source $HOME/.zshsecrets
 
 
@@ -181,6 +188,7 @@ alias copilot='copilot --yolo --remote'
 ### FUNCTIONS
 ################################################################################
 
+genpw() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c ${1:-32}; echo; }
 killport() { lsof -i :$1 | awk '{print $2}' | tail -n 1 | xargs kill; }
 listtargz() { tar -ztvf $1; }
 trash() { mv $@ ~/.Trash }
