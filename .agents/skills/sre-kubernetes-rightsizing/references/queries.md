@@ -7,7 +7,22 @@ instance. Follow `sre-grafana`'s command mechanics — resolve the datasource UI
 first, build request bodies with `jq -n`, and pass `from` / `to` explicitly.
 
 All variables below: `$NS` namespace, `$WL` workload name, `$WLTYPE` one of
-`deployment` / `statefulset` / `daemonset`, `$CONTAINER` container name.
+`deployment` / `statefulset` / `daemonset`, `$CONTAINER` container name,
+`$CLUSTER` the selected cluster (only when a cluster label exists, see below).
+
+> **Multi-cluster datasources — conditional.** The queries below are written for
+> a single-cluster datasource and carry no cluster matcher. Probe once:
+> `count by (cluster) (kube_pod_info{namespace="$NS"})`. A single result
+> **without** a `cluster` label means the label does not exist — use the queries
+> unchanged. **Never add `cluster="$CLUSTER"` for a label that does not exist:**
+> a matcher on a missing label matches nothing and every query returns empty.
+> Only when the probe returns several `cluster` values (or the installation's
+> own cluster label) add that matcher to **every** selector — both sides of each
+> join, `$OWNERS_30D`, exporter series — and the label to every join identity
+> (`on (cluster, namespace, pod)`); otherwise joins fail on duplicate owner
+> series or mix another cluster's usage into the target. If the datasource holds
+> several clusters but no label distinguishes them, joins error with duplicate
+> series — stop and report it instead of guessing.
 
 ## Result Identity and Reproducibility
 
@@ -96,6 +111,19 @@ node_namespace_pod_container:container_memory_working_set_bytes{namespace="$NS",
 namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}
 ```
 
+The join above uses ownership **at each evaluation instant**. Window-wide
+queries evaluated once at `end` (OOM/restart counters, raw-sample peaks) must
+use **historical ownership** instead, so pods that vanished before `end` are not
+dropped. Substitute this expression as `$OWNERS_30D`:
+
+```promql
+max by (namespace, pod) (
+  max_over_time(
+    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}[30d]
+  )
+)
+```
+
 ### Fallback — Kind-Specific Pod-Name Regex
 
 When the relabel rule is absent, match pod names by the controller's naming
@@ -106,9 +134,13 @@ verified note above):
 
 | Kind          | Pod-name pattern            | Regex matcher                           |
 | ------------- | --------------------------- | --------------------------------------- |
-| `Deployment`  | `<name>-<rshash>-<podhash>` | `pod=~"$WL-[a-f0-9]{6,10}-[a-z0-9]{5}"` |
+| `Deployment`  | `<name>-<rshash>-<podhash>` | `pod=~"$WL-[a-z0-9]{6,10}-[a-z0-9]{5}"` |
 | `StatefulSet` | `<name>-<ordinal>`          | `pod=~"$WL-[0-9]+"`                     |
 | `DaemonSet`   | `<name>-<podhash>`          | `pod=~"$WL-[a-z0-9]{5}"`                |
+
+The ReplicaSet hash (`pod-template-hash`) is a Kubernetes safe-encoded string
+(consonants and digits such as `g`, `h`, `7`), **not** hexadecimal — never
+narrow it to `[a-f0-9]`.
 
 With the raw-cAdvisor fallback always include
 `container="$CONTAINER", container!=""` to drop the pod-level pause/`POD`
@@ -137,6 +169,15 @@ body.
 >
 > Then wrap that inner instant vector in a subquery `[30d:10m]` and apply
 > `quantile_over_time` / `max_over_time`.
+>
+> **Exception — safety peaks.** A subquery evaluates one instant per step, so a
+> `[30d:10m]` `max_over_time` misses bursts between steps. Percentiles and
+> trends tolerate that; the **memory peak that sets a limit** does not. Take
+> peaks over every stored sample instead: `max_over_time(<series>[30d])` per
+> series, joined to `$OWNERS_30D`, then `max`. Per-series maxima do not collapse
+> under churn the way per-series percentiles do (the max of maxima is the true
+> max). If the raw range exceeds the query sample limit, split the window into
+> chunks (e.g. 5 × 6d) and take the max of the chunk peaks — that is exact.
 
 Apply the workload selector (relabel join, or regex fallback) from the section
 above inside every aggregation below. The blocks lead with the
@@ -174,18 +215,18 @@ quantile_over_time(0.95,
   ))[30d:10m]
 )
 
-# hottest replica peak (drives the memory limit): max of the fleet max
-max_over_time(
-  (max(
-    node_namespace_pod_container:container_memory_working_set_bytes{namespace="$NS", container="$CONTAINER"}
-    * on (namespace, pod) group_left
-    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}
-  ))[30d:10m]
+# hottest replica peak (drives the memory limit): max over every stored sample
+# (not a subquery, which skips bursts between steps), with historical ownership
+max(
+  max_over_time(
+    node_namespace_pod_container:container_memory_working_set_bytes{namespace="$NS", container="$CONTAINER"}[30d]
+  )
+  * on (namespace, pod) group_left $OWNERS_30D
 )
 
 # FALLBACK (no mixin rules): raw cAdvisor + pod-name regex
 quantile_over_time(0.95, (avg(container_memory_working_set_bytes{$SEL}))[30d:10m])
-max_over_time((max(container_memory_working_set_bytes{$SEL}))[30d:10m])
+max(max_over_time(container_memory_working_set_bytes{$SEL}[30d]))
 ```
 
 Swap the quantile to `0.50` / `0.99` for p50 / p99. **Censoring caveat:** when
@@ -284,16 +325,10 @@ Keep OOM event counters, last-termination **evidence**, and restart counters
 separate. `kube_pod_container_status_last_terminated_reason` is a gauge: **never
 use `increase()` or `rate()` on it to count OOMKills.**
 
-For these window-wide queries, use historical ownership so pods that vanished
-before `end` are not dropped. Substitute this expression as `$OWNERS_30D` below:
-
-```promql
-max by (namespace, pod) (
-  max_over_time(
-    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}[30d]
-  )
-)
-```
+For these window-wide queries, use historical ownership (`$OWNERS_30D`, defined
+under
+[Preferred — `kube-prometheus` Owner Relabel Rule](#preferred--kube-prometheus-owner-relabel-rule))
+so pods that vanished before `end` are not dropped.
 
 If owner rules are absent, use the cross-checked kind-specific pod selector
 above and state that attribution is weaker. Scope both sides to the selected
@@ -453,18 +488,26 @@ This is the **generic** analogue of the DB/JVM page-cache degradation in
 `workloads.md`, and it hits mmap-heavy services that are **not** a classified
 engine (HashiCorp Vault, etcd, Loki/Mimir, BoltDB-backed Go services, SQLite, or
 any binary that mmaps large files). cAdvisor exposes it directly; probe first
-(`count(container_memory_failures_total{namespace="$NS", container="$CONTAINER", failure_type="pgmajfault"})`):
+(`count(container_memory_failures_total{namespace="$NS", container="$CONTAINER", failure_type="pgmajfault"})`).
+Scope it to the workload like every other series — a namespace + container
+matcher alone also catches other workloads' containers with the same name, which
+would then decide this target's downsize guard. With the owner rule (fallback:
+add the cross-checked `pod=~"<regex>"` instead of the join):
 
 ```promql
 # major page faults per second on the hottest replica — p95 and peak over 30d
 quantile_over_time(0.95,
   (max(sum by (namespace, pod) (
     rate(container_memory_failures_total{namespace="$NS", container="$CONTAINER", failure_type="pgmajfault", scope="container"}[5m])
+    * on (namespace, pod) group_left
+    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}
   )))[30d:10m]
 )
 max_over_time(
   (max(sum by (namespace, pod) (
     rate(container_memory_failures_total{namespace="$NS", container="$CONTAINER", failure_type="pgmajfault", scope="container"}[5m])
+    * on (namespace, pod) group_left
+    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}
   )))[30d:10m]
 )
 ```
@@ -496,6 +539,41 @@ called it "safe to trim".)
 > set nears the limit), not the absolute rate — treat a flat baseline as a
 > cost/latency tradeoff, not an undersize. (Verified live: a well-provisioned
 > `vmstorage` runs at ~0 major faults despite a multi-hundred-GiB dataset.)
+
+## Data Coverage
+
+`avg(...)` / `max(...)` across pods silently ignore pods without series, so a
+vanished scrape target or a node whose cAdvisor was not scraped looks like a
+quiet fleet. Compare observed with expected pods per step (1h step is enough):
+
+```promql
+# ratio of running workload pods that have usage series (1 = full coverage)
+(
+  count(count by (namespace, pod) (
+    node_namespace_pod_container:container_memory_working_set_bytes{namespace="$NS", container="$CONTAINER"}
+    * on (namespace, pod) group_left
+    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}
+  ))
+  /
+  count(
+    namespace_workload_pod:kube_pod_owner:relabel{namespace="$NS", workload="$WL", workload_type="$WLTYPE"}
+    * on (namespace, pod) group_left
+    max by (namespace, pod) (kube_pod_status_phase{namespace="$NS", phase="Running"} == 1)
+  )
+)
+
+# average coverage and the number of hours below 90% over the window
+avg_over_time((<ratio above>)[30d:1h])
+sum_over_time(((<ratio above>) < bool 0.9)[30d:1h])
+```
+
+Short dips during rollouts are normal. Sustained gaps (hours below ~90%, or
+steps where the ratio is absent while pods ran) mean the fleet statistics may
+miss the hottest replica: report the gap with its time range, and withhold
+downsizing recommendations and "appropriately sized" verdicts for the affected
+container until coverage is established. Apply the same check to any exporter
+series that gates a decision (PSI, major faults, engine metrics). Without owner
+rules, use the cross-checked pod regex on both sides and say so.
 
 ## Variability / Trend Series (Autoscaling Gate Only)
 
@@ -542,11 +620,14 @@ avg_over_time((count(container_memory_working_set_bytes{$SEL}))[30d:10m])
 max_over_time((count(container_memory_working_set_bytes{$SEL}))[30d:10m])
 ```
 
-Compute the % of time at `minReplicaCount` (over-provisioned floor) and at
-`maxReplicaCount` (capacity-starved ceiling) from a 1h-step range pull. **Watch
-for rollout surge:** the running-pod count can briefly exceed `maxReplicaCount`
-(old + new pods during a `RollingUpdate` with `maxSurge`) — that is not load
-scaling, so discount short spikes above the ceiling when judging the bounds.
+Compute the % of time at `minReplicaCount` and at `maxReplicaCount` from a
+1h-step range pull. These prompt a review, not a verdict: a floor may be
+required for availability (PDB, zone spread, quorum, cold start), and time at
+the ceiling indicates starvation only when the trigger metric stays above its
+threshold at max or PSI/latency/errors rise there. **Watch for rollout surge:**
+the running-pod count can briefly exceed `maxReplicaCount` (old + new pods
+during a `RollingUpdate` with `maxSurge`) — that is not load scaling, so
+discount short spikes above the ceiling when judging the bounds.
 
 ## Current Requests / Limits From Metrics (Cross-Check Only)
 
@@ -583,6 +664,13 @@ fall back to the raw `kube_*`/`node_*` series.
 > 5 × 6d) and combine the per-chunk percentiles conservatively (take the max of
 > the chunk p95s). State the step/chunking used.
 
+**Scope every input to the selected cluster.** Only when the datasource spans
+several clusters and a cluster label exists (see the multi-cluster note at the
+top), add `cluster="$CLUSTER"` to every selector in this section and in the cost
+section — allocatable, requests, usage, node PSI/busy, pricing — or aggregate
+`by (cluster)`. The queries below omit it for brevity; never sum across
+clusters.
+
 ```promql
 # allocatable (schedulable capacity), excluding control-plane / tainted pools if
 # the target cannot land there — state which node selector was used
@@ -590,15 +678,17 @@ sum(kube_node_status_allocatable{resource="cpu"})
 sum(kube_node_status_allocatable{resource="memory"})
 
 # requested by running/pending pods (mixin :active: rules ignore terminated pods)
+# NOTE: container requests only — see "Effective requests" below
 sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests)
 sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_requests)
 # fallback
 sum(kube_pod_container_resource_requests{resource="cpu"}    * on (namespace, pod) group_left max by (namespace, pod) (kube_pod_status_phase{phase=~"Running|Pending"} == 1))
 sum(kube_pod_container_resource_requests{resource="memory"} * on (namespace, pod) group_left max by (namespace, pod) (kube_pod_status_phase{phase=~"Running|Pending"} == 1))
 
-# actually used, p95 over the window (coarse step — see the note above)
-quantile_over_time(0.95, (sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m))[30d:1h])
-quantile_over_time(0.95, (sum(node_namespace_pod_container:container_memory_working_set_bytes))[30d:1h])
+# actually used, p95 over the window (coarse step — see the note above);
+# container!="" drops the sandbox group the mixin rules keep (see Gotchas)
+quantile_over_time(0.95, (sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m{container!=""}))[30d:1h])
+quantile_over_time(0.95, (sum(node_namespace_pod_container:container_memory_working_set_bytes{container!=""}))[30d:1h])
 
 # node-level CPU contention on the nodes that hosted the target's pods
 # (node PSI; cgroup v2 + node-exporter pressure collector). Join the target's
@@ -644,15 +734,31 @@ Always cross-check the join: the number of nodes matched must equal the number
 of distinct `node` values in `kube_pod_info` for the target over the window. A
 smaller count means the join dropped nodes and the PSI figure is unreliable.
 
+**Same node scope for every ratio.** When allocatable is restricted to the node
+pool the target can land on, restrict requests and usage to pods on those same
+nodes (join on `node` through `kube_pod_info`, e.g.
+`... * on (namespace, pod) group_left (node) kube_pod_info{node=~"<pool nodes>"}`)
+— never divide cluster-wide requests by pool allocatable. If that is not
+possible, report a cluster-wide ratio and label it so.
+
+**Effective requests.** `kube_pod_container_resource_requests` and the mixin
+`:active:` rules count app containers only. The scheduler reserves the effective
+pod request (app containers + native sidecars, or a larger init container
+request, plus RuntimeClass overhead). When available, prefer kube-scheduler's
+`kube_pod_resource_request` (`/metrics/resources`), which is already the
+effective value; otherwise add `kube_pod_init_container_resource_requests` where
+an init container exceeds the app containers' sum, or state that the baseline
+counts container requests only (usually a small understatement).
+
 Derive and report, per cluster:
 
-| Figure                           | Formula                               | Use                                                         |
-| -------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
-| requested ÷ allocatable          | Σ requests / Σ allocatable            | bin-packing / cost; what node count follows                 |
-| used ÷ allocatable               | p95 Σ usage / Σ allocatable           | true node efficiency; the figure rightsizing should raise   |
-| used ÷ requested                 | p95 Σ usage / Σ requests              | accuracy; >100% = hidden overcommit, ≪100% = reserved slack |
-| Δrequest of this change          | Σ(new − old) × replicas, per resource | the headline fleet impact, also as % of allocatable         |
-| node CPU PSI (hosting nodes) p95 | query above                           | gate for CPU raises on a no-CPU-limit cluster               |
+| Figure                           | Formula                                                     | Use                                                         |
+| -------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------- |
+| requested ÷ allocatable          | Σ requests / Σ allocatable                                  | bin-packing / cost; what node count follows                 |
+| used ÷ allocatable               | p95 Σ usage / Σ allocatable                                 | true node efficiency; the figure rightsizing should raise   |
+| used ÷ requested                 | p95 Σ usage / Σ requests                                    | accuracy; >100% = hidden overcommit, ≪100% = reserved slack |
+| Δrequest of this change          | Σ(new − old effective pod request) × replicas, per resource | the headline fleet impact, also as % of allocatable         |
+| node CPU PSI (hosting nodes) p95 | query above                                                 | gate for CPU raises on a no-CPU-limit cluster               |
 
 Interpretation for the CPU raise gate (no CPU limits):
 

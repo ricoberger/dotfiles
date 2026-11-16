@@ -103,6 +103,11 @@ If — and only if — the user explicitly prefers direct cluster access, allow
 `sre-kubernetes` Mode A (API URL + token) or Mode B (kubeconfig context) as an
 override.
 
+**Prerequisite:** the `sre-grafana` and `sre-kubernetes` skills must be
+installed next to this one. Check that both are available before step 0; if
+either is missing, stop and tell the user which skill is missing instead of
+implementing Grafana or cluster API access ad hoc.
+
 ## Workflow
 
 Do these phases in order. Delegate every metric query to `sre-grafana` and every
@@ -155,18 +160,30 @@ cache/heap ceiling, and the observed working set is partly a function of the
 limit already granted, so trimming it degrades latency while firing **neither
 OOMKills nor PSI** (the generic downsize guards). Match the container image +
 labels to a candidate engine, then **confirm by probing** for that engine's
-exporter metric:
+exporter metric, scoped to the target's pods/exporter (a namespace-wide hit from
+another instance does not confirm it):
 
 - **Confirmed** → use the engine's memory model, signal metrics and downsize
   guard in steps 4–5; never replace the generic working-set/PSI analysis, only
   augment it.
-- **Detected but exporter absent** → fall back to the generic method and state
-  in the report that the engine's memory model was not applied (no exporter).
-- **No engine match** → plain generic method.
+- **Detected but exporter absent** → run the generic analysis and allow raises,
+  but **withhold memory reductions**: a cut needs the engine ceiling (from the
+  live spec/config: `-Xmx` / `MaxRAMPercentage`, `cacheSizeGB`,
+  `shared_buffers`, `maxmemory`, `max_server_memory_usage`) **and** the engine's
+  pressure evidence from another source. Without both, list the cut as a reclaim
+  candidate blocked by "engine evidence missing" and state in the report that
+  the engine's memory model was not applied (no exporter).
+- **No engine match** → first run the Generic JVM probe (see
+  `references/workloads.md`) and check the container command/env for `java`,
+  `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` or `-Xmx`: an unrecognized image can
+  still be a JVM whose heap cuts fire neither OOMKills nor PSI. JVM found →
+  treat it as Generic JVM (confirmed or exporter absent). Otherwise → plain
+  generic method.
 
 ### 2. Read the Live Spec (Authoritative Current Config)
 
-From the matched object, extract per container (and per init container):
+From the matched object, extract per container (and per init container,
+including its `restartPolicy` — `Always` marks a native sidecar):
 
 - `resources.requests.cpu` / `.memory`
 - `resources.limits.cpu` / `.memory`
@@ -184,6 +201,15 @@ _old_ configuration. Keep the window configuration as the evidence baseline, but
 treat the **live** value as the practical baseline for direction: do not
 recommend moving below a value that is already live unless post-change data
 supports it, and label the target's row "live config newer than window".
+
+If resources, engine config or autoscaler bounds changed **inside** the window,
+the 30-day statistics mix two configurations (and each limit censors usage
+differently). Split the evidence at the rollout time (ReplicaSet /
+ControllerRevision creation, or a step in `kube_pod_container_resource_*`),
+report both segments and base recommendations on the post-change segment.
+Recommend a further **cut** only with ≥ 7 comparable post-change days that pass
+all guards; otherwise hold it and say when to re-run. Pre-change data may still
+support a raise when the live value is not already higher.
 
 Also detect controllers that already manage resources or scaling (see
 [`references/keda.md`](references/keda.md)):
@@ -218,11 +244,13 @@ instant queries (do **not** pull raw range series for the stats):
   (cgroup v2); probe first: full-stall p95 + peak. A leading bottleneck signal
   that catches pressure happening _between_ scrapes.
 - **Major page faults** —
-  `container_memory_failures_total{failure_type="pgmajfault"}`; the
-  page-cache-thrash signal that OOMKills **and** PSI both miss. Pull it for any
-  mmap-heavy / page-cache-sensitive workload (a DB/JVM engine, or the non-engine
-  list in `references/workloads.md` — Vault, etcd, Loki, BoltDB-backed Go
-  services) as a memory downsize **guard** (see `references/queries.md`).
+  `container_memory_failures_total{failure_type="pgmajfault"}`, scoped to the
+  workload's pods; the page-cache-thrash signal that OOMKills **and** PSI both
+  miss. Pull it for **every memory-downsize candidate** (the step 5 downsize
+  guard requires it) and always for mmap-heavy / page-cache-sensitive workloads
+  (a DB/JVM engine, or the non-engine list in `references/workloads.md` — Vault,
+  etcd, Loki, BoltDB-backed Go services), where it is also a raise signal (see
+  `references/queries.md`).
 - **Engine signal metrics** — when an engine was confirmed in step 1, also pull
   its exporter metrics from [`references/workloads.md`](references/workloads.md)
   (configured cache/heap ceiling, fill ratio, GC time, evictions, cache-hit
@@ -253,6 +281,13 @@ persistent local record is needed. Keep unavailable/error distinct from observed
 zero. Use the query reference's OOM/restart definitions: a
 last-termination-reason gauge is not an event counter.
 
+Check per-container **data coverage** across the window
+([Data Coverage](references/queries.md#data-coverage)) before trusting fleet
+aggregates: `avg`/`max` across pods silently ignore pods whose series are
+missing. Report sustained gaps (a vanished scrape target, pods without series)
+and withhold downsizing recommendations and "appropriately sized" verdicts for
+the affected containers until coverage is established.
+
 Selection must be **robust to pod churn over 30 days** (rollouts change pod
 names) — prefer the kube-prometheus mixin recording rules when present: the
 `namespace_workload_pod:kube_pod_owner:relabel` rule for pod → workload
@@ -266,11 +301,14 @@ regex over-matches and the un-normalized series skew the percentile (verified:
 raw+regex CPU p95 0.65 vs mixin 0.84 on the same workload). **Aggregate across
 the fleet at each instant before taking percentiles over time** — `avg(...)`
 across pods for the typical-replica signal that sizes the request, `max(...)`
-across pods for the hottest-replica signal that sizes the memory limit. Never
-take a per-pod `quantile_over_time` then `max by (container)`: on a high-churn
-workload each pod lives only minutes, so its own percentiles collapse (p50 ≈ p95
-≈ max) and the number is meaningless. Pull a coarse-step range series **only**
-for the variability/trend check used by the autoscaling gate.
+across pods for the hottest-replica signal. The memory **peak** that sizes the
+limit is the exception: take it over every stored sample (`max_over_time` on the
+raw series with historical ownership, then `max`), not from a `[30d:10m]`
+subquery, which only sees one instant per step and skips bursts in between.
+Never take a per-pod `quantile_over_time` then `max by (container)`: on a
+high-churn workload each pod lives only minutes, so its own percentiles collapse
+(p50 ≈ p95 ≈ max) and the number is meaningless. Pull a coarse-step range series
+**only** for the variability/trend check used by the autoscaling gate.
 
 The `p95` in the recommendation rules below is the **typical-replica**
 (`avg`-aggregated) p95; the memory-limit `max` is the **hottest-replica**
@@ -320,8 +358,9 @@ Per container, judge CPU and memory independently:
 | Memory request | `p95 × 1.1`                        | Schedule against typical working set          |
 | Memory limit   | `max × 1.25` (never below peak)    | Memory is incompressible; clear the real peak |
 
-Round CPU to a sane unit (e.g. nearest 10m / 50m) and memory to a sane unit
-(e.g. nearest 8Mi / 16Mi).
+Round **up** to a sane unit (CPU e.g. to the next 10m / 50m, memory to the next
+8Mi / 16Mi) — never to the nearest, which can land a limit below the observed
+peak. The rounded memory limit must stay above the peak.
 
 Verdict per resource:
 
@@ -348,11 +387,18 @@ downsizing memory without near-zero PSI _and_ a baseline (non-elevated)
 major-page-fault rate** — together they are the proof the current limit is not
 already biting; on an mmap-heavy workload PSI can read ≈ 0 while major faults
 are loud (see `references/queries.md` and the page-cache-sensitive section of
-`references/workloads.md`).
+`references/workloads.md`). If the major-fault series is absent, say so:
+withhold the cut for engines and page-cache-sensitive workloads; elsewhere
+proceed on PSI with lowered confidence.
 
-**Init containers:** report and size separately, by per-container max — they do
-not run concurrently with app containers, so never fold their usage into the
-main containers' totals.
+**Init containers:** distinguish one-shot init containers from **native
+sidecars** (`initContainers[]` with `restartPolicy: Always`). Sidecars run for
+the pod's lifetime next to the app containers: size them like app containers and
+include them in steady-state totals and the fleet impact. One-shot init
+containers finish before the app containers start: report and size them
+separately by per-container max and never fold their usage into the steady-state
+totals. Scheduling impact uses the effective pod request (see
+[Fleet Impact](#fleet-impact-and-the-reclaim-pass)).
 
 **Engine-aware memory override (when an engine was confirmed in step 1).** For
 database and JVM engines the `max × 1.25` memory rule above is a **floor, not
@@ -449,32 +495,43 @@ PSI, peak-near-limit, usage > request). Rebalance this per recommendation:
 
 After the per-container numbers, compute per cluster:
 
-- **Σ Δrequest** for CPU and memory = Σ(new − old) × replicas. Use the
-  StatefulSet/Deployment replica count; for autoscaled workloads give the figure
-  at observed avg **and** peak replicas.
+- **Σ Δrequest** for CPU and memory = Σ(new effective pod request − old
+  effective pod request) × replicas. The effective pod request is what the
+  scheduler reserves: app containers plus native sidecars, or a larger one-shot
+  init container request (Kubernetes sidecar resource-calculation rules, plus
+  any RuntimeClass `overhead`). A container cut that stays below a larger init
+  request frees nothing. Use the StatefulSet/Deployment replica count; for
+  autoscaled workloads give the figure at observed avg **and** peak replicas.
 - The same as **% of cluster allocatable**, and the cluster's requested ÷
   allocatable before and after (step 4 capacity context). Draw the conclusion
   explicitly: below ~0.5% of allocatable per cluster, state "no node-count
-  effect expected"; above that, estimate the nodes it could add or free
-  (Δrequest ÷ allocatable per node) — that, not the request delta, is the figure
-  that turns into cost.
-- **Δ cost / month** when OpenCost pricing is present: Σ ΔCPU × core-hour price
-  - Σ ΔGiB × GiB-hour price, × 730, labelled "estimate (OpenCost node pricing,
-    <currency>)", with the cluster's idle spend before → after. It is a marginal
-    list-price estimate that only materializes when the autoscaler adds or
-    removes nodes; say so. Omit with a one-line note when the series are absent.
+  effect expected" only when the target's node pool has free requestable
+  capacity (no Pending pods, requested ÷ allocatable not near the autoscaler's
+  scale-up point); otherwise say a small raise can still add a node. Above that,
+  estimate the nodes it could add or free (Δrequest ÷ allocatable per node,
+  ignoring bin-packing/affinity constraints — say so) — that, not the request
+  delta, is the figure that turns into cost.
+- **Δ cost / month** when OpenCost pricing is present:
+  `(Σ ΔCPU × core-hour price + Σ ΔGiB × GiB-hour price) × 730`, labelled
+  "estimate (OpenCost node pricing, <currency>)", with the cluster's idle spend
+  before → after. It is a marginal list-price estimate that only materializes
+  when the autoscaler adds or removes nodes; say so. Omit with a one-line note
+  when the series are absent.
 - **Reclaim candidates** the guards held back: every container in the selection
   with request > 2× p95 (or memory limit ≫ peak) that was not cut, the guard
   that blocked it (PSI / major faults / engine signal / OOM / hold convention)
   and the reclaimable amount. The user sees "+33Gi added, 40Gi of slack held
   back by X" and can trade.
 
-When the user set a **capacity budget**, the selection must satisfy it: offset
-raises with the reclaim candidates whose guards are weakest (e.g. request =
-limit convention, engine cache ≤ 50% full with zero misses) and surface the
-remaining shortfall rather than silently exceeding the budget. Without a budget,
-a net increase is acceptable but must be reported as such, never as an
-utilization improvement.
+When the user set a **capacity budget**, the selection must satisfy it using
+only changes that pass every applicable guard: offset raises with reclaim
+candidates blocked by a **convention or policy**, not by a safety signal (e.g.
+dropping the request = limit convention, or a paired engine-config reduction
+whose own guard passes — cache ≤ 50% full with zero misses), presented as the
+user's choice. Never bypass a PSI, major-fault, OOM, coverage or engine-pressure
+guard to meet a budget; surface the remaining shortfall rather than silently
+exceeding the budget. Without a budget, a net increase is acceptable but must be
+reported as such, never as an utilization improvement.
 
 ### 6. Autoscaling Analysis (Always Run)
 
@@ -483,28 +540,39 @@ greenfield template. Always produce an autoscaling section:
 
 - **KEDA `ScaledObject` or HPA present:** report the triggers (metric · query ·
   threshold), `minReplicaCount` / `maxReplicaCount`, and from the 30-day replica
-  history the % of time pinned at the floor (over-provisioned floor) vs the
-  ceiling (capacity-starved → raise max). Run the trigger's own PromQL over 30
-  days to judge whether the `threshold` actually triggers, never crosses, or is
-  always exceeded — trigger metrics are often high-cardinality (mesh/ingress
-  counters), so use a coarse `[30d:1h]` step and **retry once** on an empty
-  frame before calling it "never triggers" (see `references/queries.md` fan-out
-  gotcha). Cross-check the scaling signal against the real constraint — if it
-  scales on a custom metric but the pods are the thing OOMing, flag that the
-  autoscaler will not protect against the binding constraint.
-- **VPA present in `Auto` / `Recreate`:** the cluster is already right-sizing —
-  **defer**: report findings but recommend no manual resource change to avoid
-  fighting the VPA.
-- **VPA present in `Off` (or `Initial`):** it is **not** mutating running pods,
-  so it does not fight a manual change — do **not** defer. Instead read its
-  computed recommendation (`status.recommendation.containerRecommendations[]`:
-  `target`, `lowerBound`, `upperBound`) and use it as an **independent
-  cross-check** on your own numbers. Agreement raises confidence; a large
-  divergence is worth explaining (the VPA cannot see a page-cache-thrash or
-  HA-failover need, and it bins usage that may itself be censored by the current
-  limit). Report it as corroboration, not as the recommendation. Verified live:
-  on a Vault StatefulSet an `Off` VPA recommended mem target ~378Mi / upperBound
-  ~566Mi, corroborating a manual raise from 300Mi to 512Mi.
+  history the % of time pinned at the floor vs the ceiling. Treat these as
+  prompts, not verdicts: a floor may be held for availability (PDB, zone spread,
+  quorum, cold start) — confirm it is not before lowering it; time at the
+  ceiling means capacity starvation only with evidence the cap constrains needed
+  capacity (trigger metric above threshold while at max, PSI, latency or errors)
+  — then raise max. Run the trigger's own PromQL over 30 days to judge whether
+  the `threshold` actually triggers, never crosses, or is always exceeded —
+  trigger metrics are often high-cardinality (mesh/ingress counters), so use a
+  coarse `[30d:1h]` step and **retry once** on an empty frame before calling it
+  "never triggers" (see `references/queries.md` fan-out gotcha). Cross-check the
+  scaling signal against the real constraint — if it scales on a custom metric
+  but the pods are the thing OOMing, flag that the autoscaler will not protect
+  against the binding constraint.
+- **VPA present in `Recreate`, `Auto` (deprecated alias of `Recreate`),
+  `InPlaceOrRecreate` / `InPlace`, or with `updateMode` omitted (defaults to
+  `Recreate`):** the cluster is already right-sizing — **defer**: report
+  findings but recommend no manual resource change to avoid fighting the VPA.
+- **VPA present in `Initial`:** it rewrites the controlled resources
+  (`resourcePolicy` `controlledResources` / `controlledValues`, containers not
+  set to `mode: Off`) at pod admission, so the rollout of a manual change gets
+  the VPA's values instead. Defer changes to the controlled resources (or
+  propose switching the VPA to `Off` / removing it as a paired change);
+  resources the VPA does not control can be recommended normally.
+- **VPA present in `Off`:** it is purely advisory and does not fight a manual
+  change — do **not** defer. Instead read its computed recommendation
+  (`status.recommendation.containerRecommendations[]`: `target`, `lowerBound`,
+  `upperBound`) and use it as an **independent cross-check** on your own
+  numbers. Agreement raises confidence; a large divergence is worth explaining
+  (the VPA cannot see a page-cache-thrash or HA-failover need, and it bins usage
+  that may itself be censored by the current limit). Report it as corroboration,
+  not as the recommendation. Verified live: on a Vault StatefulSet an `Off` VPA
+  recommended mem target ~378Mi / upperBound ~566Mi, corroborating a manual
+  raise from 300Mi to 512Mi.
 - **Nothing found:** a short "no HPA / KEDA / VPA found" note. Then, **for
   Deployments only**, gate on variability (step 4's trend series): if load
   varies meaningfully (e.g. peak ≥ ~2× trough or a clear diurnal pattern),
@@ -605,13 +673,19 @@ history, HPA-pinned CPU).
 
 #### Coupling Caveats To Always Check Before Recommending
 
-- **HPA on CPU utilization:** the observed CPU p95 is pinned near the HPA target
-  by design, and changing the CPU request changes the autoscaler's behavior. Do
-  **not** auto-recommend a new CPU request for a CPU-utilization-scaled workload
-  — flag the request↔target coupling and recommend memory changes only.
+- **HPA / KEDA on resource utilization (CPU or memory):** utilization is usage ÷
+  request, so the observed p95 of that resource is pinned near the target by
+  design, and changing its request changes the replica count. This covers HPA
+  `Resource` / `ContainerResource` metrics with `type: Utilization` and KEDA
+  `cpu` / `memory` scalers with `metricType: Utilization`. Do **not**
+  auto-recommend a new request for a resource that drives such a trigger — flag
+  the request↔target coupling; if a change is warranted, present request and
+  target together with the expected replica effect, and compute the fleet impact
+  at the re-estimated replica count. Resources not used by a utilization trigger
+  follow the normal rules.
 - **QoS class change:** if a recommendation would flip the pod's QoS class (e.g.
   removing a CPU limit, or request/limit equality changes), call it out.
-- **VPA in Auto:** defer (see step 6).
+- **VPA in any mode except `Off`:** defer controlled resources (see step 6).
 - **Request = limit convention (Guaranteed QoS):** every byte of limit headroom
   (`max × 1.25`, engine ceiling × overhead) becomes a _reservation_, so the
   fleet-impact figure for memory equals the limit change × replicas. State this;
@@ -773,17 +847,20 @@ start automatic corrective edits or authorize a GitHub comment.
   as "no data".
 - **Always include the time window and the exact query / API path** for each
   number, so the user can reproduce it.
-- **Respect controllers.** Do not recommend changes that fight an HPA (CPU
-  request coupling) or a VPA in `Auto` mode without flagging the conflict.
+- **Respect controllers.** Do not recommend changes that fight an HPA (CPU or
+  memory utilization request coupling) or a VPA in a mode other than `Off`
+  without flagging the conflict.
 - **Never downsize a classified engine's memory on working set / PSI alone.**
   Cache- and heap-backed engines (DB / JVM) degrade on eviction, GC thrash, or
   page-cache loss **without** OOMKills or PSI. Size from the engine's ceiling
   (`references/workloads.md`), use the engine's own pressure signal as the
   downsize guard, and only reclaim memory as a change paired with lowering the
   engine's own config. If the engine was detected but its exporter is absent,
-  say the engine model was not applied. The same caution applies to
-  **page-cache-sensitive non-engine** services (Vault, etcd, Loki, BoltDB-backed
-  Go apps): they too thrash without OOM/PSI — use the major-page-fault rate as
-  the downsize guard (`references/queries.md`, `references/workloads.md`).
+  say the engine model was not applied and withhold memory reductions until the
+  engine ceiling and pressure evidence are established. The same caution applies
+  to **page-cache-sensitive non-engine** services (Vault, etcd, Loki,
+  BoltDB-backed Go apps): they too thrash without OOM/PSI — use the
+  major-page-fault rate as the downsize guard (`references/queries.md`,
+  `references/workloads.md`).
 - **Never** echo, log, or write the Grafana bearer token to disk.
 - **Flag QoS-class changes** any recommendation would cause.

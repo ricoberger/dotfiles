@@ -23,19 +23,29 @@ This file is consulted from three points in the main workflow:
 
 1. **Classify** after resolving the target. Match the container image and common
    labels (table below) to a candidate engine, then **confirm by probing** for
-   that engine's exporter metric (the `Probe` query in each section). Run every
+   that engine's exporter metric (the `Probe` query in each section, scoped to
+   the target with `$ESEL` — see "Selecting an Exporter's Series"). Run every
    query through `sre-grafana`, same as the generic queries.
 2. **Confirmed** (probe returns series) → use the engine section: pull its
    signal metrics in step 4, apply its sizing rule + downsize guard in step 5,
    and add the engine line to the report.
 3. **Candidate but probe empty** (engine detected from the image, but no
-   exporter metrics) → fall back to the generic working-set method, and **state
-   explicitly in the report** that the recommendation ignores the engine's
-   memory model because no exporter was found. Suggest deploying the exporter
-   for an accurate sizing.
-4. **No match** → plain generic method. **But first check whether the workload
-   is page-cache-sensitive** (stateful/mmap-heavy with `container_memory_cache`
-   a large share of memory, no engine exporter — see "Page-Cache-Sensitive
+   exporter metrics) → run the generic working-set analysis and allow raises,
+   but **withhold memory reductions**: the generic method can put the limit
+   below a configured heap or cache it cannot see. A cut needs the engine
+   ceiling (from the live spec/config: `-Xmx` / `MaxRAMPercentage`,
+   `cacheSizeGB`, `shared_buffers`, `maxmemory`, `max_server_memory_usage`)
+   **and** the engine's pressure evidence from another source; without both,
+   list it as a reclaim candidate blocked by "engine evidence missing". **State
+   explicitly in the report** that the engine's memory model was not applied
+   because no exporter was found, and suggest deploying the exporter.
+4. **No match** → first run the **Generic JVM** probe and check the container
+   command/env (`java`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `-Xmx`): an
+   unrecognized image can still be a JVM, and its heap cuts fire neither OOM nor
+   PSI. A JVM found this way follows step 2 or 3 as Generic JVM. Otherwise →
+   plain generic method. **But first check whether the workload is
+   page-cache-sensitive** (stateful/mmap-heavy with `container_memory_cache` a
+   large share of memory, no engine exporter — see "Page-Cache-Sensitive
    Services (Non-Engine)" below); if so, keep the generic
    `working_set_max × 1.25` sizing but add the major-page-fault downsize guard,
    since PSI and OOM miss page-cache thrash.
@@ -55,7 +65,7 @@ matched as substrings (ignore registry/tag). The `app.kubernetes.io/name` label
 | MongoDB                    | `mongo`, `mongodb`, `percona-server-mongodb`          | `mongodb`, `psmdb`, `mongodb-replicaset`                  | `mongodb_ss_wt_cache_maximum_bytes_configured`                             |
 | PostgreSQL                 | `postgres`, `postgresql`, `spilo`, `crunchy-postgres` | `postgresql`, `postgres`, `cluster-name` (Zalando/CNPG)   | `pg_settings_shared_buffers_bytes`                                         |
 | Redis                      | `redis`, `valkey`, `redis-stack`                      | `redis`, `valkey`, `redis-cluster`                        | `redis_memory_used_bytes`                                                  |
-| Kafka                      | `kafka`, `cp-kafka`, `strimzi`, `redpanda`            | `kafka`, `strimzi.io/cluster`                             | `kafka_server_replicamanager_*` or JMX heap                                |
+| Kafka                      | `kafka`, `cp-kafka`, `strimzi`                        | `kafka`, `strimzi.io/cluster`                             | `kafka_server_replicamanager_*` or JMX heap                                |
 | ClickHouse                 | `clickhouse`, `clickhouse-server`                     | `clickhouse`, `clickhouse-operator`                       | `ClickHouseMetrics_MemoryTracking`                                         |
 | Elasticsearch / OpenSearch | `elasticsearch`, `opensearch`                         | `elasticsearch`, `opensearch`, `elasticsearch-master`     | `elasticsearch_jvm_memory_max_bytes` / `opensearch_jvm_mem_heap_max_bytes` |
 | Generic JVM                | java app images; presence of `-Xmx`/`JAVA_OPTS`       | any; corroborate by the JVM probe                         | `jvm_memory_bytes_used` / `jvm_memory_used_bytes`                          |
@@ -63,6 +73,13 @@ matched as substrings (ignore registry/tag). The `app.kubernetes.io/name` label
 Pick **Generic JVM** only when no more-specific engine matched but the JVM probe
 returns series (Kafka, Elasticsearch and OpenSearch are JVM engines too — prefer
 their specific section, which already covers the heap plus the engine's caches).
+
+**Redpanda** (`redpanda` image) is Kafka-compatible but C++ (Seastar), not a
+JVM: the Kafka/JVM probes never confirm it, and "deploy an exporter" does not
+apply. It is not covered by an engine section — use the generic method, take its
+configured `--memory` / `--reserve-memory` (or the operator's resource settings)
+as the ceiling it plans against, and withhold memory cuts below that ceiling;
+say so in the report.
 
 ### Selecting an Exporter’s Series
 
@@ -79,6 +96,21 @@ pod/instance label that matches the workload:
   set off the result to find the right selector.
 
 Abbreviate the chosen selector as `$ESEL` in the queries below.
+
+**Confirm per target, not per namespace.** The namespace-wide probe above is
+discovery only: another engine instance in the same namespace (e.g. a second
+MongoDB with an exporter) would make a target without one look confirmed. An
+engine counts as **confirmed** only when the `Probe` query of its section,
+evaluated with `$ESEL`, returns series that belong to **this** workload —
+sidecar series whose `pod` is owned by the target, or a standalone exporter
+whose labels/config point at the target's service. Otherwise treat it as
+"exporter absent" (How This Plugs In, step 3).
+
+The `max_over_time((max(...))[30d:10m])` forms below are fine for configured
+ceilings and trends. For a **peak that sizes a limit or heap** (heap/non-heap
+used max, live-set max, tracked-memory peak), use the raw-sample form from
+`queries.md` instead — `max(max_over_time(<metric>{$ESEL}[30d]))` — because a
+subquery skips bursts between steps.
 
 ## Shared Principle — Memory-Resident Engines
 
@@ -119,7 +151,7 @@ Plus ~1MiB per connection and aggregation/sort scratch.
 **Probe.**
 
 ```promql
-count(mongodb_ss_wt_cache_maximum_bytes_configured{namespace="$NS"})
+count(mongodb_ss_wt_cache_maximum_bytes_configured{$ESEL})
 ```
 
 **Signal metrics.**
@@ -142,10 +174,21 @@ quantile_over_time(0.95, (max(mongodb_ss_connections{$ESEL,conn_type="current"})
 > `mongodb_mongod_wiredtiger_cache_*`). Probe both prefixes if the first is
 > empty.
 
-**Sizing.** `engine_ceiling` = configured WiredTiger cache; `overhead_factor` ≈
-`1 / 0.5` plus the +1GiB base, i.e. a limit that _keeps the current cache_ must
-satisfy `limit ≥ cache / 0.5 + 1GiB`, then add connection headroom
-(`current_conns × 1MiB`). Take the max of that and `working_set_max × 1.25`.
+**Sizing.** `engine_ceiling` = configured WiredTiger cache. Distinguish how it
+is set:
+
+- **Limit-derived (no `cacheSizeGB`):** the cache is `0.5 × (limit − 1GiB)`, so
+  `cache / 0.5 + 1GiB` just reconstructs the **current limit** — connections and
+  sort/aggregation scratch already live in the non-cache half. Do **not** add
+  connection headroom on top (every run would ratchet the limit up as the cache
+  re-derives from it). Keep the current limit unless there is evidence of unmet
+  demand: the downsize guard below shows pressure, or the non-cache footprint
+  (working set − `bytes_currently_in_the_cache`) approaches `limit − cache`.
+- **Explicit `cacheSizeGB`:** the limit must cover the cache plus the measured
+  non-cache footprint:
+  `limit ≥ cacheSizeGB + max(non-cache peak × 1.25, 1GiB + current_conns × 1MiB)`.
+
+Take the max of that and `working_set_max × 1.25`.
 
 **Downsize guard.** Cache fill at ~100% of the configured maximum **with** a
 non-trivial `read_into_cache` rate = the working set does not fit; raise, do not
@@ -198,14 +241,18 @@ usage, but the metric has sharp edges:
   on each secondary — querying a secondary makes _every_ index look unused).
   Resolve it first, and apply this to **all** query-side Mongo metrics (usage,
   scans, ops, examined), not just indexstats:
+
   ```promql
   mongodb_mongod_replset_my_state{$ESEL} == 1   # the primary pod (or filter rs_state="PRIMARY")
   ```
+
 - **Per-index dimension is `key_name`, not `index`** (the `index` label is
   empty):
+
   ```promql
   sum by(collection,key_name)(increase(mongodb_indexstats_accesses_ops{<primary-pod>}[7d]))
   ```
+
 - **Never autodrop on a 0-ops reading.** `accesses.ops` counts only _query_ uses
   — a **TTL** index (e.g. `createdAt_1`), a **unique/constraint** index, or one
   used only by rare/batch jobs shows ~0 ops yet is essential (verified live: a
@@ -231,7 +278,7 @@ naive trim.
 **Probe.**
 
 ```promql
-count(pg_settings_shared_buffers_bytes{namespace="$NS"})
+count(pg_settings_shared_buffers_bytes{$ESEL})
 ```
 
 **Signal metrics.**
@@ -243,23 +290,34 @@ max_over_time((max(pg_settings_work_mem_bytes{$ESEL}))[30d:10m])
 max_over_time((max(pg_settings_maintenance_work_mem_bytes{$ESEL}))[30d:10m])
 max_over_time((max(pg_settings_max_connections{$ESEL}))[30d:10m])
 
-# buffer cache hit ratio — the undersize signal (decays when memory is short)
-sum(rate(pg_stat_database_blks_hit{$ESEL}[5m]))
-  / (sum(rate(pg_stat_database_blks_hit{$ESEL}[5m])) + sum(rate(pg_stat_database_blks_read{$ESEL}[5m])))
+# buffer cache hit ratio per instance — the undersize signal (decays when memory
+# is short); never sum members before dividing, a busy healthy replica hides a
+# starved one. Use the exporter's instance label (`instance`, `pod` or `server`).
+sum by (instance) (rate(pg_stat_database_blks_hit{$ESEL}[5m]))
+  / (sum by (instance) (rate(pg_stat_database_blks_hit{$ESEL}[5m])) + sum by (instance) (rate(pg_stat_database_blks_read{$ESEL}[5m])))
 
-# peak concurrent connections (drives work_mem multiplication)
-quantile_over_time(0.95, (sum(pg_stat_activity_count{$ESEL}))[30d:10m])
+# peak concurrent active connections (drives work_mem multiplication) — a peak,
+# not a p95, since the work_mem budget is a worst case. The series is per
+# database, so sum per instance first; use the scrape interval as the step so
+# no stored sample is skipped (sub-scrape spikes stay invisible — say so).
+max_over_time((max(sum by (instance) (pg_stat_activity_count{$ESEL,state="active"})))[30d:1m])
 ```
 
 **Sizing.** `engine_ceiling` ≈
-`shared_buffers + maintenance_work_mem + work_mem × peak_active_connections + ~150MiB base`;
+`shared_buffers + maintenance_work_mem × concurrent_maintenance + work_mem × hash_mem_multiplier × peak_active_connections × concurrent_nodes + ~150MiB base`,
+where `concurrent_nodes` is the number of sort/hash nodes a heavy query runs at
+once (× parallel workers + 1 for parallel plans) and `concurrent_maintenance`
+the autovacuum workers / index builds that can run together. This is a planning
+estimate, not a measurement: state the assumed `concurrent_nodes` (≥ 2 when
+unknown) and never recommend a limit below the estimate with that assumption.
 `overhead_factor` ~1.2 plus a page-cache allowance (don't squeeze the limit down
 to just `shared_buffers` — leave room for hot data in page cache). Take the max
 of that and `working_set_max × 1.25`.
 
-**Downsize guard.** A buffer cache-hit ratio durably **below ~0.99 (OLTP)** is
-memory starvation — raise, don't trim. Only trim when the hit ratio is high
-_and_ working set sits well under the limit.
+**Downsize guard.** Apply it **per instance** and use the worst member. A buffer
+cache-hit ratio durably **below ~0.99 (OLTP)** is memory starvation — raise,
+don't trim. Only trim when the hit ratio is high _and_ working set sits well
+under the limit.
 
 **Replica-set note.** `pg_settings_*` are identical across members, but the
 **cache-hit ratio, connections, and write activity differ per instance** — and
@@ -283,7 +341,7 @@ Redis grows unbounded until OOM.
 **Probe.**
 
 ```promql
-count(redis_memory_used_bytes{namespace="$NS"})
+count(redis_memory_used_bytes{$ESEL})
 ```
 
 **Signal metrics.**
@@ -305,11 +363,20 @@ headroom. If `maxmemory == 0`: there is no engine ceiling — size off
 `used_memory` peak × fragmentation × 1.25 **and recommend setting `maxmemory`**
 to a value below the limit so Redis enforces its own bound instead of OOMing.
 
-**Downsize guard.** A non-zero `evicted_keys` rate means the dataset doesn't fit
-**unless** the `maxmemory-policy` is an intentional LRU/LFU cache (`allkeys-*`)
-— check the policy before reading evictions as pressure. For a persistence/store
-policy (`noeviction`/`volatile-*`), evictions ⇒ raise. Trim only with zero
-evictions and used_memory well under maxmemory.
+**Downsize guard.** Read pressure according to `maxmemory-policy`:
+
+- `allkeys-*` (intentional LRU/LFU cache): evictions are expected; judge them
+  against the hit ratio, not as pressure on their own.
+- `volatile-*`: evictions ⇒ raise; once no evictable (TTL) keys remain, Redis
+  also **rejects writes**.
+- `noeviction`: Redis never evicts — it **rejects writes** at `maxmemory`, so
+  zero evictions prove nothing. Check rejected writes:
+  `rate(redis_errors_total{$ESEL,err="OOM"}[5m])` (errorstats, Redis ≥ 6.2) or
+  `redis_commands_rejected_calls_total`, plus `used_memory` vs `maxmemory`.
+
+Any OOM rejections or evictions under a store policy ⇒ raise. Trim only with
+zero evictions, zero OOM rejections (or the series confirmed absent and stated)
+and used_memory well under maxmemory.
 
 **Replica-set note.** In a master/replica (e.g. Sentinel) topology replicas
 mirror the dataset, so `used_memory`/`maxmemory` are ~identical across members
@@ -333,15 +400,17 @@ uses off-heap direct memory for network buffers.
 **Probe.**
 
 ```promql
-count(kafka_server_replicamanager_underreplicatedpartitions{namespace="$NS"})
-  or count(jvm_memory_bytes_max{namespace="$NS",area="heap"})
+count(kafka_server_replicamanager_underreplicatedpartitions{$ESEL})
+  or count(jvm_memory_bytes_max{$ESEL,area="heap"})
 ```
 
 **Signal metrics.**
 
 ```promql
 # JVM heap ceiling (Xmx) and live heap use
-max_over_time((max(jvm_memory_bytes_max{$ESEL,area="heap"}))[30d:10m])
+# current Xmx per instance (at the window end) — not the 30d max, which keeps an
+# old, larger heap after a reduction
+max by (instance) (last_over_time(jvm_memory_bytes_max{$ESEL,area="heap"}[1h]))
 quantile_over_time(0.95, (max(jvm_memory_bytes_used{$ESEL,area="heap"}))[30d:10m])
 
 # GC time fraction — heap-pressure signal (rises before working set hits limit)
@@ -383,7 +452,7 @@ with `MEMORY_LIMIT_EXCEEDED`. Mark cache and uncompressed cache add fixed pools.
 **Probe.**
 
 ```promql
-count(ClickHouseMetrics_MemoryTracking{namespace="$NS"})
+count(ClickHouseMetrics_MemoryTracking{$ESEL})
 ```
 
 **Signal metrics.**
@@ -427,15 +496,17 @@ searches.
 **Probe.**
 
 ```promql
-count(elasticsearch_jvm_memory_max_bytes{namespace="$NS",area="heap"})
-  or count(opensearch_jvm_mem_heap_max_bytes{namespace="$NS"})
+count(elasticsearch_jvm_memory_max_bytes{$ESEL,area="heap"})
+  or count(opensearch_jvm_mem_heap_max_bytes{$ESEL})
 ```
 
 **Signal metrics.** (OpenSearch plugin names in parentheses.)
 
 ```promql
 # heap ceiling and use
-max_over_time((max(elasticsearch_jvm_memory_max_bytes{$ESEL,area="heap"}))[30d:10m])
+# current Xmx per instance (at the window end) — not the 30d max, which keeps an
+# old, larger heap after a reduction
+max by (instance) (last_over_time(elasticsearch_jvm_memory_max_bytes{$ESEL,area="heap"}[1h]))
 quantile_over_time(0.95, (max(elasticsearch_jvm_memory_used_bytes{$ESEL,area="heap"}))[30d:10m])
 
 # GC time fraction — heap-pressure signal
@@ -479,8 +550,8 @@ demand. GC frequency/time is the uncensored signal.
 **Probe.**
 
 ```promql
-count(jvm_memory_bytes_used{namespace="$NS",area="heap"})
-  or count(jvm_memory_used_bytes{namespace="$NS",area="heap"})
+count(jvm_memory_bytes_used{$ESEL,area="heap"})
+  or count(jvm_memory_used_bytes{$ESEL,area="heap"})
 ```
 
 **Signal metrics.** (`client_java` `jvm_memory_bytes_*` / Micrometer
@@ -488,7 +559,9 @@ count(jvm_memory_bytes_used{namespace="$NS",area="heap"})
 
 ```promql
 # heap ceiling (Xmx) and use
-max_over_time((max(jvm_memory_bytes_max{$ESEL,area="heap"}))[30d:10m])
+# current Xmx per instance (at the window end) — not the 30d max, which keeps an
+# old, larger heap after a reduction
+max by (instance) (last_over_time(jvm_memory_bytes_max{$ESEL,area="heap"}[1h]))
 quantile_over_time(0.95, (max(jvm_memory_bytes_used{$ESEL,area="heap"}))[30d:10m])
 max_over_time((max(jvm_memory_bytes_used{$ESEL,area="heap"}))[30d:10m])
 
@@ -528,8 +601,10 @@ overstates true need — never size heap off it.
 > **Verified live why this matters.** Same skill, two JVM workloads, opposite
 > verdicts the pre-GC peak hid: an ES data node showed heap `max` 16GiB on a
 > 21GiB Xmx (looks ~right) but a **2GiB live set with 0 old GCs in 30d** → heap
-> ~10× oversized. A Jetty service showed heap `max` ≈ Xmx (looks pressured) and
-> a **live set at 99% of Xmx with 30% old-GC wall-time** → genuinely starved.
+> ~10× oversized (with 0 old GCs the collection gauge is stale — confirm such a
+> verdict against the old-gen occupancy max, see below). A Jetty service showed
+> heap `max` ≈ Xmx (looks pressured) and a **live set at 99% of Xmx with 30%
+> old-GC wall-time** → genuinely starved.
 
 **Live-set probe ladder** (name varies by exporter — probe top-down, use the
 first that returns series):
@@ -537,12 +612,18 @@ first that returns series):
 1. **Post-collection occupancy (best — true live set):**
    `jvm_memory_pool_collection_used_bytes{pool=~".*Old.*"}` (`client_java` /
    simpleclient). Updated only after a GC of that pool, so it **is** the live
-   set.
-2. **Old-gen occupancy floor (fallback):** a low percentile of
-   `jvm_memory_pool_used_bytes{pool=~".*Old.*"}` (client_java) /
+   set — but only as fresh as the last collection: with no old collection in the
+   window it is stale (it may predate the window) and does not show later
+   old-gen growth.
+2. **Old-gen occupancy (fallback):**
+   `jvm_memory_pool_used_bytes{pool=~".*Old.*"}` (client_java 1.x) /
+   `jvm_memory_pool_bytes_used{pool=~".*Old.*"}` (simpleclient 0.x) /
    `jvm_memory_used_bytes{area="heap",id=~".*Old.*"}` (Micrometer) /
    `elasticsearch_jvm_memory_pool_used_bytes{pool="old"}` /
-   `opensearch_jvm_mem_pools_old_used_bytes` — the sawtooth bottom ≈ live set.
+   `opensearch_jvm_mem_pools_old_used_bytes`. The sawtooth bottom ≈ live set;
+   estimate the **peak** live set as the highest hourly floor (query below).
+   Occupancy always includes uncollected garbage, so it bounds the live set from
+   above — conservative for a shrink decision.
 3. **No per-pool series (last resort):** fall back to total-heap + GC% only (the
    per-section method above). Some exporters emit only `area`-level heap (e.g.
    `jvm_memory_used_bytes{area="heap"}` with no pool/`id` label) — then the live
@@ -552,9 +633,15 @@ first that returns series):
 # (1) live set: typical, high, worst-case (per pool, fleet-aggregated)
 quantile_over_time(0.50, (avg(jvm_memory_pool_collection_used_bytes{$ESEL,pool=~".*Old.*"}))[30d:10m])
 quantile_over_time(0.95, (avg(jvm_memory_pool_collection_used_bytes{$ESEL,pool=~".*Old.*"}))[30d:10m])
-max_over_time((max(jvm_memory_pool_collection_used_bytes{$ESEL,pool=~".*Old.*"}))[30d:10m])
+max(max_over_time(jvm_memory_pool_collection_used_bytes{$ESEL,pool=~".*Old.*"}[30d]))
 
-# (2) fallback floor when collection_used is absent
+# (2) fallback when collection_used is absent or stale: peak of the hourly
+# sawtooth floor (≈ peak live set; conservatively high when old GCs are rare).
+# Use jvm_memory_pool_bytes_used for simpleclient 0.x.
+max_over_time((max(min_over_time(jvm_memory_pool_used_bytes{$ESEL,pool=~".*Old.*"}[1h])))[30d:1h])
+# old-gen occupancy max over the window (upper bound of the live set)
+max(max_over_time(jvm_memory_pool_used_bytes{$ESEL,pool=~".*Old.*"}[30d]))
+# quiet-period floor — a LOWER bound only, never a basis for shrinking
 quantile_over_time(0.05, (max(jvm_memory_pool_used_bytes{$ESEL,pool=~".*Old.*"}))[30d:10m])
 
 # young vs OLD GC split — old-GC% is the heap-pressure signal, young-GC% is allocation rate
@@ -565,6 +652,11 @@ max_over_time((max(rate(jvm_gc_collection_seconds_count{$ESEL,gc=~".*Old.*"}[5m]
 
 **Verdict — live-set peak as % of Xmx × old-GC time:**
 
+Compare each instance with **its own current Xmx** (the per-instance
+`last_over_time` query in the engine sections), never with a 30-day max of the
+heap ceiling. If Xmx changed inside the window, split the evidence at the change
+(see `SKILL.md` step 2) and use only the post-change live set.
+
 | live-set peak vs Xmx          | old-GC time peak | meaning                                       | action                                                                 |
 | ----------------------------- | ---------------- | --------------------------------------------- | ---------------------------------------------------------------------- |
 | ≳90% **or** old-GC peak >~5%  | high             | **starved** — no reclaimable space, GC thrash | **raise** Xmx so live-set peak lands ≤~75% of Xmx; raise limit with it |
@@ -574,6 +666,17 @@ max_over_time((max(rate(jvm_gc_collection_seconds_count{$ESEL,gc=~".*Old.*"}[5m]
 Target a heap where the **live-set peak sits at ~70–75% of Xmx** (room for the
 collector to work + burst headroom). Request/limit then follow the engine's
 normal rule.
+
+**Shrink evidence must be current and representative.** With ~0 old collections
+in the window, `collection_used` is stale — base the shrink verdict on the
+window's old-gen **occupancy** max instead (it includes garbage, so it
+over-states the live set): ≤ ~40% of Xmx supports a shrink; above that, or
+without occupancy data, mark the shrink **inconclusive**. The window must cover
+representative load (full weekly cycle, no traffic outage); a low percentile of
+occupancy only describes quiet periods and never justifies a shrink. `-Xmx` also
+bounds the young generation: if young-GC time is already elevated (see the
+`gc=~".*Young.*"` query above), mark the shrink **inconclusive**, and after a
+shrink re-check young-GC time and frequency alongside old-GC time.
 
 **Coupling + caveats (never size heap in isolation):**
 
@@ -625,11 +728,22 @@ recommended mem limit   = working_set_max × 1.25
 recommended mem request ≈ p95 working set
 ```
 
-`working_set_max × 1.25` already carries page-cache headroom for free: working
-set **excludes** reclaimable (inactive-file) cache, so the ×1.25 is space the
-kernel will repurpose as reclaimable page cache. (Optional belt-and-suspenders
-floor: `container_memory_rss` max — the non-reclaimable anon memory the box can
-never go below — but since `working_set ≥ RSS` always, this rarely binds.)
+`working_set_max × 1.25` leaves _some_ room for page cache: working set
+**excludes** reclaimable (inactive-file) cache, so the ×1.25 is space the kernel
+can use for it. It does **not** prove that the cache the service holds today
+still fits after a cut — under the current limit the kernel may use far more
+than that as page cache, and a quiet major-fault rate only proves the _current_
+limit is enough. (Optional belt-and-suspenders floor: `container_memory_rss` max
+— the non-reclaimable anon memory the box can never go below — but since
+`working_set ≥ RSS` always, this rarely binds.)
+
+For a **downsize**, compare the proposed limit with the current cache footprint
+(`container_memory_cache` p95 and the inactive-file part,
+`container_memory_usage_bytes − container_memory_working_set_bytes`). When the
+cut would remove a material share of that cache, stage it (≤ ~25% per step),
+name the re-check (major-fault rate vs a quiet sibling after ≥ 7 days) and go
+further only on that evidence; when the required cache size is unknown and the
+cut is large, defer it.
 
 **The category's one real change is the downsize guard.** PSI and OOM are silent
 while the page cache thrashes, so:
