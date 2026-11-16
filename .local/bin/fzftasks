@@ -577,7 +577,9 @@ cmd_start() {
         title="$(printf '%s' "$title" | tr '\t\n' '  ')"
         sql "INSERT INTO items (key, title, details, workspace, external_workspace, state, updated_at) VALUES ($(q "$key"), $(q "$title"), CAST(readfile($(q "$tmp")) AS TEXT), $(q "$cwd"), 1, 'todo', $(now));"
         rm -f "$tmp"
-        exec "$SCRIPT" __run "$key"
+        # stdin may be the (drained) details pipe of "new --cwd"; pi needs the
+        # terminal, otherwise it falls back to print mode and exits at once.
+        exec "$SCRIPT" __run "$key" </dev/tty
       fi
       # Ad-hoc, Jira, alert and Kubernetes items can work in a repository; ask
       # for it unless the caller passed --repo (an empty value means "no
