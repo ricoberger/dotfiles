@@ -48,7 +48,7 @@ REX_SIDEBAR_INBOX_ISSUES_QUERY="${REX_SIDEBAR_INBOX_ISSUES_QUERY:-archived:false
 # The "Assigned" filter of fzfjira.
 # Slack channels (names, separated by spaces) whose unread messages are shown
 # next to the unread activity.
-REX_SIDEBAR_INBOX_SLACK_CHANNELS="${REX_SIDEBAR_INBOX_SLACK_CHANNELS:-#team-core #team-core-internal #com-machineroom #com-ai-in-engineering #team-engineers}"
+REX_SIDEBAR_INBOX_SLACK_CHANNELS="${REX_SIDEBAR_INBOX_SLACK_CHANNELS:-#team-core-infra #team-core-internal #com-machineroom #com-ai-in-engineering #team-engineers}"
 REX_SIDEBAR_INBOX_JIRA_JQL="${REX_SIDEBAR_INBOX_JIRA_JQL:-project = CORE AND assignee = currentUser() AND statusCategory != Done AND status != Backlog ORDER BY priority DESC, updated DESC}"
 REX_SIDEBAR_INBOX_SOURCES=(alerts slack prs issues jira agents)
 
