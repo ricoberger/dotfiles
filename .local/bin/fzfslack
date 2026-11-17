@@ -753,6 +753,79 @@ if [[ "$1" == "__json-activity" ]]; then
   exit 0
 fi
 
+# ---------- Sub-command: __json-unreads ----------
+# Called as: fzfslack __json-unreads [channel...]
+# Prints the channels with unread messages (client.counts), limited to the
+# given channels (names with or without "#", all channels when none are
+# given), as a JSON array of
+#   {channel, channel_name, latest, last_read, mention_count, unread_count,
+#    more, last_ts, last_author, last_text,
+#    messages: [{ts, thread_ts, author, text, reply_count}] (newest first)}
+# The unread messages are fetched per channel (conversations.history since
+# last_read, at most 100, "more" is true when there are more; thread replies
+# are not included) and cached until
+# the channel's latest or last_read changes, so a channel only costs a request
+# when it has new messages or was read. Also used by ~/.local/bin/rex-sidebar
+# (inbox), so keep the fields stable.
+
+if [[ "$1" == "__json-unreads" ]]; then
+  shift
+  counts="$(api client.counts)"
+  if [[ "$(jq -r '.ok' <<<"$counts" 2>/dev/null)" != "true" ]]; then
+    echo "Could not load unread counts: $(jq -r '.error // "error"' <<<"$counts" 2>/dev/null)" >&2
+    exit 1
+  fi
+  unread="$(jq -c '[.channels[]? | select(.has_unreads == true)]' <<<"$counts")"
+  cmap="$(jq -r '.[].id' <<<"$unread" | build_channel_map)"
+  wanted="$(printf '%s\n' "$@" | sed '/^$/d; s/^#*/#/' | jq -R -s -c 'split("\n") | map(select(. != ""))')"
+  unread="$(jq -c --argjson cmap "$cmap" --argjson wanted "$wanted" '
+    map(. + {channel_name: ($cmap[.id] // .id)})
+    | map(select(($wanted | length) == 0 or (.channel_name as $n | $wanted | index($n))))' <<<"$unread")"
+
+  dir="$(persist_dir)/unreads"
+  mkdir -p "$dir"
+  items="[]"
+  while IFS=$'\t' read -r id latest last_read; do
+    [[ -z "$id" ]] && continue
+    cache="$dir/$id.json"
+    if [[ -f "$cache" ]] &&
+      [[ "$(jq -r 'if .item.messages then [.latest, .last_read] | join(" ") else "" end' "$cache" 2>/dev/null)" == "$latest $last_read" ]]; then
+      item="$(jq -c '.item' "$cache")"
+    else
+      hist="$(api conversations.history \
+        --data-urlencode "channel=$id" \
+        --data-urlencode "oldest=$last_read" \
+        --data-urlencode "limit=100")"
+      [[ "$(jq -r '.ok' <<<"$hist" 2>/dev/null)" == "true" ]] || continue
+      ids="$(jq -r '.messages[]?.user // empty' <<<"$hist" | sort -u)"
+      map="$(printf '%s\n' "$ids" | build_user_map)"
+      item="$(jq_args -c --argjson map "$map" "$JQLIB"'
+        (.messages // []) as $ms
+        | ($ms[0] // null) as $m
+        | { unread_count: ($ms | length), more: (.has_more // false),
+            last_ts: ($m.ts // ""),
+            last_author: (if $m then author($m) else "" end),
+            last_text: (if $m then (($m | msgtext) | decode | strip_links | oneline) else "" end),
+            messages: [$ms[] | . as $x
+              | { ts: .ts, thread_ts: (.thread_ts // ""), author: author($x),
+                  text: (($x | msgtext) | decode | strip_links | oneline),
+                  reply_count: (.reply_count // 0) }] }' <<<"$hist")"
+      [[ -n "$item" ]] || continue
+      jq -nc --arg latest "$latest" --arg last_read "$last_read" --argjson item "$item" \
+        '{latest: $latest, last_read: $last_read, item: $item}' >"$cache"
+    fi
+    items="$(jq -c --argjson item "$item" --arg id "$id" '. + [$item + {id: $id}]' <<<"$items")"
+  done < <(jq -r '.[] | [.id, (.latest // ""), (.last_read // "")] | @tsv' <<<"$unread")
+
+  jq -c --argjson items "$items" '
+    ($items | map({(.id): .}) | add // {}) as $byid
+    | map(select(.id | in($byid))
+      | . as $c
+      | {channel: .id, channel_name, latest: (.latest // ""), last_read: (.last_read // ""),
+         mention_count: (.mention_count // 0)} + ($byid[$c.id] | del(.id)))' <<<"$unread"
+  exit 0
+fi
+
 # ---------- Sub-command: __list-activity ----------
 # Renders the activity feed (see __json-activity) as TAB-separated rows:
 #   <feed_ts>\t<channel>\t<ts>\t<thread_ts>\t<type>\t<display>\t<key>
@@ -1178,6 +1251,9 @@ Usage:
   fzfslack                 browse conversations, messages and threads
   fzfslack search [query]  search messages across the workspace
   fzfslack activity        browse your activity feed (mentions, reactions, ...)
+  fzfslack conversation view <id>
+                           show the messages of a conversation (by its id,
+                           e.g. C061S43JS76)
   fzfslack activity view <key>
                            show a single activity item of the feed (by its key,
                            e.g. thread_v2-<channel>-<thread_ts>)
@@ -1554,9 +1630,18 @@ if [[ "$1" == "activity" && "$2" == "view" && -n "$3" && $# -eq 3 ]]; then
   run_activity "$3"
   exit 0
 fi
+if [[ "$1" == "conversation" && "$2" == "view" && -n "$3" && $# -eq 3 ]]; then
+  # The name (border label) of the conversation, from the channel name cache.
+  name="$(printf '%s\n' "$3" | build_channel_map | jq -r --arg id "$3" '.[$id] // $id')"
+  # The unread markers and "mark" read last_read / latest from the cached
+  # counts, which are otherwise written by the conversation list.
+  api client.counts > "$FZFSLACK_CACHE_DIR/counts.json" 2>/dev/null
+  run_messages "$3" "${name#[#@]}"
+  exit 0
+fi
 if [[ -n "$1" ]]; then
   echo "Unknown command: $*" >&2
-  echo "Usage: fzfslack [search [query] | activity [view <key>] | tokens [file]]" >&2
+  echo "Usage: fzfslack [search [query] | activity [view <key>] | conversation view <id> | tokens [file]]" >&2
   exit 1
 fi
 
