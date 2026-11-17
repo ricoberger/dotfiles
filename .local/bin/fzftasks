@@ -3,7 +3,7 @@
 # fzftasks - Track work items and the pi agents working on them
 #
 # Usage: fzftasks [start <key> | open <key> | reply <key> | done <key>... |
-#                  reopen <key>... | new [--cwd]]
+#                  reopen <key>... | new [--cwd] | worktrees]
 #
 # Work items are identified by a key, which encodes the item's kind:
 #
@@ -26,6 +26,10 @@
 # created with "fzftasks new --cwd" use the current directory as an external
 # workspace instead, which fzftasks never prepares or removes; their first run
 # starts in the current terminal.
+#
+# "fzftasks worktrees" lists the worktrees in the worktree directory and shows
+# which of them are workspaces of items and which were created otherwise
+# (manually or by an agent), and deletes the latter.
 #
 # State is stored in a SQLite database. Items are in one of these states:
 #
@@ -83,6 +87,7 @@ ICON_TASKS=$'\xef\x92\xa0'      # tasklist (items)
 ICON_PROMPT=$'\xf3\xb1\x99\xba' # robot (prompt for the agent)
 ICON_TRASH=$'\xf3\xb0\xa9\xba'  # trash (delete)
 ICON_REPO=$'\xef\x90\x81'       # repository
+ICON_TREE=$'\xee\x9c\xa5'       # git branch (worktrees)
 
 # ---------- Helpers ----------
 
@@ -1142,6 +1147,209 @@ cmd_action() {
   esac
 }
 
+# ---------- Worktrees ----------
+
+# Worktrees in $FZFTASKS_WORKTREE_DIR ("<dir>/<owner>/<repo>/<branch>") are
+# either the workspace of an item (removed when the item is deleted) or "other"
+# worktrees, created manually or by an agent in addition to the item's
+# workspace. Only other worktrees can be deleted in the worktree picker.
+
+# Print an identifier of a directory ("<device>:<inode>"). Workspaces are
+# matched by it instead of by path, because the stored path can be spelled
+# differently than the directory found on disk: the owner of a PR key is
+# spelled like on GitHub (e.g. "Staffbase"), while the directory may be
+# lowercase on a case-insensitive file system. Tries GNU stat first, because
+# "stat -f" means something else there.
+path_id() {
+  stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1" 2>/dev/null
+}
+
+# Print the workspaces of items as "<path id>\t<key>\t<state>". Workspaces that
+# no longer exist are skipped. External workspaces ("new --cwd") are never
+# removed by fzftasks, so they do not own a worktree.
+item_workspaces() {
+  local workspace key state id
+  while IFS=$'\t' read -r workspace key state; do
+    id="$(path_id "$workspace")" && printf '%s\t%s\t%s\n' "$id" "$key" "$state"
+  done < <(sql "SELECT workspace, key, state FROM items WHERE COALESCE(workspace, '') != '' AND COALESCE(external_workspace, 0) != 1;")
+}
+
+# Print the item owning the worktree as "<key>\t<state>", nothing for other
+# worktrees.
+worktree_owner() {
+  local id wid key state
+  id="$(path_id "$1")" || return 0
+  while IFS=$'\t' read -r wid key state; do
+    if [[ "$wid" == "$id" ]]; then
+      printf '%s\t%s\n' "$key" "$state"
+      return 0
+    fi
+  done < <(item_workspaces)
+}
+
+# Print the state of a worktree: "clean" or the number of changed files and of
+# commits that are on no remote (unpushed).
+worktree_changes() {
+  local changed unpushed out=""
+  changed="$(git -C "$1" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  unpushed="$(git -C "$1" rev-list --count HEAD --not --remotes 2>/dev/null)"
+  [[ "${changed:-0}" != 0 ]] && out="$changed changed"
+  [[ "${unpushed:-0}" != 0 ]] && out="${out:+$out, }$unpushed unpushed"
+  echo "${out:-clean}"
+}
+
+# List the worktrees as "<path>\t<line>", other worktrees first.
+cmd_worktrees_list() {
+  local gitfile wt id rel owner key state branch changes width=0 cwidth=0 i j pass color
+  local item_ids=() item_owners=()
+  local paths=() rels=() keys=() states=() branches=() changes_list=()
+  init
+  [[ -d "$FZFTASKS_WORKTREE_DIR" ]] || return 0
+
+  while IFS=$'\t' read -r id key state; do
+    item_ids+=("$id") item_owners+=("$key"$'\t'"$state")
+  done < <(item_workspaces)
+
+  while IFS= read -r gitfile; do
+    wt="${gitfile%/.git}"
+    owner=""
+    if id="$(path_id "$wt")"; then
+      for j in "${!item_ids[@]}"; do
+        [[ "${item_ids[j]}" == "$id" ]] && owner="${item_owners[j]}" && break
+      done
+    fi
+    IFS=$'\t' read -r key state <<<"$owner"
+    rel="${wt#"$FZFTASKS_WORKTREE_DIR"/}"
+    branch="$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached)")"
+    changes="$(worktree_changes "$wt")"
+    paths+=("$wt") rels+=("$rel") keys+=("$key") states+=("$state")
+    branches+=("$branch") changes_list+=("$changes")
+    ((${#rel} > width)) && width=${#rel}
+    ((${#changes} > cwidth)) && cwidth=${#changes}
+  done < <(find "$FZFTASKS_WORKTREE_DIR" -mindepth 4 -maxdepth 4 -name .git 2>/dev/null | sort)
+
+  # Other worktrees first, then the workspaces of items. The branch is only
+  # shown when it differs from the directory name.
+  for pass in other item; do
+    for i in "${!paths[@]}"; do
+      [[ "$pass" == other && -n "${keys[i]}" ]] && continue
+      [[ "$pass" == item && -z "${keys[i]}" ]] && continue
+      color=$'\033[90m'
+      [[ "${changes_list[i]}" != clean ]] && color=$'\033[31m'
+      branch="${branches[i]}"
+      [[ "${branch//\//-}" == "${rels[i]##*/}" ]] && branch=""
+      if [[ -z "${keys[i]}" ]]; then
+        printf '%s\t\033[33m○ other\033[0m %s%-*s\033[0m %-*s \033[90m%s\033[0m\n' \
+          "${paths[i]}" "$color" "$cwidth" "${changes_list[i]}" "$width" "${rels[i]}" "$branch"
+      else
+        printf '%s\t\033[32m● item \033[0m %s%-*s\033[0m %-*s \033[36m%s\033[0m \033[90m%s %s\033[0m\n' \
+          "${paths[i]}" "$color" "$cwidth" "${changes_list[i]}" "$width" "${rels[i]}" "${keys[i]}" "${states[i]}" "$branch"
+      fi
+    done
+  done
+}
+
+cmd_worktrees_preview() {
+  local wt="$1" key state common unpushed
+  [[ -n "$wt" ]] || return 0
+  init
+  IFS=$'\t' read -r key state < <(worktree_owner "$wt")
+  common="$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  printf '\033[1mPath:\033[0m       %s\n' "$wt"
+  printf '\033[1mRepository:\033[0m %s\n' "${common%/.git}"
+  printf '\033[1mBranch:\033[0m     %s\n' "$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached)")"
+  if [[ -n "$key" ]]; then
+    printf '\033[1mItem:\033[0m       \033[36m%s\033[0m (%s), removed when the item is deleted\n' "$key" "$state"
+  else
+    printf '\033[1mItem:\033[0m       \033[33mnone\033[0m, not created by fzftasks\n'
+  fi
+  printf '\n\033[1mChanges\033[0m\n\n'
+  git -C "$wt" -c color.status=always status --short 2>&1
+  printf '\n\033[1mUnpushed commits\033[0m\n\n'
+  unpushed="$(git -C "$wt" log --color=always --oneline -n 20 HEAD --not --remotes 2>&1)"
+  printf '%s\n' "${unpushed:-none}"
+  printf '\n\033[1mRecent commits\033[0m\n\n'
+  git -C "$wt" log --color=always --oneline -n 10 2>&1
+}
+
+# Delete other worktrees: "git worktree remove" in their repository, refusing
+# local changes unless forced. Branches are kept. Worktrees of items are
+# refused; they are removed by deleting the item.
+cmd_worktrees_delete() {
+  local wt key state label answer common force=() failed=0
+  [[ $# -gt 0 ]] || exit 0
+  init
+  for wt in "$@"; do
+    IFS=$'\t' read -r key state < <(worktree_owner "$wt")
+    [[ -z "$key" ]] ||
+      fail "${wt#"$FZFTASKS_WORKTREE_DIR"/} is the workspace of $key, delete the item instead (alt-x in fzftasks)"
+  done
+  if [[ $# -eq 1 ]]; then
+    label="${1#"$FZFTASKS_WORKTREE_DIR"/}"
+  else
+    label="$# worktrees"
+  fi
+  answer="$(printf '%s\n' "No" "Yes" "Yes, force (discard local changes)" | fzf \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --prompt "$ICON_TRASH Delete $label: " \
+    --height 100% \
+    --reverse \
+    --border rounded \
+    --border-label " $ICON_TRASH Delete $label " \
+    --border-label-pos center)"
+  case "$answer" in
+    Yes) ;;
+    Yes,*) force=(--force) ;;
+    *) exit 0 ;;
+  esac
+
+  for wt in "$@"; do
+    common="$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+    if [[ -z "$common" ]]; then
+      echo "Failed to find the repository of $wt, remove it manually"
+      failed=1
+    elif ! git -C "$(dirname "$common")" worktree remove "${force[@]}" "$wt"; then
+      echo "Failed to remove the worktree $wt"
+      failed=1
+    fi
+  done
+  [[ "$failed" == 1 ]] && pause
+}
+
+cmd_worktrees() {
+  init
+  "$SCRIPT" __worktrees-list | fzf \
+    --ansi \
+    --delimiter $'\t' \
+    --with-nth 2 \
+    --reverse \
+    --height 100% \
+    --info right \
+    --multi \
+    --track \
+    --id-nth 1 \
+    --prompt "$ICON_TREE Worktrees: " \
+    --border rounded \
+    --border-label " $ICON_TREE fzftasks worktrees " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "ctrl-f:preview-half-page-down" \
+    --bind "ctrl-b:preview-half-page-up" \
+    --bind "home:preview-top" \
+    --bind "end:preview-bottom" \
+    --bind "ctrl-p:toggle-preview" \
+    --bind "tab:toggle+down" \
+    --bind "shift-tab:toggle+up" \
+    --bind "ctrl-r:reload-sync($SCRIPT __worktrees-list)+refresh-preview" \
+    --bind "alt-x:execute($SCRIPT __worktrees-delete {+1})+deselect-all+reload-sync($SCRIPT __worktrees-list)" \
+    --preview-window "right:50%" \
+    --preview "$SCRIPT __worktrees-preview {1}"
+}
+
 usage() {
   cat <<'EOF'
 fzftasks - Track work items and the pi agents working on them
@@ -1170,6 +1378,10 @@ Usage:
                           current directory and start its pi in the current
                           terminal (no repository or prompt; deleting the
                           item keeps the directory)
+  fzftasks worktrees      browse the worktrees in FZFTASKS_WORKTREE_DIR: other
+                          worktrees (created manually or by an agent), which
+                          fzftasks never removes, first, then the workspaces
+                          of items
 
 Track work items (pull requests, Jira work items, alerts, Kubernetes resources
 and ad-hoc tasks) and the pi agents working on them. Each item has its own pi
@@ -1199,6 +1411,13 @@ Keybindings:
   home   : scroll preview to top
   end    : scroll preview to bottom
   alt-h  : show help
+
+Worktree keybindings (fzftasks worktrees):
+  alt-x  : delete other worktrees (git worktree remove, optionally forced;
+           branches are kept); workspaces of items are deleted with the item
+  ctrl-r : reload list
+  The list shows whether a worktree has changed files or commits that are on
+  no remote; the preview shows them.
 
 Environment:
   FZFTASKS_STATE_DIR        : database, log, sessions, workspaces and
@@ -1286,7 +1505,14 @@ case "${1:-}" in
     cmd_reopen "$@"
     ;;
   new) cmd_new "$2" ;;
+  worktrees) cmd_worktrees ;;
   __list) cmd_list ;;
+  __worktrees-list) cmd_worktrees_list ;;
+  __worktrees-preview) cmd_worktrees_preview "$2" ;;
+  __worktrees-delete)
+    shift
+    cmd_worktrees_delete "$@"
+    ;;
   __preview)
     shift
     cmd_preview "$@"
