@@ -780,8 +780,12 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
 fi
 
 VIEW=0
+LIST=0
 if [[ "$1" == "view" && $# -eq 3 ]]; then
   VIEW=1
+elif [[ "$1" == "__json" && $# -eq 2 ]]; then
+  # Internal: print the alerts of a filter as JSON (see below).
+  LIST=1
 elif [[ $# -gt 0 ]]; then
   echo "Unknown command: $*" >&2
   echo "Usage: fzfalertmanager [view <alertmanager> <fingerprint>]" >&2
@@ -840,8 +844,38 @@ else
 fi
 
 if [[ "$VIEW" == 0 ]]; then
-  printf 'Fetching alerts...\n' >&2
+  [[ "$LIST" == 0 ]] && printf 'Fetching alerts...\n' >&2
   refresh
+fi
+
+# ---------- __json: print the alerts of a filter as JSON ----------
+#
+# Called as: fzfalertmanager __json <filter>
+#
+# Prints a JSON array of the filter's alerts, sorted by severity, then newest
+# first, of
+#   {alertmanager, fingerprint, severity, color, alertname, summary, ago,
+#    starts, source, silenced, inhibited}
+# with the alertmanager name and fingerprint for the view subcommand, the ANSI
+# color of the severity, the start time (epoch seconds) and the source link.
+# Alertmanagers whose refresh failed are skipped silently. Used by
+# ~/.local/bin/rex-sidebar (inbox), so keep the fields stable.
+
+if [[ "$LIST" == 1 ]]; then
+  list_idx="$(cfg '.filters | map(.name) | index($n) // empty' --arg n "$2")"
+  if [[ -z "$list_idx" ]]; then
+    echo "No filter named \"$2\"" >&2
+    exit 1
+  fi
+  jq_alerts '
+    [ alerts_for("filter"; $idx)
+      | sort_by([sevrank, -((.startsAt | epoch) // 0)])[]
+      | { alertmanager: am.name, fingerprint, severity: severity,
+          color: sevcolor, alertname: (.labels.alertname // "unknown"),
+          summary: secondary, ago: (.startsAt | ago),
+          starts: ((.startsAt | epoch) // 0), source: link("source"),
+          silenced: silenced, inhibited: inhibited } ]' -c --argjson idx "$list_idx"
+  exit 0
 fi
 
 # List the alerts of one filter / alertmanager, or only the alert with the given

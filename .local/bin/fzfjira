@@ -267,18 +267,22 @@ emit_markdown() {
   fi
 }
 
-# ---------- List mode ----------
+# ---------- JSON mode ----------
 #
-# Called for the initial feed and on every reload. Reads the JQL from the
-# environment (FZFJIRA_JQL) so the fzf reload binding stays quoting-safe.
+# Called as: fzfjira __json [JQL]
+#
+# Fetches the work items of the JQL (FZFJIRA_JQL when not passed) and prints
+# them as a JSON array of
+#   {key, summary, status, statusColor, priority, url}
+# where statusColor is the ANSI color code of the status category (e.g. "33").
+# The list mode renders its rows from it. Also used by ~/.local/bin/rex-sidebar (inbox), so keep the
+# fields stable.
 
-if [[ "$1" == "__list" ]]; then
-  # An optional second argument overrides FZFJIRA_JQL (used by the link-create
-  # target picker to feed a project-wide query through the same renderer).
-  list_jql="${2:-$FZFJIRA_JQL}"
+if [[ "$1" == "__json" ]]; then
+  json_jql="${2:-$FZFJIRA_JQL}"
   err="$(mktemp)"
   out="$(acli jira workitem search \
-    --jql "$list_jql" \
+    --jql "$json_jql" \
     --limit "$FZFJIRA_LIMIT" \
     --json 2>"$err")"
   status=$?
@@ -290,8 +294,8 @@ if [[ "$1" == "__list" ]]; then
   fi
   rm -f "$err"
 
-  printf '%s' "$out" | jq -r '
-    def pad(s; n): (s + (" " * 60))[0:n];
+  site="$(fzfjira_jira_site 2>/dev/null)"
+  printf '%s' "$out" | jq -c --arg site "$site" '
     def color(c):
       {
         green: "32",
@@ -301,11 +305,34 @@ if [[ "$1" == "__list" ]]; then
         "medium-gray": "37",
         "warm-red": "31"
       }[c] // "37";
+    map({
+      key,
+      summary: (.fields.summary // "-"),
+      status: (.fields.status.name // "-"),
+      statusColor: color(.fields.status.statusCategory.colorName // "medium-gray"),
+      priority: (.fields.priority.name // ""),
+      url: (if $site != "" then "https://" + $site + "/browse/" + .key else "" end)
+    })'
+  exit 0
+fi
+
+# ---------- List mode ----------
+#
+# Called for the initial feed and on every reload. Reads the JQL from the
+# environment (FZFJIRA_JQL) so the fzf reload binding stays quoting-safe.
+
+if [[ "$1" == "__list" ]]; then
+  # An optional second argument overrides FZFJIRA_JQL (used by the link-create
+  # target picker to feed a project-wide query through the same renderer).
+  # The work items come from the JSON mode.
+  out="$("$SCRIPT" __json "${2:-$FZFJIRA_JQL}")" || exit 1
+
+  printf '%s' "$out" | jq -r '
+    def pad(s; n): (s + (" " * 60))[0:n];
     .[]
-    | (.fields.status.statusCategory.colorName // "medium-gray") as $c
     | pad(.key; 12) + " "
-      + "\u001b[" + color($c) + "m" + pad((.fields.status.name // "-"); 14) + "\u001b[0m" + " "
-      + (.fields.summary // "-" | gsub("[\t\n\r]"; " "))
+      + "\u001b[" + .statusColor + "m" + pad(.status; 14) + "\u001b[0m" + " "
+      + (.summary | gsub("[\t\n\r]"; " "))
   '
   exit 0
 fi

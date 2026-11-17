@@ -697,14 +697,19 @@ if [[ "$1" == "__preview-search" ]]; then
   exit 0
 fi
 
-# ---------- Sub-command: __list-activity ----------
+# ---------- Sub-command: __json-activity ----------
 # The Slack "Activity" feed: mentions, reactions, thread replies, DMs, invites.
-# Emits TAB-separated rows:
-#   <feed_ts>\t<channel>\t<ts>\t<thread_ts>\t<type>\t<display>\t<key>
-# The raw feed is cached so the preview can look items up without re-fetching.
+# Called as: fzfslack __json-activity [mode]
+# Prints the items as a JSON array of
+#   {feed_ts, unread, type, channel, channel_name, ts, thread_ts, actor,
+#    actor_name, reaction, unread_count, key}
+# with the channel / user names resolved (channel_name e.g. "#general" or
+# "@user", empty when unknown). The raw feed is cached so the preview can look
+# items up without re-fetching. __list-activity renders its rows from it. Also
+# used by ~/.local/bin/rex-sidebar (inbox), so keep the fields stable.
 FZFSLACK_ACTIVITY_TYPES="thread_v2,dm,generic_system_alert,message_reaction,internal_channel_invite,list_record_edited,bot_dm_bundle,at_user,at_user_group,at_channel,at_everyone,keyword,list_record_assigned,list_user_mentioned,external_channel_invite,shared_workspace_invite,external_dm_invite"
 
-if [[ "$1" == "__list-activity" ]]; then
+if [[ "$1" == "__json-activity" ]]; then
   mode="${2:-${FZFSLACK_ACTIVITY_MODE:-chrono_reads_and_unreads}}"
   raw="$(api activity.feed \
     --data-urlencode "limit=50" \
@@ -743,14 +748,26 @@ if [[ "$1" == "__list-activity" ]]; then
   cmap="$(printf '%s\n' "$chans" | build_channel_map)"
   umap="$(printf '%s\n' "$users" | build_user_map)"
 
-  jq_args -r \
-    --argjson cmap "$cmap" \
-    --argjson umap "$umap" \
-    "$JQLIB"'
-    def loc: ($cmap[.channel] // (if .channel == "" then "?" else .channel end));
-    def actorname: ($umap[.actor] // "someone");
+  jq -c --argjson cmap "$cmap" --argjson umap "$umap" '
+    map(. + {channel_name: ($cmap[.channel] // ""), actor_name: ($umap[.actor] // "")})' <<<"$norm"
+  exit 0
+fi
+
+# ---------- Sub-command: __list-activity ----------
+# Renders the activity feed (see __json-activity) as TAB-separated rows:
+#   <feed_ts>\t<channel>\t<ts>\t<thread_ts>\t<type>\t<display>\t<key>
+# Only the item with the key FZFSLACK_ACTIVITY_KEY is rendered when it is set
+# (activity view <key>).
+
+if [[ "$1" == "__list-activity" ]]; then
+  norm="$("$SCRIPT" __json-activity "${2:-${FZFSLACK_ACTIVITY_MODE:-chrono_reads_and_unreads}}")" || exit 1
+
+  jq_args -r --arg only "${FZFSLACK_ACTIVITY_KEY:-}" "$JQLIB"'
+    def loc: (if .channel_name != "" then .channel_name elif .channel == "" then "?" else .channel end);
+    def actorname: (if .actor_name != "" then .actor_name else "someone" end);
     def rname: (.reaction | gsub("::skin-tone-[0-9]"; ""));
     .[]
+    | select($only == "" or .key == $only)
     | . as $a
     | (if .type == "message_reaction" then [$i_react, "reaction", ":" + rname + ": from " + actorname]
        elif .type == "thread_v2" then [$i_thread, "thread", (if .unread_count > 0 then ((.unread_count | tostring) + " new " + (if .unread_count == 1 then "reply" else "replies" end)) else "new activity" end)]
@@ -1161,6 +1178,9 @@ Usage:
   fzfslack                 browse conversations, messages and threads
   fzfslack search [query]  search messages across the workspace
   fzfslack activity        browse your activity feed (mentions, reactions, ...)
+  fzfslack activity view <key>
+                           show a single activity item of the feed (by its key,
+                           e.g. thread_v2-<channel>-<thread_ts>)
   fzfslack tokens [file]   extract FZFSLACK_XOXC / FZFSLACK_XOXD from a copied
                            "Copy as cURL" Slack request (file, stdin, or a temp
                            file opened in \$EDITOR) and print them as exports
@@ -1230,7 +1250,7 @@ Activity Keybindings (fzfslack activity):
   alt-o  : open the message in the Slack app
   alt-y  : copy the message permalink to the clipboard
   alt-m  : mark the selected activity as read
-  alt-u  : toggle showing only unread activity
+  alt-u  : toggle showing only unread activity (not for a single item)
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
@@ -1446,13 +1466,24 @@ run_search() {
 # Activity (top-level subcommand): the Slack Activity feed. Enter opens the
 # referenced message / thread read-only in nvim; the preview shows it. alt-u
 # toggles unread-only (fzf aborts via --expect and the loop flips the mode).
+# Activity view. With a key (activity view <key>) only that activity item is
+# shown, read or unread, and the unread toggle is disabled.
 run_activity() {
-  local mode="chrono_reads_and_unreads" action rows prompt sel key
+  local mode="chrono_reads_and_unreads" action rows prompt sel key one="$1"
+  local unread_args=(--expect "alt-u")
   action="$SCRIPT __action"
+  if [[ -n "$one" ]]; then
+    export FZFSLACK_ACTIVITY_KEY="$one"
+    unread_args=()
+  fi
   while true; do
     export FZFSLACK_ACTIVITY_MODE="$mode"
     rows="$("$SCRIPT" __list-activity "$mode")"
     if [[ -z "$rows" ]]; then
+      if [[ -n "$one" ]]; then
+        pause_msg "Activity not found (only the latest 50 activities are available)."
+        exit 1
+      fi
       if [[ "$mode" == "priority_unreads_v1" ]]; then
         pause_msg "No unread activity."
         mode="chrono_reads_and_unreads"
@@ -1493,7 +1524,7 @@ run_activity() {
       --bind "alt-y:execute($action yank {2} {3})" \
       --bind "alt-m:execute($action mark-activity {5} {1} {7} {3})+reload($SCRIPT __list-activity $mode)" \
       --bind "ctrl-r:reload($SCRIPT __list-activity $mode)" \
-      --expect "alt-u" \
+      "${unread_args[@]}" \
       --preview-window "right:65%" \
       --preview "$SCRIPT __preview-activity {2} {3} {4} {5}")"
     key="$(printf '%s\n' "$sel" | sed -n '1p')"
@@ -1515,13 +1546,17 @@ if [[ "$1" == "search" ]]; then
   run_search "$*"
   exit 0
 fi
-if [[ "$1" == "activity" ]]; then
+if [[ "$1" == "activity" && $# -eq 1 ]]; then
   run_activity
   exit 0
 fi
+if [[ "$1" == "activity" && "$2" == "view" && -n "$3" && $# -eq 3 ]]; then
+  run_activity "$3"
+  exit 0
+fi
 if [[ -n "$1" ]]; then
-  echo "Unknown command: $1" >&2
-  echo "Usage: fzfslack [search [query] | activity | tokens [file]]" >&2
+  echo "Unknown command: $*" >&2
+  echo "Usage: fzfslack [search [query] | activity [view <key>] | tokens [file]]" >&2
   exit 1
 fi
 

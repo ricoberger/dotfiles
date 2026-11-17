@@ -20,11 +20,12 @@ FZFGH_NOTIF_CACHE="${FZFGH_NOTIF_CACHE:-${TMPDIR:-/tmp}/fzfgh-notifications.json
 # run. Each entry is "Name|query". Override the whole list at runtime via the
 # FZFGH_PR_FILTERS / FZFGH_ISSUE_FILTERS env vars (newline-separated "Name|query"
 # entries); otherwise these baked defaults are used.
-# Start date (YYYY-MM-DD) for the "Recent" filter: 14 days ago. Uses BSD date
+# Start date (YYYY-MM-DD) for the "Recent" filter, which shows the pull requests
+# updated since then: 14 days ago. Uses BSD date
 # (macOS) and falls back to GNU date.
 FZFGH_RECENT_SINCE="$(date -v-14d +%F 2>/dev/null || date -d '14 days ago' +%F)"
 FZFGH_PR_DEFAULT_FILTERS=(
-  "Recent|archived:false is:open (review-requested:$FZFGH_USER OR author:$FZFGH_USER) -author:app/dependabot created:>=$FZFGH_RECENT_SINCE"
+  "Recent|archived:false is:open (review-requested:$FZFGH_USER OR author:$FZFGH_USER) -author:app/dependabot updated:>=$FZFGH_RECENT_SINCE"
   "Involves|archived:false is:open involves:$FZFGH_USER"
   "Created|archived:false is:open author:$FZFGH_USER"
   "Assigned|archived:false is:open assignee:$FZFGH_USER"
@@ -101,6 +102,107 @@ gh_notifications() {
   esac
 }
 
+# ---------- JSON mode ----------
+#
+# Called as: fzfgh __json <prs|issues> [query]
+#
+# Fetches the pull requests / issues of the query (FZFGH_QUERY when not passed;
+# the "__repo <owner/repo>" filter and the single pull request / issue of the
+# view command are supported as in the list mode) and prints them as a JSON
+# array of
+#   prs:    {repo, number, title, author, state, isDraft, createdAt, updatedAt, url}
+#   issues: {repo, number, title, author, state, createdAt, updatedAt, url}
+# The list mode renders its rows from it. Also used by ~/.local/bin/rex-sidebar
+# (inbox), so keep the fields stable.
+
+if [[ "$1" == "__json" ]]; then
+  case "$2" in
+    prs)
+      query="${3:-$FZFGH_QUERY}"
+      err="$(mktemp)"
+      if [[ -n "$FZFGH_ONE_REPO" ]]; then
+        # View command: a single pull request, fetched directly and wrapped in
+        # an array.
+        out="$(gh pr view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
+          --json number,title,author,state,isDraft,createdAt,updatedAt,url 2>"$err" \
+          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+        status=$?
+      elif [[ "$query" == "__repo "* ]]; then
+        # Repository filter: list a single repo's open PRs straight from the API
+        # (gh pr list) instead of the search index, which lags for new PRs.
+        one_repo="${query#__repo }"
+        out="$(gh pr list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
+          --json number,title,author,state,isDraft,createdAt,updatedAt,url 2>"$err" \
+          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
+        status=$?
+      else
+        # Split the query into its individual qualifiers. "gh search prs" only
+        # treats tokens like "is:open" or "involves:user" as search qualifiers
+        # when they are passed as separate arguments; a single quoted string is
+        # matched as free-text keywords instead, which silently returns the wrong
+        # pull requests. The qualifiers are passed after "--" so negated
+        # qualifiers (e.g. "-author:app/dependabot") are not parsed as flags.
+        read -ra query_args <<< "$query"
+        out="$(gh search prs \
+          --limit "$FZFGH_LIMIT" \
+          --json number,title,repository,author,state,isDraft,createdAt,updatedAt,url \
+          -- "${query_args[@]}" 2>"$err")"
+        status=$?
+      fi
+      if [[ $status -ne 0 ]]; then
+        cat "$err" >&2
+        rm -f "$err"
+        exit 1
+      fi
+      rm -f "$err"
+
+      printf '%s' "$out" | jq -c 'map({
+        repo: .repository.nameWithOwner, number, title, author: .author.login,
+        state, isDraft: (.isDraft // false), createdAt, updatedAt, url})'
+      exit 0
+      ;;
+    issues)
+      query="${3:-$FZFGH_QUERY}"
+      err="$(mktemp)"
+      if [[ -n "$FZFGH_ONE_REPO" ]]; then
+        # View command: a single issue, fetched directly and wrapped in an array.
+        out="$(gh issue view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
+          --json number,title,author,state,createdAt,updatedAt,url 2>"$err" \
+          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+        status=$?
+      elif [[ "$query" == "__repo "* ]]; then
+        # Repository filter: list a single repo's open issues straight from the
+        # API (gh issue list) instead of the search index, which lags for new
+        # issues.
+        one_repo="${query#__repo }"
+        out="$(gh issue list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
+          --json number,title,author,state,createdAt,updatedAt,url 2>"$err" \
+          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
+        status=$?
+      else
+        # Split the query into its individual qualifiers (see the prs branch).
+        read -ra query_args <<< "$query"
+        out="$(gh search issues "${query_args[@]}" \
+          --limit "$FZFGH_LIMIT" \
+          --json number,title,repository,author,state,createdAt,updatedAt,url 2>"$err")"
+        status=$?
+      fi
+      if [[ $status -ne 0 ]]; then
+        cat "$err" >&2
+        rm -f "$err"
+        exit 1
+      fi
+      rm -f "$err"
+
+      printf '%s' "$out" | jq -c 'map({
+        repo: .repository.nameWithOwner, number, title, author: .author.login,
+        state, createdAt, updatedAt, url})'
+      exit 0
+      ;;
+  esac
+  exit 1
+fi
+
 # ---------- List mode ----------
 #
 # Called for the initial feed and on every reload as:
@@ -115,43 +217,8 @@ if [[ "$1" == "__list" ]]; then
 
   case "$kind" in
     prs)
-      query="${3:-$FZFGH_QUERY}"
-      err="$(mktemp)"
-      if [[ -n "$FZFGH_ONE_REPO" ]]; then
-        # View command: a single pull request, fetched directly and wrapped in
-        # an array so the renderer below is unchanged.
-        out="$(gh pr view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
-          --json number,title,author,state,isDraft,createdAt,url 2>"$err" \
-          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
-        status=$?
-      elif [[ "$query" == "__repo "* ]]; then
-        # Repository filter: list a single repo's open PRs straight from the API
-        # (gh pr list) instead of the search index, which lags for new PRs.
-        one_repo="${query#__repo }"
-        out="$(gh pr list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
-          --json number,title,author,state,isDraft,createdAt,url 2>"$err" \
-          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
-        status=$?
-      else
-        # Split the query into its individual qualifiers. "gh search prs" only
-        # treats tokens like "is:open" or "involves:user" as search qualifiers
-        # when they are passed as separate arguments; a single quoted string is
-        # matched as free-text keywords instead, which silently returns the wrong
-        # pull requests. The qualifiers are passed after "--" so negated
-        # qualifiers (e.g. "-author:app/dependabot") are not parsed as flags.
-        read -ra query_args <<< "$query"
-        out="$(gh search prs \
-          --limit "$FZFGH_LIMIT" \
-          --json number,title,repository,author,state,isDraft,createdAt,url \
-          -- "${query_args[@]}" 2>"$err")"
-        status=$?
-      fi
-      if [[ $status -ne 0 ]]; then
-        cat "$err" >&2
-        rm -f "$err"
-        exit 1
-      fi
-      rm -f "$err"
+      # The pull requests come from the JSON mode, which handles the query.
+      out="$("$SCRIPT" __json prs "${3:-$FZFGH_QUERY}")" || exit 1
 
       # Tab-delimited rows: <repo>\t<number>\t<isDraft>\t<display>. The first
       # three fields stay hidden from the picker (--with-nth 4) but remain
@@ -173,9 +240,9 @@ if [[ "$1" == "__list" ]]; then
               end
           end;
         .[]
-        | .repository.nameWithOwner as $repo
+        | .repo as $repo
         | (.number|tostring) as $num
-        | (.isDraft // false) as $draft
+        | .isDraft as $draft
         | (if (.state|ascii_downcase) == "merged" then "mauve"
            elif (.state|ascii_downcase) == "closed" then "red"
            elif $draft then "gray"
@@ -185,43 +252,14 @@ if [[ "$1" == "__list" ]]; then
           + "\u001b[" + color($c) + "m\uf407\u001b[0m"
           + " [#" + $num + "] " + $repo + ": "
           + ((.title // "-") | gsub("[\t\n\r]"; " "))
-          + "  (" + (.author.login // "-") + " \u00b7 " + reltime(.createdAt) + ")"
+          + "  (" + (.author // "-") + " \u00b7 " + reltime(.createdAt) + ")"
       '
       exit 0
       ;;
 
     issues)
-      query="${3:-$FZFGH_QUERY}"
-      err="$(mktemp)"
-      if [[ -n "$FZFGH_ONE_REPO" ]]; then
-        # View command: a single issue, fetched directly and wrapped in an array.
-        out="$(gh issue view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
-          --json number,title,author,state,createdAt,url 2>"$err" \
-          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
-        status=$?
-      elif [[ "$query" == "__repo "* ]]; then
-        # Repository filter: list a single repo's open issues straight from the
-        # API (gh issue list) instead of the search index, which lags for new
-        # issues.
-        one_repo="${query#__repo }"
-        out="$(gh issue list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
-          --json number,title,author,state,createdAt,url 2>"$err" \
-          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
-        status=$?
-      else
-        # Split the query into its individual qualifiers (see the prs branch).
-        read -ra query_args <<< "$query"
-        out="$(gh search issues "${query_args[@]}" \
-          --limit "$FZFGH_LIMIT" \
-          --json number,title,repository,author,state,createdAt,url 2>"$err")"
-        status=$?
-      fi
-      if [[ $status -ne 0 ]]; then
-        cat "$err" >&2
-        rm -f "$err"
-        exit 1
-      fi
-      rm -f "$err"
+      # The issues come from the JSON mode, which handles the query.
+      out="$("$SCRIPT" __json issues "${3:-$FZFGH_QUERY}")" || exit 1
 
       # Tab-delimited rows: <repo>\t<number>\t<display>. The first two fields
       # stay hidden from the picker (--with-nth 3) but remain addressable in
@@ -243,7 +281,7 @@ if [[ "$1" == "__list" ]]; then
               end
           end;
         .[]
-        | .repository.nameWithOwner as $repo
+        | .repo as $repo
         | (.number|tostring) as $num
         | (if (.state|ascii_downcase) == "open" then "green"
            elif (.state|ascii_downcase) == "closed" then "mauve"
@@ -252,7 +290,7 @@ if [[ "$1" == "__list" ]]; then
           + "\u001b[" + color($c) + "m\uf41b\u001b[0m"
           + " [#" + $num + "] " + $repo + ": "
           + ((.title // "-") | gsub("[\t\n\r]"; " "))
-          + "  (" + (.author.login // "-") + " \u00b7 " + reltime(.createdAt) + ")"
+          + "  (" + (.author // "-") + " \u00b7 " + reltime(.createdAt) + ")"
       '
       exit 0
       ;;
