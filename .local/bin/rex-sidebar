@@ -866,20 +866,29 @@ inbox_fetch_source() {
       ;;
     agents)
       # Args: <session> <block> <window>
-      # "<icon> [<state>] <session>" / "<app> · <title> · <kind> · <msg> ·
+      # "<icon> [<state>] <title or session>" / "<app> · <kind> · <msg> ·
       # <progress> · <age>" (gray, empty parts left out), with the icon in the
-      # color of the state, for every status record of every terminal.
+      # color of the state, for every status record of every terminal. The
+      # root record of a terminal is left out when it has child records, which
+      # carry the information (e.g. the idle fzftasks UI and its tasks).
       json="$(agents_json)" || return 1
       jq -r --arg icon "$ICON_AGENT" "$INBOX_JQ"'
-        .[]
+        group_by(.block)
+        | map(if any(.[]; .id != null) then map(select(.id != null)) else . end)
+        | add // []
+        | .[]
         | (.updated_at | isotime) as $time
-        | ({blocked: "33", done: "32", error: "31", working: "34"}[.state] // "90") as $color
+        # The colors of fzftasks: running (working) yellow, waiting for the
+        # user (done, blocked) magenta.
+        | ({working: "33", done: "35", blocked: "35", error: "31"}[.state] // "90") as $color
         | item($time; "agent:" + .block + ":" + (.id // "");
             .session; .block; .window; "";
             esc($color) + $icon + reset + " [" + .state + "] "
-              + (if .session_label != "" then .session_label else .session end);
+              + (if (.title // "") != "" then .title
+                 elif .session_label != "" then .session_label
+                 else .session end);
             gray
-              + ([(.effective_app // "?"), (.title // ""), (.kind // ""), (.msg // ""),
+              + ([(.effective_app // "?"), (.kind // ""), (.msg // ""),
                   (if .progress != null then "\(.progress)%" else "" end), ago($time)]
                  | map(select(. != "")) | join(" · "))
               + reset)' <<<"$json"
