@@ -171,6 +171,50 @@ parse_pr_key() {
   PR_NUMBER="${rest##*#}"
 }
 
+# GitHub repository names are case-insensitive, so the same repository can be
+# spelled differently by different sources (e.g. "Staffbase/mops" from the
+# GitHub API, "staffbase/mops" typed in a URL or as a local directory). All
+# repository lookups therefore ignore the case.
+
+# Print the local clone of a repository as "<org>/<repo>" spelled like its
+# directory in $FZFTASKS_GITHUB_DIR, preferring an exact match. Returns 1 when
+# there is no clone.
+local_repo() {
+  [[ -n "$1" ]] || return 1
+  find "$FZFTASKS_GITHUB_DIR" -mindepth 2 -maxdepth 2 -type d 2>/dev/null |
+    awk -v base="$FZFTASKS_GITHUB_DIR/" -v want="$1" '
+      { d = substr($0, length(base) + 1) }
+      d == want { exact = d }
+      tolower(d) == tolower(want) && fold == "" { fold = d }
+      END {
+        if (exact != "") print exact
+        else if (fold != "") print fold
+        else exit 1
+      }'
+}
+
+# Print the key of an existing item, ignoring the case of the repository in
+# pull request keys; other keys are printed as they are. New pull request keys
+# are spelled like on GitHub when GITHUB is set (needs gh and the network).
+resolve_key() {
+  local key="$1" existing canonical
+  [[ "$(kind_of "$key")" == pr ]] || {
+    printf '%s' "$key"
+    return
+  }
+  existing="$(sql "SELECT key FROM items WHERE key = $(q "$key") COLLATE NOCASE ORDER BY key = $(q "$key") DESC LIMIT 1;")"
+  if [[ -n "$existing" ]]; then
+    printf '%s' "$existing"
+    return
+  fi
+  if [[ -n "${2:-}" ]]; then
+    parse_pr_key "$key"
+    canonical="$(gh repo view "$PR_REPO" --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
+    [[ -n "$canonical" ]] && key="pr:$canonical#$PR_NUMBER"
+  fi
+  printf '%s' "$key"
+}
+
 # Move "running" items whose process is gone (crash, reboot, closed tab) to
 # "waiting". Without a key all running items are checked.
 reset_stale() {
@@ -282,14 +326,14 @@ status_item() {
 # unpushed commits (its HEAD and local branch exist on GitHub), so local
 # commits of an agent are never discarded.
 workspace_pr() {
-  local repo_dir info head wt old tip
+  local repo_dir clone info head wt old tip
   parse_pr_key "$1"
 
-  repo_dir="$FZFTASKS_GITHUB_DIR/$PR_REPO"
-  if [[ ! -d "$repo_dir" ]]; then
-    echo "Local clone not found at $repo_dir"
+  if ! clone="$(local_repo "$PR_REPO")"; then
+    echo "Local clone of $PR_REPO not found in $FZFTASKS_GITHUB_DIR"
     return 1
   fi
+  repo_dir="$FZFTASKS_GITHUB_DIR/$clone"
 
   info="$(gh pr view "$PR_NUMBER" --repo "$PR_REPO" --json headRefName,baseRefName 2>/dev/null)"
   head="$(jq -r '.headRefName // empty' <<<"$info" 2>/dev/null)"
@@ -299,7 +343,9 @@ workspace_pr() {
     return 1
   fi
 
-  wt="$FZFTASKS_WORKTREE_DIR/${PR_REPO%%/*}/${PR_REPO#*/}/${head//\//-}"
+  # Spelled like the clone, so the worktree path matches the directory on
+  # disk.
+  wt="$FZFTASKS_WORKTREE_DIR/${clone%%/*}/${clone#*/}/${head//\//-}"
   if [[ ! -d "$wt" ]]; then
     if ! git -C "$repo_dir" worktree add --detach "$wt"; then
       echo "Failed to create worktree at $wt"
@@ -345,7 +391,7 @@ commit_on_github() {
 # the repository's default branch. An existing worktree is reused as is; it is
 # the item's own branch, so there is nothing to refresh.
 workspace_task() {
-  local repo repo_dir branch
+  local repo repo_dir clone branch
   repo="$(item_field "$1" repo)"
   if [[ -z "$repo" ]]; then
     WORKSPACE="$WORKSPACES/$(session_id "$1")"
@@ -353,11 +399,11 @@ workspace_task() {
     return
   fi
 
-  repo_dir="$FZFTASKS_GITHUB_DIR/$repo"
-  if [[ ! -d "$repo_dir" ]]; then
-    echo "Local clone not found at $repo_dir"
+  if ! clone="$(local_repo "$repo")"; then
+    echo "Local clone of $repo not found in $FZFTASKS_GITHUB_DIR"
     return 1
   fi
+  repo_dir="$FZFTASKS_GITHUB_DIR/$clone"
 
   BASE="$(git -C "$repo_dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"
   BASE="${BASE#origin/}"
@@ -366,7 +412,7 @@ workspace_task() {
   fi
 
   branch="$(session_id "$1")"
-  WORKSPACE="$FZFTASKS_WORKTREE_DIR/${repo%%/*}/${repo#*/}/$branch"
+  WORKSPACE="$FZFTASKS_WORKTREE_DIR/${clone%%/*}/${clone#*/}/$branch"
   [[ -d "$WORKSPACE" ]] && return 0
 
   if git -C "$repo_dir" show-ref --verify --quiet "refs/heads/$branch"; then
@@ -553,6 +599,9 @@ cmd_start() {
   esac
 
   init
+  # The same pull request may be handed over with a differently spelled
+  # repository; reuse its item, and spell new keys like on GitHub.
+  key="$(resolve_key "$key" github)"
   reset_stale "$key"
   state="$(item_field "$key" state)"
 
@@ -600,6 +649,11 @@ cmd_start() {
         return 0
       fi
       title="$(printf '%s' "$title" | tr '\t\n' '  ')"
+      # Pull requests work in their own repository, spelled like in the key.
+      if [[ "$kind" == pr ]]; then
+        parse_pr_key "$key"
+        repo="$PR_REPO"
+      fi
       sql "INSERT INTO items (key, title, details, repo, state, updated_at) VALUES ($(q "$key"), $(q "$title"), CAST(readfile($(q "$tmp")) AS TEXT), NULLIF($(q "$repo"), ''), 'todo', $(now));"
       rm -f "$tmp"
       if [[ "$tpl" == track ]]; then
@@ -704,6 +758,7 @@ cmd_open() {
   WARN=""
 
   init
+  key="$(resolve_key "$key")"
   reset_stale "$key"
   state="$(item_field "$key" state)"
   [[ -n "$state" ]] || fail "Unknown item: $key"
@@ -766,20 +821,27 @@ sql_list() {
 }
 
 cmd_done() {
-  local k
+  local k keys=()
   [[ $# -gt 0 && -n "$1" ]] || die "done: missing key"
   init
-  sql "UPDATE items SET state = 'done', updated_at = $(now) WHERE key IN $(sql_list "$@");"
   for k in "$@"; do
+    keys+=("$(resolve_key "$k")")
+  done
+  sql "UPDATE items SET state = 'done', updated_at = $(now) WHERE key IN $(sql_list "${keys[@]}");"
+  for k in "${keys[@]}"; do
     status_item "$k" clear
   done
 }
 
 # Move done items back to waiting. Other states are left unchanged.
 cmd_reopen() {
+  local k keys=()
   [[ $# -gt 0 && -n "$1" ]] || die "reopen: missing key"
   init
-  sql "UPDATE items SET state = 'waiting', updated_at = $(now) WHERE key IN $(sql_list "$@") AND state = 'done';"
+  for k in "$@"; do
+    keys+=("$(resolve_key "$k")")
+  done
+  sql "UPDATE items SET state = 'waiting', updated_at = $(now) WHERE key IN $(sql_list "${keys[@]}") AND state = 'done';"
 }
 
 # Create an ad-hoc item in $EDITOR: the first non-empty line is the title, the
@@ -824,6 +886,7 @@ cmd_reply() {
   [[ -n "$key" ]] || die "reply: missing key"
 
   init
+  key="$(resolve_key "$key")"
   reset_stale "$key"
   [[ "$(item_field "$key" state)" == waiting ]] ||
     fail "Only waiting items can be continued in the background"
@@ -1058,7 +1121,8 @@ delete_item() {
       else
         repo="$(item_field "$key" repo)"
       fi
-      if ! git -C "$FZFTASKS_GITHUB_DIR/$repo" worktree remove "$workspace"; then
+      repo="$(local_repo "$repo")" || repo=""
+      if [[ -z "$repo" ]] || ! git -C "$FZFTASKS_GITHUB_DIR/$repo" worktree remove "$workspace"; then
         echo "Failed to remove the worktree $workspace (local changes?), $key is kept"
         return 1
       fi

@@ -122,10 +122,14 @@ if [[ "$1" == "__json" ]]; then
       err="$(mktemp)"
       if [[ -n "$FZFGH_ONE_REPO" ]]; then
         # View command: a single pull request, fetched directly and wrapped in
-        # an array.
+        # an array. The repository is taken from the URL returned by GitHub
+        # instead of the argument, so it is spelled like on GitHub even when the
+        # argument is not (repository names are case-insensitive); this keeps
+        # e.g. the keys handed to fzftasks consistent. The same applies to the
+        # repository filter below and to issues.
         out="$(gh pr view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
           --json number,title,author,state,isDraft,createdAt,updatedAt,url 2>"$err" \
-          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+          | jq -c '[. + {repository:{nameWithOwner:(.url | capture("github.com/(?<r>[^/]+/[^/]+)/").r)}}]')"
         status=$?
       elif [[ "$query" == "__repo "* ]]; then
         # Repository filter: list a single repo's open PRs straight from the API
@@ -133,7 +137,7 @@ if [[ "$1" == "__json" ]]; then
         one_repo="${query#__repo }"
         out="$(gh pr list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
           --json number,title,author,state,isDraft,createdAt,updatedAt,url 2>"$err" \
-          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
+          | jq -c 'map(. + {repository:{nameWithOwner:(.url | capture("github.com/(?<r>[^/]+/[^/]+)/").r)}})')"
         status=$?
       else
         # Split the query into its individual qualifiers. "gh search prs" only
@@ -168,7 +172,7 @@ if [[ "$1" == "__json" ]]; then
         # View command: a single issue, fetched directly and wrapped in an array.
         out="$(gh issue view "$FZFGH_ONE_NUMBER" --repo "$FZFGH_ONE_REPO" \
           --json number,title,author,state,createdAt,updatedAt,url 2>"$err" \
-          | jq -c --arg r "$FZFGH_ONE_REPO" '[. + {repository:{nameWithOwner:$r}}]')"
+          | jq -c '[. + {repository:{nameWithOwner:(.url | capture("github.com/(?<r>[^/]+/[^/]+)/").r)}}]')"
         status=$?
       elif [[ "$query" == "__repo "* ]]; then
         # Repository filter: list a single repo's open issues straight from the
@@ -177,7 +181,7 @@ if [[ "$1" == "__json" ]]; then
         one_repo="${query#__repo }"
         out="$(gh issue list --repo "$one_repo" --state open --limit "$FZFGH_LIMIT" \
           --json number,title,author,state,createdAt,updatedAt,url 2>"$err" \
-          | jq -c --arg r "$one_repo" 'map(. + {repository:{nameWithOwner:$r}})')"
+          | jq -c 'map(. + {repository:{nameWithOwner:(.url | capture("github.com/(?<r>[^/]+/[^/]+)/").r)}})')"
         status=$?
       else
         # Split the query into its individual qualifiers (see the prs branch).
