@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 
-# rex-sidebar - Sidebar panes for Rex (git status / git commits / pull request)
+# rex-sidebar - Sidebar panes for Rex (git status / git commits / pull request
+# / inbox)
 #
-# Usage: rex-sidebar [git-status | git-commits | pr]
+# Usage: rex-sidebar [git-status | git-commits | pr | inbox]
 #
 # The panes are opened by the "sidebar_toggle" action in ~/.config/rex/init.lua
 # in the directory of the focused pane. Larger views (files, diffs, logs, ...)
 # are opened in a floating layer via the "sidebar_float" action.
 #
-# Requires bash 4+ (associative arrays), fzf, git, gh and jq.
+# Requires bash 4+ (associative arrays), fzf, git, gh and jq. The inbox uses
+# fzfalertmanager, fzfslack, fzfgh, fzfjira and rex (and their configuration).
 
 SCRIPT="$(realpath "$0")"
-FZFGH="$(dirname "$SCRIPT")/fzfgh"
+BIN_DIR="$(dirname "$SCRIPT")"
+FZFGH="$BIN_DIR/fzfgh"
 REX="${REX_BIN_DIR:+$REX_BIN_DIR/}rex"
 
 # Refresh interval of the panes in seconds. The pull request data is cached per
@@ -23,15 +26,45 @@ REX_SIDEBAR_PR_INTERVAL="${REX_SIDEBAR_PR_INTERVAL:-60}"
 REX_SIDEBAR_COMMITS_LIMIT="${REX_SIDEBAR_COMMITS_LIMIT:-100}"
 REX_SIDEBAR_CACHE="${REX_SIDEBAR_CACHE:-${TMPDIR:-/tmp}/rex-sidebar}"
 
+# Inbox: refresh interval per source in seconds, how often the inbox checks for
+# sources to refresh, and the alerts filter (fzfalertmanager), pull request and
+# issue searches (fzfgh) and JQL (fzfjira) of the sources.
+REX_SIDEBAR_INBOX_TICK="${REX_SIDEBAR_INBOX_TICK:-5}"
+REX_SIDEBAR_INBOX_ALERTS_INTERVAL="${REX_SIDEBAR_INBOX_ALERTS_INTERVAL:-180}"
+REX_SIDEBAR_INBOX_SLACK_INTERVAL="${REX_SIDEBAR_INBOX_SLACK_INTERVAL:-60}"
+REX_SIDEBAR_INBOX_PRS_INTERVAL="${REX_SIDEBAR_INBOX_PRS_INTERVAL:-300}"
+REX_SIDEBAR_INBOX_ISSUES_INTERVAL="${REX_SIDEBAR_INBOX_ISSUES_INTERVAL:-300}"
+# Agents are read from the local Rex server, which is cheap.
+REX_SIDEBAR_INBOX_AGENTS_INTERVAL="${REX_SIDEBAR_INBOX_AGENTS_INTERVAL:-60}"
+# Jira is refreshed hourly, as the last update of each work item is fetched with
+# an extra request (ctrl-r refreshes all sources).
+REX_SIDEBAR_INBOX_JIRA_INTERVAL="${REX_SIDEBAR_INBOX_JIRA_INTERVAL:-3600}"
+REX_SIDEBAR_INBOX_ALERTS_FILTER="${REX_SIDEBAR_INBOX_ALERTS_FILTER:-team-core}"
+# The "Recent" pull request filter of fzfgh (updated in the last 14 days).
+REX_SIDEBAR_INBOX_PRS_QUERY="${REX_SIDEBAR_INBOX_PRS_QUERY:-archived:false is:open (review-requested:${FZFGH_USER:-ricoberger} OR author:${FZFGH_USER:-ricoberger}) -author:app/dependabot updated:>=$(date -v-14d +%F 2>/dev/null || date -d '14 days ago' +%F)}"
+# The "Involves" issue filter of fzfgh, limited to issues updated in the last
+# 14 days.
+REX_SIDEBAR_INBOX_ISSUES_QUERY="${REX_SIDEBAR_INBOX_ISSUES_QUERY:-archived:false is:open involves:${FZFGH_USER:-ricoberger} updated:>=$(date -v-14d +%F 2>/dev/null || date -d '14 days ago' +%F)}"
+# The "Assigned" filter of fzfjira.
+REX_SIDEBAR_INBOX_JIRA_JQL="${REX_SIDEBAR_INBOX_JIRA_JQL:-project = CORE AND assignee = currentUser() AND statusCategory != Done AND status != Backlog ORDER BY priority DESC, updated DESC}"
+REX_SIDEBAR_INBOX_SOURCES=(alerts slack prs issues jira agents)
+
 # Icons in the pane titles, the same as in the git-status and fzfgh pickers.
 ICON_GIT=$'\xef\x90\x98'           # git branch (git-status)
 ICON_PR=$'\xef\x90\x87'            # pull request (fzfgh)
+ICON_ISSUE=$'\xef\x90\x9b'         # issue (fzfgh)
+ICON_INBOX=$'\xef\x80\x9c'         # inbox
+ICON_ALERT=$'\xef\x81\xb1'         # warning triangle (fzfalertmanager)
+ICON_SLACK=$'\xef\x86\x98'         # slack (fzfslack)
+ICON_JIRA=$'\U000f0303'            # jira
+ICON_AGENT=$'\U000f06a9'           # robot (agents)
 
 usage() {
   cat <<'EOF'
-rex-sidebar - Sidebar panes for Rex (git status / git commits / pull request)
+rex-sidebar - Sidebar panes for Rex (git status / git commits / pull request
+/ inbox)
 
-Usage: rex-sidebar [git-status | git-commits | pr]
+Usage: rex-sidebar [git-status | git-commits | pr | inbox]
 
 git-status:
   Shows the uncommitted changes and, on a branch other than the base branch
@@ -53,6 +86,26 @@ pr:
            check logs (floating layer)
   alt-r  : rerun failed jobs of the selected check
   alt-o  : open pull request / check in the browser
+
+inbox:
+  Alerts (fzfalertmanager filter), unread Slack activity (fzfslack), recent
+  pull requests and issues (fzfgh), assigned Jira work items (fzfjira) and
+  the status of agents (and other programs) reported to Rex (OSC 7501),
+  newest first (by the last update of pull requests, issues, Jira work items
+  and agents). Sources which cannot be fetched are left out.
+
+  enter  : open the item (floating layer): alert (fzfalertmanager view), Slack
+           activity (fzfslack activity view), pull request / issue (fzfgh
+           view) or work item (fzfjira); go to the pane of an agent
+  alt-o  : open the item in the browser / the Slack app (agents: as enter)
+  alt-0  : show all sources
+  alt-1  : show only alerts
+  alt-2  : show only Slack
+  alt-3  : show only pull requests
+  alt-4  : show only issues
+  alt-5  : show only Jira
+  alt-6  : show only agents
+  ctrl-r : refresh all sources
 
 Common:
   ctrl-d : scroll half page down
@@ -631,6 +684,419 @@ run_pr() {
     --bind "alt-o:execute-silent($SCRIPT __pr-action browse {1} {2} {3})"
 }
 
+# ---------- Inbox ----------
+
+# The cache directory is versioned: bump the version when the format of the
+# cached items changes, so that a running inbox of the previous version does
+# not mark its sources as fresh for the new one.
+INBOX_DIR="$REX_SIDEBAR_CACHE/inbox-v5"
+
+inbox_interval() {
+  case "$1" in
+    alerts) printf '%s\n' "$REX_SIDEBAR_INBOX_ALERTS_INTERVAL" ;;
+    slack) printf '%s\n' "$REX_SIDEBAR_INBOX_SLACK_INTERVAL" ;;
+    prs) printf '%s\n' "$REX_SIDEBAR_INBOX_PRS_INTERVAL" ;;
+    issues) printf '%s\n' "$REX_SIDEBAR_INBOX_ISSUES_INTERVAL" ;;
+    jira) printf '%s\n' "$REX_SIDEBAR_INBOX_JIRA_INTERVAL" ;;
+    agents) printf '%s\n' "$REX_SIDEBAR_INBOX_AGENTS_INTERVAL" ;;
+  esac
+}
+
+# Seconds since a file was modified (a large number when it does not exist).
+file_age() {
+  local mtime
+  mtime="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)" || {
+    echo 999999999
+    return
+  }
+  echo $(($(date +%s) - mtime))
+}
+
+# jq definitions shared by the inbox sources (see inbox_fetch_source).
+INBOX_JQ='
+def esc(code): "\u001b[" + code + "m";
+def reset: esc("0");
+def gray: esc("90");
+# Text for a single line of a row (no tabs, newlines or row separators).
+def clean: tostring | gsub("[\t\n\r\u001f]"; " ");
+# Relative age of an epoch timestamp: "now", "5m", "3h", "2d".
+def ago($t):
+  if $t <= 0 then "?"
+  else (now - $t) as $s
+    | if $s < 60 then "now"
+      elif $s < 3600 then "\(($s / 60) | floor)m"
+      elif $s < 86400 then "\(($s / 3600) | floor)h"
+      else "\(($s / 86400) | floor)d" end
+  end;
+# RFC 3339 / ISO 8601 timestamps with fractional seconds and offsets, e.g.
+# "2026-11-13T13:22:30.144+0100" (Jira) or "2026-11-17T07:02:56.04+01:00"
+# (Rex), as epoch seconds (0 when they cannot be parsed).
+def isotime:
+  (try capture("^(?<d>[0-9-]+T[0-9:]+)(\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})?$") catch null) as $m
+  | if $m == null then 0
+    else (($m.d + "Z") | fromdate)
+      - (if ($m.z // "Z") == "Z" then 0
+         else ($m.z | gsub(":"; "")) as $z
+           | ($z[0:1] + "1" | tonumber)
+             * (($z[1:3] | tonumber) * 3600 + ($z[3:5] | tonumber) * 60) end)
+    end;
+# A cached inbox item: the time (epoch seconds, 0 when unknown), the id, four
+# action args and the display, a title and the indented details separated by
+# \x1f.
+def item($time; $id; $a1; $a2; $a3; $a4; $title; $details):
+  [($time | floor | tostring), ($id | clean), ($a1 | clean), ($a2 | clean),
+   ($a3 | clean), ($a4 | clean), ($title | clean) + "\u001f  " + ($details | clean)]
+  | join("\t");
+'
+
+# Print the items of a source as
+# "<time>\t<id>\t<arg1>\t<arg2>\t<arg3>\t<arg4>\t<display>" lines, built from
+# the JSON of the internal __json commands of the fzf scripts. The time (epoch
+# seconds, 0 when unknown) is used to order the inbox, the args are passed to
+# the inbox actions (see __inbox-action). The display has two lines, a title
+# and the details (indented), separated by \x1f in the cache and by a newline
+# in the list (see inbox_list). The title starts with the icon of the source,
+# colored by the item's severity / state.
+inbox_fetch_source() {
+  local json
+  case "$1" in
+    alerts)
+      # Args: <alertmanager> <fingerprint> <source link>
+      # "<icon> [<severity>] <alertname>" /
+      # "[silenced / inhibited · ]<alertmanager> · <summary> · <age>" (gray),
+      # with the icon in the color of the severity and the name grayed out for
+      # silenced / inhibited alerts.
+      json="$("$BIN_DIR/fzfalertmanager" __json "$REX_SIDEBAR_INBOX_ALERTS_FILTER")" || return 1
+      jq -r --arg icon "$ICON_ALERT" "$INBOX_JQ"'
+        .[]
+        | (if .silenced or .inhibited then gray else "" end) as $dim
+        | item(.starts; "alert:" + .alertmanager + ":" + .fingerprint;
+            .alertmanager; .fingerprint; .source; "";
+            .color + $icon + reset + " " + $dim + "[" + .severity + "] " + .alertname + reset;
+            gray
+              + ([(if .silenced then "silenced" elif .inhibited then "inhibited" else "" end),
+                  .alertmanager, .summary, ago(.starts)]
+                 | map(select(. != "")) | join(" · "))
+              + reset)' <<<"$json"
+      ;;
+    slack)
+      # Args: <channel> <ts> <key> (for fzfslack activity view and open-msg)
+      # "<icon> [<kind>] <what happened>" / "<channel / user> · <age>" (gray)
+      # of the unread activity, with the kinds and descriptions of the
+      # fzfslack activity view.
+      json="$("$BIN_DIR/fzfslack" __json-activity priority_unreads_v1)" || return 1
+      jq -r --arg icon "$ICON_SLACK" "$INBOX_JQ"'
+        def who: if .actor_name != "" then .actor_name else "someone" end;
+        .[]
+        | (if .type == "message_reaction" then
+             ["reaction", ":" + (.reaction | gsub("::skin-tone-[0-9]"; "")) + ": from " + who]
+           elif .type == "thread_v2" then
+             ["thread", (if .unread_count > 0
+                         then "\(.unread_count) new " + (if .unread_count == 1 then "reply" else "replies" end)
+                         else "new activity" end)]
+           elif .type == "dm" or .type == "bot_dm_bundle" then ["message", "new message"]
+           elif .type == "at_user" then ["mention", who + " mentioned you"]
+           elif .type == "at_channel" then ["mention", "@channel from " + who]
+           elif .type == "at_everyone" then ["mention", "@everyone from " + who]
+           elif .type == "at_user_group" then ["mention", who + " mentioned a group"]
+           elif .type == "keyword" then ["keyword", "keyword from " + who]
+           else [(.type | gsub("_"; " ")), "activity"] end) as $d
+        | (.feed_ts | tonumber) as $time
+        | item($time; "slack:" + .feed_ts + ":" + .channel;
+            .channel; .ts; .key; "";
+            esc("33") + $icon + reset + " [" + $d[0] + "] " + $d[1];
+            gray + (if .channel_name != "" then .channel_name else .channel end)
+              + " · " + ago($time) + reset)' <<<"$json"
+      ;;
+    prs)
+      # Args: <url>
+      # "<icon> [#<number>] <repo>: <title>" / "<author> · <age>" (gray), with
+      # the icon in the color of the state (as in fzfgh). Ordered and aged by
+      # the last update, as the query selects recently updated pull requests.
+      json="$("$FZFGH" __json prs "$REX_SIDEBAR_INBOX_PRS_QUERY")" || return 1
+      jq -r --arg icon "$ICON_PR" "$INBOX_JQ"'
+        .[]
+        | ((.updatedAt // .createdAt // "") | try fromdate catch 0) as $time
+        | (.state | ascii_downcase) as $state
+        | (if $state == "merged" then "35" elif $state == "closed" then "31"
+           elif .isDraft then "90" elif $state == "open" then "32" else "90" end) as $color
+        | item($time; "pr:" + .repo + "#" + (.number | tostring);
+            .url; ""; ""; "";
+            esc($color) + $icon + reset
+              + " [#" + (.number | tostring) + "] " + .repo + ": " + .title;
+            gray + (.author // "-") + " · " + ago($time) + reset)' <<<"$json"
+      ;;
+    issues)
+      # Args: <url>
+      # "<icon> [#<number>] <repo>: <title>" / "<author> · <age>" (gray), with
+      # the icon in the color of the state (as in fzfgh). Ordered and aged by
+      # the last update, as the query selects recently updated issues.
+      json="$("$FZFGH" __json issues "$REX_SIDEBAR_INBOX_ISSUES_QUERY")" || return 1
+      jq -r --arg icon "$ICON_ISSUE" "$INBOX_JQ"'
+        .[]
+        | ((.updatedAt // .createdAt // "") | try fromdate catch 0) as $time
+        | (.state | ascii_downcase) as $state
+        | (if $state == "open" then "32" elif $state == "closed" then "35" else "90" end) as $color
+        | item($time; "issue:" + .repo + "#" + (.number | tostring);
+            .url; ""; ""; "";
+            esc($color) + $icon + reset
+              + " [#" + (.number | tostring) + "] " + .repo + ": " + .title;
+            gray + (.author // "-") + " · " + ago($time) + reset)' <<<"$json"
+      ;;
+    jira)
+      # Args: <key> <url>
+      # "<icon> [<key>] <summary>" / "<status> · <age>" (gray), with the icon
+      # in the color of the status (as in fzfjira), ordered and aged by the
+      # last update.
+      # The search of fzfjira does not return the last update, so it is fetched
+      # per work item (in parallel); work items without it are shown last.
+      local updated
+      json="$("$BIN_DIR/fzfjira" __json "$REX_SIDEBAR_INBOX_JIRA_JQL")" || return 1
+      updated="$(jq -r '.[].key' <<<"$json" |
+        xargs -n 1 -P 8 sh -c 'acli jira workitem view "$1" --json --fields updated 2>/dev/null |
+          jq -c "{(.key): .fields.updated}" 2>/dev/null' _ |
+        jq -s -c 'add // {}')"
+      jq -r --arg icon "$ICON_JIRA" --argjson updated "${updated:-"{}"}" "$INBOX_JQ"'
+        .[]
+        | (($updated[.key] // "") | isotime) as $time
+        | item($time; "jira:" + .key; .key; .url; ""; "";
+            esc(.statusColor) + $icon + reset + " [" + .key + "] " + .summary;
+            gray + .status + (if $time > 0 then " · " + ago($time) else "" end)
+              + reset)' <<<"$json"
+      ;;
+    agents)
+      # Args: <session> <block> <window>
+      # "<icon> [<state>] <session>" / "<app> · <title> · <kind> · <msg> ·
+      # <progress> · <age>" (gray, empty parts left out), with the icon in the
+      # color of the state, for every status record of every terminal.
+      json="$(agents_json)" || return 1
+      jq -r --arg icon "$ICON_AGENT" "$INBOX_JQ"'
+        .[]
+        | (.updated_at | isotime) as $time
+        | ({blocked: "33", done: "32", error: "31", working: "34"}[.state] // "90") as $color
+        | item($time; "agent:" + .block + ":" + (.id // "");
+            .session; .block; .window; "";
+            esc($color) + $icon + reset + " [" + .state + "] "
+              + (if .session_label != "" then .session_label else .session end);
+            gray
+              + ([(.effective_app // "?"), (.title // ""), (.kind // ""), (.msg // ""),
+                  (if .progress != null then "\(.progress)%" else "" end), ago($time)]
+                 | map(select(. != "")) | join(" · "))
+              + reset)' <<<"$json"
+      ;;
+  esac
+}
+
+# Print the status records (OSC 7501) of all terminals of all Rex sessions as
+# a JSON array of the records of "rex block call ... program_status", with the
+# session (id and label), block and window of their terminal.
+agents_json() {
+  local sessions session label block window
+  sessions="$("$REX" ls --json)" || return 1
+  jq -r '.sessions[] | [.session_id, (.label // "")] | @tsv' <<<"$sessions" |
+    while IFS=$'\t' read -r session label; do
+      "$REX" block ls -s "$session" --json 2>/dev/null |
+        jq -r '.blocks[] | select(.creator_name == "com.superlogical.terminal")
+          | [.block_id, .window_id] | @tsv' |
+        while IFS=$'\t' read -r block window; do
+          "$REX" block call -s "$session" -b "$block" program_status 2>/dev/null |
+            jq -c --arg session "$session" --arg label "$label" --arg block "$block" --arg window "$window" '
+              .records[]? | . + {session: $session, session_label: $label, block: $block, window: $window}'
+        done
+    done | jq -s -c '.'
+}
+
+# Show the pane of an agent: switch the Rex app showing the sidebar to the
+# agent's session and window, and focus its pane.
+focus_agent() {
+  local session="$1" block="$2" window="$3" client args=()
+  client="$("$REX" block ls -s "$REX_SESSION" --json 2>/dev/null |
+    jq -r --arg block "$REX_BLOCK" '.blocks[] | select(.block_id == $block) | .owner // empty')"
+  [[ "$client" == client:* ]] && args=(-C "$client")
+  "$REX" "${args[@]}" do session.select session_id="$session" window_id="$window" >/dev/null 2>&1
+  "$REX" focus -s "$session" "$block" >/dev/null 2>&1
+}
+
+# Refresh the cache of the given sources (all when none are given) whose last
+# refresh is older than their interval, or all of them with "force". The
+# sources are fetched in parallel and only one process (of all open inboxes)
+# fetches a source at a time. A failed fetch keeps the previous items, which
+# are dropped by inbox_list once they are older than three intervals.
+inbox_update() {
+  local force="" sources=() source lock
+  if [[ "$1" == "force" ]]; then
+    force=1
+    shift
+  fi
+  sources=("$@")
+  [[ ${#sources[@]} -eq 0 ]] && sources=("${REX_SIDEBAR_INBOX_SOURCES[@]}")
+  mkdir -p "$INBOX_DIR"
+  for source in "${sources[@]}"; do
+    if [[ -z "$force" ]] &&
+      (($(file_age "$INBOX_DIR/$source.stamp") < $(inbox_interval "$source"))); then
+      continue
+    fi
+    lock="$INBOX_DIR/$source.lock"
+    # Remove the lock of a fetch which was killed. A missing lock is skipped,
+    # otherwise the lock of a fetch started meanwhile by another process could
+    # be removed.
+    [[ -d "$lock" ]] && (($(file_age "$lock") > 300)) && rmdir "$lock" 2>/dev/null
+    mkdir "$lock" 2>/dev/null || continue
+    touch "$INBOX_DIR/$source.stamp"
+    (
+      if inbox_fetch_source "$source" >"$INBOX_DIR/$source.$$" 2>/dev/null; then
+        mv "$INBOX_DIR/$source.$$" "$INBOX_DIR/$source.items"
+      else
+        rm -f "$INBOX_DIR/$source.$$"
+      fi
+      rmdir "$lock" 2>/dev/null
+    ) &
+  done
+  wait
+}
+
+# Print the inbox as "<type>\t<id>\t<arg1>\t<arg2>\t<arg3>\t<arg4>\t<display>"
+# items from the cache: a header line with the number of items per source and
+# the active filter (all or one source, read from $REX_SIDEBAR_INBOX_FILTER_FILE),
+# then the items of all sources, newest first (items without a time last). As
+# in list_git_status, ids must never be empty.
+inbox_list() {
+  local filter=all source items count header="" timed=() pending=0
+  local reset=$'\e[0m' gray=$'\e[90m' active=$'\e[1;4m'
+  local -A icons=([alerts]="$ICON_ALERT" [slack]="$ICON_SLACK" [prs]="$ICON_PR" [issues]="$ICON_ISSUE" [jira]="$ICON_JIRA" [agents]="$ICON_AGENT")
+  local -A names=([alerts]="Alerts" [slack]="Slack" [prs]="Pull Requests" [issues]="Issues" [jira]="Jira" [agents]="Agents")
+  [[ -s "$REX_SIDEBAR_INBOX_FILTER_FILE" ]] && filter="$(<"$REX_SIDEBAR_INBOX_FILTER_FILE")"
+
+  [[ "$filter" == all ]] && header="${active}All${reset}" || header="${gray}All${reset}"
+  for source in "${REX_SIDEBAR_INBOX_SOURCES[@]}"; do
+    items=""
+    [[ -f "$INBOX_DIR/$source.stamp" && ! -d "$INBOX_DIR/$source.lock" ]] || pending=1
+    if [[ -f "$INBOX_DIR/$source.items" ]] &&
+      (($(file_age "$INBOX_DIR/$source.items") < 3 * $(inbox_interval "$source"))); then
+      items="$(<"$INBOX_DIR/$source.items")"
+    fi
+    count=0
+    [[ -n "$items" ]] && count="$(wc -l <<<"$items" | tr -d ' ')"
+
+    if [[ "$filter" == "$source" ]]; then
+      header+="  ${active}${icons[$source]} $count${reset}"
+    else
+      header+="  ${gray}${icons[$source]}${reset} $count"
+    fi
+
+    [[ "$filter" != all && "$filter" != "$source" ]] && continue
+    [[ $count -eq 0 ]] && continue
+    # "<time>\t<type>\t<id>\t...\t<display>"
+    while IFS= read -r line; do
+      timed+=("${line%%$'\t'*}"$'\t'"$source"$'\t'"${line#*$'\t'}")
+    done <<<"$items"
+  done
+
+  # The items are NUL-terminated (fzf --read0), so that they can have multiple
+  # lines.
+  printf 'header\theader\t\t\t\t\t%s\0' "$header"
+  if [[ ${#timed[@]} -gt 0 ]]; then
+    # Newest first; sort -s keeps the order of a source for equal times.
+    printf '%s\n' "${timed[@]}" | sort -s -t $'\t' -k1,1nr | cut -f 2- | tr '\n\037' '\0\n'
+  elif [[ $pending -eq 1 ]]; then
+    printf 'info\tinfo\t\t\t\t\t%sLoading...%s\0' "$gray" "$reset"
+  elif [[ "$filter" != all ]]; then
+    printf 'info\tinfo\t\t\t\t\t%sNo %s items%s\0' "$gray" "${names[$filter]}" "$reset"
+  else
+    printf 'info\tinfo\t\t\t\t\t%sInbox zero%s\0' "$gray" "$reset"
+  fi
+}
+
+# Refresh the sources in the background and reload fzf (listening on <socket>)
+# when the inbox changed, as refresh does for the other panes.
+inbox_refresh() {
+  local socket="$1" last="" current
+  while true; do
+    inbox_update
+    if [[ -S "$socket" ]]; then
+      current="$("$SCRIPT" __list inbox | cksum)"
+      if [[ "$current" != "$last" ]]; then
+        curl -s --unix-socket "$socket" -X POST http://localhost \
+          -d "reload-sync($SCRIPT __list inbox)" >/dev/null 2>&1
+        last="$current"
+      fi
+    fi
+    sleep "$REX_SIDEBAR_INBOX_TICK"
+  done
+}
+
+# Called as: rex-sidebar __inbox-action <view|browse> <type> <arg1>
+# <arg2> <arg3> <arg4> (see inbox_fetch_source for the args of each type).
+inbox_action() {
+  local action="$1" type="$2" a1="$3" a2="$4" a3="$5"
+  case "$action:$type" in
+    view:alerts) float "$BIN_DIR/fzfalertmanager" view "$a1" "$a2" ;;
+    browse:alerts) [[ -n "$a3" ]] && open "$a3" ;;
+    view:slack) float "$BIN_DIR/fzfslack" activity view "$a3" ;;
+    browse:slack) "$BIN_DIR/fzfslack" __action open-msg "$a1" "$a2" </dev/null ;;
+    view:prs | view:issues) float "$FZFGH" view "$a1" ;;
+    browse:prs | browse:issues) open "$a1" ;;
+    view:jira) float "$BIN_DIR/fzfjira" "key = $a1" ;;
+    view:agents | browse:agents) focus_agent "$a1" "$a2" "$a3" ;;
+    browse:jira)
+      if [[ -n "$a2" ]]; then
+        open "$a2"
+      else
+        "$BIN_DIR/fzfjira" __action web "$a1"
+      fi
+      ;;
+  esac
+  return 0
+}
+
+run_inbox() {
+  local socket pid list="$SCRIPT __list inbox"
+  mkdir -p "$INBOX_DIR"
+  # The filter of this pane, changed by the alt-0 ... alt-6 bindings.
+  export REX_SIDEBAR_INBOX_FILTER_FILE="$INBOX_DIR/filter-$$"
+  echo all >"$REX_SIDEBAR_INBOX_FILTER_FILE"
+  socket="$INBOX_DIR/inbox-$$.sock"
+  # Errors of the background refresh would be written over the fzf screen.
+  inbox_refresh "$socket" 2>/dev/null &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null; rm -f "$socket" "$REX_SIDEBAR_INBOX_FILTER_FILE"' EXIT
+  # Rex closes the pane with SIGHUP, which skips the EXIT trap otherwise.
+  trap 'exit' HUP TERM
+
+  local filter_binds=() i source
+  local sources=(all "${REX_SIDEBAR_INBOX_SOURCES[@]}")
+  for i in "${!sources[@]}"; do
+    filter_binds+=(--bind "alt-$i:execute-silent(echo ${sources[$i]} >$REX_SIDEBAR_INBOX_FILTER_FILE)+reload-sync($list)+first")
+  done
+
+  "$SCRIPT" __list inbox | fzf \
+    --listen "$socket" \
+    --read0 \
+    --wrap=word \
+    --wrap-sign "  " \
+    --ansi \
+    --reverse \
+    --no-sort \
+    --track \
+    --height 100% \
+    --info right \
+    --delimiter $'\t' \
+    --with-nth 7 \
+    --id-nth 2 \
+    --header-lines 1 \
+    --prompt " " \
+    --border rounded \
+    --border-label " $ICON_INBOX Inbox " \
+    --border-label-pos center \
+    --bind "ctrl-d:half-page-down" \
+    --bind "ctrl-u:half-page-up" \
+    --bind "alt-h:execute($SCRIPT --help | less -R)" \
+    --bind "enter:execute-silent($SCRIPT __inbox-action view {1} {3} {4} {5} {6})" \
+    --bind "alt-o:execute-silent($SCRIPT __inbox-action browse {1} {3} {4} {5} {6})" \
+    --bind "ctrl-r:execute-silent($SCRIPT __inbox-update force)+reload-sync($list)" \
+    "${filter_binds[@]}"
+}
+
 # ---------- Commands ----------
 
 case "${1:-}" in
@@ -643,7 +1109,18 @@ case "${1:-}" in
       git-status) list_git_status ;;
       git-commits) list_git_commits ;;
       pr) list_pr "$3" ;;
+      inbox) inbox_list ;;
     esac
+    ;;
+
+  __inbox-update)
+    shift
+    inbox_update "$@"
+    ;;
+
+  __inbox-action)
+    shift
+    inbox_action "$@"
     ;;
 
   __git-action)
@@ -701,6 +1178,10 @@ case "${1:-}" in
 
   pr)
     run_pr
+    ;;
+
+  inbox)
+    run_inbox
     ;;
 
   *)

@@ -87,10 +87,14 @@ rex.action({
 -- SIDEBAR
 --------------------------------------------------------------------------------
 
--- A sidebar on the right of the current tab with the git status, the commits
--- and the pull request of the focused pane's directory. The panes are rendered
--- by ~/.local/bin/rex-sidebar, which opens larger views (files, diffs, logs,
--- ...) in a floating layer via the "sidebar_float" action.
+-- Sidebars on the right of the current tab, rendered by ~/.local/bin/rex-sidebar,
+-- which opens larger views (files, diffs, logs, ...) in a floating layer via
+-- the "sidebar_float" action:
+--   - git: the git status, the commits and the pull request of the focused
+--     pane's directory
+--   - inbox: alerts, unread Slack activity, recent pull requests and Jira work
+--     items
+-- Only one sidebar is open at a time: opening one closes the other.
 
 local shell = "com.superlogical.terminal.shell"
 local sidebar_bin = os.getenv("HOME") .. "/.local/bin/rex-sidebar"
@@ -137,10 +141,11 @@ local function block_rect(node, block_id)
   end
 end
 
-local function sidebar_pane(name, dir)
+-- A sidebar pane, labeled "sidebar:<kind>:<name>".
+local function sidebar_pane(kind, name, dir)
   return rex.layout.block({
     flavor = shell,
-    label = sidebar_prefix .. name,
+    label = sidebar_prefix .. kind .. ":" .. name,
     options = {
       shell = "none",
       command = zsh_command(dir, { sidebar_bin, name }),
@@ -148,54 +153,101 @@ local function sidebar_pane(name, dir)
   })
 end
 
--- Open or close the sidebar in the current tab.
+-- Layouts of the sidebars.
+local sidebars = {
+  git = function(dir)
+    return rex.layout.vertical(
+      1 / 3,
+      sidebar_pane("git", "git-status", dir),
+      rex.layout.vertical(
+        0.5,
+        sidebar_pane("git", "git-commits", dir),
+        sidebar_pane("git", "pr", dir)
+      )
+    )
+  end,
+  inbox = function()
+    return sidebar_pane("inbox", "inbox", os.getenv("HOME"))
+  end,
+}
+
+-- The active window and its tiled layer.
+local function tiled_layer()
+  local view, err = rex.session.view({})
+  if not view then
+    return nil, nil, err
+  end
+  local window
+  for _, w in ipairs(view.windows or {}) do
+    if w.window_id == view.active_window_id then
+      window = w
+    end
+  end
+  for _, l in ipairs(window and window.layers or {}) do
+    if l.kind == "tiled" then
+      return window, l
+    end
+  end
+  return window, nil
+end
+
+-- Open or close a sidebar in the current tab. A sidebar of another kind is
+-- replaced.
 rex.action({
   name = "sidebar_toggle",
   title = "Toggle Sidebar",
   category = "Pane",
-  -- dir: directory for the sidebar (default: the focused pane's directory)
-  args = { dir = "string?" },
+  -- kind: "git" (default) or "inbox"
+  -- dir: directory for the git sidebar (default: the focused pane's directory)
+  args = { kind = "string?", dir = "string?" },
   run = function(ctx, args)
-    local view, err = rex.session.view({})
-    if not view then
-      rex.log("error", "sidebar_toggle: " .. tostring(err))
+    local kind = args.kind or "git"
+    if not sidebars[kind] then
+      rex.log("error", "sidebar_toggle: unknown kind " .. tostring(kind))
       return
     end
 
-    local window
-    for _, w in ipairs(view.windows or {}) do
-      if w.window_id == view.active_window_id then
-        window = w
-      end
-    end
-    local layer
-    for _, l in ipairs(window and window.layers or {}) do
-      if l.kind == "tiled" then
-        layer = l
-      end
+    local window, layer, err = tiled_layer()
+    if err then
+      rex.log("error", "sidebar_toggle: " .. tostring(err))
+      return
     end
     if not layer or not layer.layout then
       return
     end
 
-    -- Close the sidebar when it is open.
-    local open = false
+    -- Close the open sidebar. When it is of the requested kind, this toggles
+    -- it off; otherwise the requested sidebar is opened instead.
+    local open
+    local closed = {}
     for _, b in ipairs(layer.blocks or {}) do
       if b.label and b.label:sub(1, #sidebar_prefix) == sidebar_prefix then
-        open = true
+        open = b.label:sub(#sidebar_prefix + 1):match("^([^:]+)")
+        closed[b.block_id] = true
         rex.call("block.close", {
           session_id = ctx.session_id,
           block_id = b.block_id,
         })
       end
     end
-    if open then
+    if open == kind then
       return
+    end
+    if open then
+      window, layer, err = tiled_layer()
+      if not layer or not layer.layout then
+        rex.log("error", "sidebar_toggle: " .. tostring(err))
+        return
+      end
     end
 
     -- Split the whole tab, so that the sidebar spans the full height, and
-    -- give it about sidebar_columns columns.
-    local block_id = ctx.block_id or window.focused_block_id
+    -- give it about sidebar_columns columns. When the focused pane was part
+    -- of the closed sidebar, use the pane focused now.
+    local block_id = ctx.block_id
+    if not block_id or closed[block_id] then
+      block_id = window.focused_block_id
+    end
     local ratio = 0.75
     local size = rex.block.call(terminal, "size", { block_id = block_id })
     local rect = block_rect(layer.layout, block_id)
@@ -212,15 +264,7 @@ rex.action({
       side = "after",
       ratio = ratio,
       focus = false,
-      layout = rex.layout.vertical(
-        1 / 3,
-        sidebar_pane("git-status", dir),
-        rex.layout.vertical(
-          0.5,
-          sidebar_pane("git-commits", dir),
-          sidebar_pane("pr", dir)
-        )
-      ),
+      layout = sidebars[kind](dir),
     })
     if serr then
       rex.log("error", "sidebar_toggle: " .. tostring(serr))
@@ -435,8 +479,9 @@ rex.bind("cmd+0", "client.font.reset")
 
 -- Misc
 rex.bind("cmd+p", "client.palette.toggle")
-rex.bind("cmd+g", "floating_go_to")
+rex.bind("cmd+b", "floating_go_to")
 rex.bind("cmd+a", "client.sidebar.activity.toggle")
-rex.bind("cmd+b", "sidebar_toggle")
+rex.bind("cmd+g", "sidebar_toggle", { kind = "git" })
+rex.bind("cmd+i", "sidebar_toggle", { kind = "inbox" })
 rex.bind("cmd+f", "scrollback_open")
 rex.bind("cmd+,", "client.settings")
