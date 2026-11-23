@@ -377,6 +377,29 @@ conv_last_read() {
     | map(select(.id == $id)) | (.[0].last_read // "0")' "$f" 2>/dev/null
 }
 
+# Print the root message of the thread that contains the message TS ($2) in the
+# conversation $1 as compact JSON (the message itself when it is not part of a
+# thread). For the ts of a reply conversations.replies returns the reply (with
+# its thread_ts), so the parent is fetched in a second request. Prints nothing
+# when it is not available.
+thread_root_msg() {
+  local channel="$1" ts="$2" msg root i
+  for i in 1 2; do
+    msg="$(api conversations.replies \
+      --data-urlencode "channel=$channel" \
+      --data-urlencode "ts=$ts" \
+      --data-urlencode "limit=1" |
+      jq -c --arg ts "$ts" 'if .ok then (first(.messages[]? | select(.ts == $ts)) // empty) else empty end' 2>/dev/null)"
+    [[ -n "$msg" ]] || return 0
+    root="$(jq -r '.thread_ts // .ts' <<<"$msg")"
+    if [[ "$root" == "$ts" || "$i" == 2 ]]; then
+      printf '%s\n' "$msg"
+      return 0
+    fi
+    ts="$root"
+  done
+}
+
 # ---------- Sub-commands: __resolve-user / __resolve-channel ----------
 # Resolve a single id into the persistent name cache. Used by build_user_map /
 # build_channel_map as xargs -P targets to fan the API lookups out in parallel.
@@ -538,11 +561,22 @@ fi
 # Emits TAB-separated rows: <ts>\t<channel>\t<thread_root>\t<display>
 # thread_root is thread_ts when set, else ts (used to open the thread view).
 # Caches the raw history JSON so the message preview needs no extra API call.
+# When FZFSLACK_THREAD_TS is set (thread view) only the root message of that
+# thread is listed; the preview renders the whole thread.
 if [[ "$1" == "__list-messages" ]]; then
   channel="$2"
-  hist="$(api conversations.history \
-    --data-urlencode "channel=$channel" \
-    --data-urlencode "limit=$FZFSLACK_HISTORY_LIMIT")"
+  if [[ -n "$FZFSLACK_THREAD_TS" ]]; then
+    root="$(thread_root_msg "$channel" "$FZFSLACK_THREAD_TS")"
+    if [[ -z "$root" ]]; then
+      echo "Could not load the thread $FZFSLACK_THREAD_TS." >&2
+      exit 1
+    fi
+    hist="$(jq -c '{ok: true, messages: [.]}' <<<"$root")"
+  else
+    hist="$(api conversations.history \
+      --data-urlencode "channel=$channel" \
+      --data-urlencode "limit=$FZFSLACK_HISTORY_LIMIT")"
+  fi
   if [[ "$(jq -r '.ok' <<<"$hist")" != "true" ]]; then
     echo "Could not load messages: $(jq -r '.error // "error"' <<<"$hist")" >&2
     exit 1
@@ -1254,6 +1288,10 @@ Usage:
   fzfslack conversation view <id>
                            show the messages of a conversation (by its id,
                            e.g. C061S43JS76)
+  fzfslack thread view <id> <ts>
+                           show a single thread of a conversation (by the
+                           conversation id and the ts of any of its messages,
+                           e.g. C061S43JS76 1712345678.123456)
   fzfslack activity view <key>
                            show a single activity item of the feed (by its key,
                            e.g. thread_v2-<channel>-<thread_ts>)
@@ -1471,9 +1509,9 @@ run_messages() {
     --info right \
     --track \
     --id-nth 1 \
-    --prompt "$ICON_SLACK Messages: " \
+    --prompt "$ICON_SLACK ${FZFSLACK_THREAD_TS:+Thread }Messages: " \
     --border rounded \
-    --border-label " $ICON_SLACK $name " \
+    --border-label " $ICON_SLACK $name${FZFSLACK_THREAD_TS:+ $ICON_THREAD thread} " \
     --border-label-pos center \
     --bind "ctrl-d:half-page-down" \
     --bind "ctrl-u:half-page-up" \
@@ -1630,18 +1668,21 @@ if [[ "$1" == "activity" && "$2" == "view" && -n "$3" && $# -eq 3 ]]; then
   run_activity "$3"
   exit 0
 fi
-if [[ "$1" == "conversation" && "$2" == "view" && -n "$3" && $# -eq 3 ]]; then
+if [[ "$1" == "conversation" && "$2" == "view" && -n "$3" && $# -eq 3 ]] ||
+  [[ "$1" == "thread" && "$2" == "view" && -n "$3" && -n "$4" && $# -eq 4 ]]; then
   # The name (border label) of the conversation, from the channel name cache.
   name="$(printf '%s\n' "$3" | build_channel_map | jq -r --arg id "$3" '.[$id] // $id')"
   # The unread markers and "mark" read last_read / latest from the cached
   # counts, which are otherwise written by the conversation list.
   api client.counts > "$FZFSLACK_CACHE_DIR/counts.json" 2>/dev/null
+  # thread view: list only the root of the thread (see __list-messages).
+  [[ "$1" == "thread" ]] && export FZFSLACK_THREAD_TS="$4"
   run_messages "$3" "${name#[#@]}"
   exit 0
 fi
 if [[ -n "$1" ]]; then
   echo "Unknown command: $*" >&2
-  echo "Usage: fzfslack [search [query] | activity [view <key>] | conversation view <id> | tokens [file]]" >&2
+  echo "Usage: fzfslack [search [query] | activity [view <key>] | conversation view <id> | thread view <id> <ts> | tokens [file]]" >&2
   exit 1
 fi
 
