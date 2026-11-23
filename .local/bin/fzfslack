@@ -1272,6 +1272,50 @@ if [[ "$1" == "__action" ]]; then
       root="$4"
       compose_and_send "$channel" "$root" "Reply in thread:"
       ;;
+    task)
+      # Hand the thread of a message to fzftasks: $3=channel $4=ts of any
+      # message in the thread (the root is resolved, so every message of a
+      # thread maps to the same item "slack:<channel>/<thread-root-ts>"). A new
+      # item asks for an optional repository and a prompt (or "Track") and
+      # starts pi in the background, an existing item is opened. The thread as
+      # Markdown (the nvim view) with the conversation and the permalink is
+      # stored as the item's details snapshot (shown in the preview and passed
+      # to the agent).
+      channel="$3"
+      ts="$4"
+      if [[ -z "$channel" || "$channel" == "?" || -z "$ts" || "$ts" != *.* ]]; then
+        pause_msg "Nothing to hand over (no message)."
+        exit 0
+      fi
+      msg="$(thread_root_msg "$channel" "$ts")"
+      if [[ -z "$msg" ]]; then
+        pause_msg "Could not load the message $ts."
+        exit 0
+      fi
+      root="$(jq -r '.thread_ts // .ts' <<<"$msg")"
+      conv="$(resolve_channel "$channel")"
+      link="$(api chat.getPermalink \
+        --data-urlencode "channel=$channel" \
+        --data-urlencode "message_ts=$root" | jq -r '.permalink // ""')"
+      ids="$( { jq -r '.user // empty' <<<"$msg"; jq -r '(.text // "") | [scan("<@([UW][A-Z0-9]+)")] | .[][]?' <<<"$msg"; } | sort -u)"
+      map="$(printf '%s\n' "$ids" | build_user_map)"
+      # Title: "<conversation>: <first 80 characters of the root message>".
+      text="$(jq_args -r --argjson map "$map" "$JQLIB"'
+        (msgtext | decode | strip_links | oneline | ltrimstr(" "))
+        | if length > 80 then .[0:79] + "…" else . end' <<<"$msg")"
+      author="$(jq_args -r --argjson map "$map" "$JQLIB"'author(.)' <<<"$msg")"
+      started="$(jq_args -r --argjson map '{}' "$JQLIB"'fmt_full(.ts)' <<<"$msg")"
+      title="$conv: ${text:-message from $author}"
+      {
+        printf -- '- Conversation: %s (`%s`)\n' "$conv" "$channel"
+        printf -- '- Thread: `%s`, started by %s at %s\n' "$root" "$author" "$started"
+        printf -- '- Replies: %s\n' "$(jq -r '.reply_count // 0' <<<"$msg")"
+        [[ -n "$link" ]] && printf -- '- Permalink: %s\n' "$link"
+        printf '\n---\n\n'
+        FZFSLACK_RAW=1 FZFSLACK_CACHE_DIR="" "$SCRIPT" __preview-activity "$channel" "$root" "$root" thread_v2
+        printf '\n'
+      } | fzftasks start "slack:$channel/$root" --title "$title" --details -
+      ;;
   esac
   exit 0
 fi
@@ -1333,6 +1377,7 @@ Message Keybindings:
   alt-y  : copy message permalink to the clipboard
   alt-f  : open a file attached to the message / thread
   alt-m  : mark conversation as read
+  alt-enter : hand the message's thread to fzftasks
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
@@ -1348,6 +1393,7 @@ Search Keybindings (fzfslack search):
   enter  : open the selected result read-only in nvim
   alt-o  : open the message in the Slack app
   alt-y  : copy the message permalink to the clipboard
+  alt-enter : hand the message's thread to fzftasks
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
@@ -1365,6 +1411,7 @@ Activity Keybindings (fzfslack activity):
   alt-y  : copy the message permalink to the clipboard
   alt-m  : mark the selected activity as read
   alt-u  : toggle showing only unread activity (not for a single item)
+  alt-enter : hand the referenced message's thread to fzftasks
   ctrl-r : reload list
   ctrl-p : toggle preview
   ctrl-d : scroll half page down
@@ -1529,6 +1576,7 @@ run_messages() {
     --bind "alt-y:execute($action yank $channel {1})" \
     --bind "alt-f:execute($action open-files $channel {3} {1})" \
     --bind "alt-m:execute($action mark $channel {1})+reload($list)" \
+    --bind "alt-enter:execute($action task $channel {3})" \
     --preview-window "right:65%" \
     --preview "$preview"
 }
@@ -1572,6 +1620,7 @@ run_search() {
     --bind "enter:execute($action view-search {1} {2})" \
     --bind "alt-o:execute($action open-msg {1} {2})" \
     --bind "alt-y:execute($action yank {1} {2})" \
+    --bind "alt-enter:execute($action task {1} {3})" \
     --bind "ctrl-r:reload($SCRIPT __list-search)" \
     --preview-window "right:65%" \
     --preview "$SCRIPT __preview-search {1} {2}"
@@ -1637,6 +1686,7 @@ run_activity() {
       --bind "alt-o:execute($action open-msg {2} {3})" \
       --bind "alt-y:execute($action yank {2} {3})" \
       --bind "alt-m:execute($action mark-activity {5} {1} {7} {3})+reload($SCRIPT __list-activity $mode)" \
+      --bind "alt-enter:execute($action task {2} {3})" \
       --bind "ctrl-r:reload($SCRIPT __list-activity $mode)" \
       "${unread_args[@]}" \
       --preview-window "right:65%" \

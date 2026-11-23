@@ -15,6 +15,9 @@
 #                                   the namespace is omitted for cluster-scoped
 #                                   resources, everything after the first "@"
 #                                   is the kubeconfig context
+#   slack:<channel>/<thread_ts>     Slack thread (handed over by fzfslack; the
+#                                   conversation id and the ts of the thread's
+#                                   root message)
 #   adhoc:<timestamp>-<slug>        ad-hoc task created via "fzftasks new"
 #
 # Every item maps to exactly one pi session (the session id is derived from the
@@ -384,7 +387,7 @@ commit_on_github() {
   [[ -n "$2" ]] && gh api "repos/$1/commits/$2" --silent >/dev/null 2>&1
 }
 
-# Ad-hoc, Jira, alert and Kubernetes items without a repository work in a
+# Ad-hoc, Jira, alert, Kubernetes and Slack items without a repository work in a
 # scratch directory. With a repository they get a worktree at
 # "$FZFTASKS_WORKTREE_DIR/<org>/<repo>/<branch>" on a new branch named like the
 # session id (e.g. "adhoc.<timestamp>-<slug>", "jira.CORE-123"), created from
@@ -452,7 +455,7 @@ prepare_workspace() {
   fi
   case "$(kind_of "$1")" in
     pr) workspace_pr "$1" || return 1 ;;
-    adhoc | jira | alert | k8s) workspace_task "$1" || return 1 ;;
+    adhoc | jira | alert | k8s | slack) workspace_task "$1" || return 1 ;;
     *)
       echo "Unsupported item kind: $1"
       return 1
@@ -594,7 +597,7 @@ cmd_start() {
 
   kind="$(kind_of "$key")"
   case "$kind" in
-    pr | adhoc | jira | alert | k8s) ;;
+    pr | adhoc | jira | alert | k8s | slack) ;;
     *) fail "Unsupported item kind: $key" ;;
   esac
 
@@ -635,9 +638,9 @@ cmd_start() {
         # terminal, otherwise it falls back to print mode and exits at once.
         exec "$SCRIPT" __run "$key" </dev/tty
       fi
-      # Ad-hoc, Jira, alert and Kubernetes items can work in a repository; ask
-      # for it unless the caller passed --repo (an empty value means "no
-      # repository").
+      # Ad-hoc, Jira, alert, Kubernetes and Slack items can work in a
+      # repository; ask for it unless the caller passed --repo (an empty value
+      # means "no repository").
       if [[ "$repo_given" == 0 && "$kind" != pr ]]; then
         if ! repo="$(choose_repo)"; then
           rm -f "$tmp"
@@ -1171,6 +1174,12 @@ cmd_action() {
             fzfk "$a" --context "$ctx" --field-selector "metadata.name=$b"
           fi
           ;;
+        slack)
+          # "<channel>/<thread_ts>": opens the thread in fzfslack's message
+          # view.
+          rest="${key#slack:}"
+          fzfslack thread view "${rest%%/*}" "${rest#*/}"
+          ;;
         *)
           # Ad-hoc items have no source; their details are in the preview.
           ;;
@@ -1447,11 +1456,11 @@ Usage:
                           fzftasks never removes, first, then the workspaces
                           of items
 
-Track work items (pull requests, Jira work items, alerts, Kubernetes resources
-and ad-hoc tasks) and the pi agents working on them. Each item has its own pi
-session and workspace (a git worktree or a scratch directory). Agents run in the
-background; when they finish, the item moves to waiting and can be opened in
-Ghostty or Rex to continue the session.
+Track work items (pull requests, Jira work items, alerts, Kubernetes resources,
+Slack threads and ad-hoc tasks) and the pi agents working on them. Each item has
+its own pi session and workspace (a git worktree or a scratch directory). Agents
+run in the background; when they finish, the item moves to waiting and can be
+opened in Ghostty or Rex to continue the session.
 
 Keybindings:
   enter  : start a todo item (pick a prompt or "Open"; alt-enter on a prompt
