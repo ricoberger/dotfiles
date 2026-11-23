@@ -99,8 +99,10 @@ inbox:
   and agents). Sources which cannot be fetched are left out.
 
   enter  : open the item (floating layer): alert (fzfalertmanager view), Slack
-           activity (fzfslack activity view), pull request / issue (fzfgh
-           view) or work item (fzfjira); go to the pane of an agent
+           activity (fzfslack activity view), unread Slack message (fzfslack
+           thread view) or channel (fzfslack conversation view), pull request
+           / issue (fzfgh view) or work item (fzfjira); go to the pane of an
+           agent
   alt-o  : open the item in the browser / the Slack app (agents: as enter)
   alt-0  : show all sources
   alt-1  : show only alerts
@@ -785,7 +787,9 @@ inbox_fetch_source() {
       ;;
     slack)
       # Args: <channel> <ts> <key> (for fzfslack activity view and open-msg),
-      # or <channel> <ts> "" channel for the unread messages of channels.
+      # <channel> <ts> "" message for the unread messages of channels (for
+      # fzfslack thread view and open-msg), or <channel> <last_read> "" channel
+      # for channels with more unread messages (fzfslack conversation view).
       # "<icon> [<kind>] <what happened>" / "<channel / user> · <age>" (gray)
       # of the unread activity, with the kinds and descriptions of the
       # fzfslack activity view.
@@ -828,7 +832,7 @@ inbox_fetch_source() {
             | ((.messages // [])[]
                 | ((.ts | tonumber) // 0) as $time
                 | item($time; "slack-message:" + $c.channel + ":" + .ts;
-                    $c.channel; .ts; ""; "channel";
+                    $c.channel; .ts; ""; "message";
                     esc("33") + $icon + reset + " [message] " + (.text | short);
                     gray
                       + ([$c.channel_name, .author,
@@ -1079,6 +1083,8 @@ inbox_action() {
     view:slack)
       if [[ "$a4" == channel ]]; then
         float "$BIN_DIR/fzfslack" conversation view "$a1"
+      elif [[ "$a4" == message ]]; then
+        float "$BIN_DIR/fzfslack" thread view "$a1" "$a2"
       else
         float "$BIN_DIR/fzfslack" activity view "$a3"
       fi
