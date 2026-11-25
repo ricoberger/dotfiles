@@ -958,7 +958,7 @@ agents_json() {
 # agent's session and window, and focus its pane.
 focus_agent() {
   local session="$1" block="$2" window="$3" client args=()
-  client="$("$REX" block ls -s "$REX_SESSION" --json 2>/dev/null |
+  client="$("$REX" block ls -s "$REX_BLOCK" --json 2>/dev/null |
     jq -r --arg block "$REX_BLOCK" '.blocks[] | select(.block_id == $block) | .owner // empty')"
   [[ "$client" == client:* ]] && args=(-C "$client")
   "$REX" "${args[@]}" do session.select session_id="$session" window_id="$window" >/dev/null 2>&1

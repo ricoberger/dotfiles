@@ -137,8 +137,7 @@ export function backgroundUnavailableReason(
   ctx: ExtensionContext,
 ): string | undefined {
   if (!ctx.hasUI) return "pi runs without an interactive UI";
-  if (!process.env.REX_SESSION || !process.env.REX_BLOCK)
-    return "pi does not run in a Rex pane";
+  if (!process.env.REX_BLOCK) return "pi does not run in a Rex pane";
   return undefined;
 }
 
@@ -173,10 +172,25 @@ export class BackgroundWorkers {
     return dir ? path.join(dir, "rex") : "rex";
   }
 
+  /**
+   * Session of the parent pi pane. Rex no longer sets REX_SESSION; the CLI
+   * derives the session from REX_BLOCK, but "rex api call" needs a session ID.
+   */
+  private async currentRexSession(): Promise<string> {
+    const { stdout } = await execFileAsync(
+      this.rexBin(),
+      ["--autostart=false", "whoami", "--json"],
+      { timeout: 15_000 },
+    );
+    const session = (JSON.parse(stdout) as { session_id?: string }).session_id;
+    if (!session) throw new Error("could not determine the Rex session");
+    return session;
+  }
+
   private async rexCall<T>(
     method: string,
     args: Record<string, unknown>,
-    rexSession = process.env.REX_SESSION,
+    rexSession: string,
   ): Promise<T> {
     const { stdout } = await execFileAsync(
       this.rexBin(),
@@ -391,43 +405,50 @@ export class BackgroundWorkers {
 
     let record: WorkerRecord;
     try {
+      const rexSession = await this.currentRexSession();
       const parent = await this.rexCall<{ block: { window_id?: string } }>(
         "session.describe_block",
         { block_id: process.env.REX_BLOCK },
+        rexSession,
       );
       if (!parent.block.window_id)
         throw new Error("the parent pi pane is not attached to a Rex tab");
       const created = await this.rexCall<{
         layer_id: string;
         block_ids: string[];
-      }>("session.new_layer", {
-        window_id: parent.block.window_id,
-        bounds: PANE_BOUNDS,
-        focus: false,
-        layout: {
-          block: {
-            flavor: "com.superlogical.terminal.shell",
-            label: `subagent:${agent.name}:${sessionId}`,
-            options: {
-              command,
-              cwd,
-              path_prepend: (process.env.PATH ?? "")
-                .split(path.delimiter)
-                .filter(Boolean),
-              size: PANE_SIZE,
+      }>(
+        "session.new_layer",
+        {
+          window_id: parent.block.window_id,
+          bounds: PANE_BOUNDS,
+          focus: false,
+          layout: {
+            block: {
+              flavor: "com.superlogical.terminal.shell",
+              label: `subagent:${agent.name}:${sessionId}`,
+              options: {
+                command,
+                cwd,
+                path_prepend: (process.env.PATH ?? "")
+                  .split(path.delimiter)
+                  .filter(Boolean),
+                size: PANE_SIZE,
+              },
             },
           },
         },
-      });
-      await this.rexCall("session.set_layer_state", {
-        layer_id: created.layer_id,
-        state: "minimized",
-      });
+        rexSession,
+      );
+      await this.rexCall(
+        "session.set_layer_state",
+        { layer_id: created.layer_id, state: "minimized" },
+        rexSession,
+      );
       record = {
         sessionId,
         agent: agent.name,
         dir,
-        rexSession: process.env.REX_SESSION as string,
+        rexSession,
         block: created.block_ids[0],
         layer: created.layer_id,
         cwd,

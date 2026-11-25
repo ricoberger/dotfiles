@@ -701,9 +701,9 @@ start_run() {
 }
 
 # Succeed if fzftasks runs in a Rex terminal, which sets TERM_PROGRAM and
-# REX_SESSION and puts the rex CLI on the PATH.
+# REX_BLOCK and puts the rex CLI on the PATH.
 in_rex() {
-  [[ "${TERM_PROGRAM:-}" == rex && -n "${REX_SESSION:-}" ]] && command -v rex >/dev/null 2>&1
+  [[ "${TERM_PROGRAM:-}" == rex && -n "${REX_BLOCK:-}" ]] && command -v rex >/dev/null 2>&1
 }
 
 # Type a command into the shell of a Rex block and run it. Like ghostty-new, the
