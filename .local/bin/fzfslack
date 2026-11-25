@@ -1211,6 +1211,15 @@ if [[ "$1" == "__action" ]]; then
       # An activity item: $3=channel $4=ts $5=thread_ts $6=type.
       view_in_nvim __preview-activity "$3" "$4" "$5" "$6"
       ;;
+    thread)
+      # Open the thread view (reply with alt-r) of the thread that contains
+      # the message $4 in the conversation $3 (the root is resolved).
+      if [[ -z "$3" || "$3" == "?" || -z "$4" || "$4" != *.* ]]; then
+        pause_msg "No thread to open (no message)."
+        exit 0
+      fi
+      "$SCRIPT" thread view "$3" "$4"
+      ;;
     mark-activity)
       # Mark one activity feed item read: $3=type $4=feed_ts $5=key $6=ts.
       # activity.markRead requires all four; ts must be a real message ts.
@@ -1407,6 +1416,7 @@ Search Keybindings (fzfslack search):
 
 Activity Keybindings (fzfslack activity):
   enter  : open the referenced message / thread read-only in nvim
+  alt-t  : open the referenced message's thread (to reply with alt-r)
   alt-o  : open the message in the Slack app
   alt-y  : copy the message permalink to the clipboard
   alt-m  : mark the selected activity as read
@@ -1627,7 +1637,8 @@ run_search() {
 }
 
 # Activity (top-level subcommand): the Slack Activity feed. Enter opens the
-# referenced message / thread read-only in nvim; the preview shows it. alt-u
+# referenced message / thread read-only in nvim; the preview shows it. alt-t
+# opens its thread view (to reply). alt-u
 # toggles unread-only (fzf aborts via --expect and the loop flips the mode).
 # Activity view. With a key (activity view <key>) only that activity item is
 # shown, read or unread, and the unread toggle is disabled.
@@ -1683,6 +1694,7 @@ run_activity() {
       --bind "ctrl-p:toggle-preview" \
       --bind "alt-h:execute($SCRIPT --help | less -R)" \
       --bind "enter:execute($action view-activity {2} {3} {4} {5})" \
+      --bind "alt-t:execute($action thread {2} {3})" \
       --bind "alt-o:execute($action open-msg {2} {3})" \
       --bind "alt-y:execute($action yank {2} {3})" \
       --bind "alt-m:execute($action mark-activity {5} {1} {7} {3})+reload($SCRIPT __list-activity $mode)" \
