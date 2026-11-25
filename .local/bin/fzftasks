@@ -874,10 +874,14 @@ cmd_new() {
 }
 
 # Start a background run of an item claimed by this process with the given
-# prompt file, which the run removes when it finishes.
+# prompt file, which the run removes when it finishes. The run gets its own
+# session without a controlling terminal: "pi -p" handles SIGHUP (overriding
+# nohup) and would abort when the terminal that started it is closed. macOS has
+# no setsid command, so perl's POSIX::setsid is used; exec keeps the PID.
 launch_run() {
   local pid
-  nohup "$SCRIPT" __run "$1" --prompt-file "$2" >/dev/null 2>&1 </dev/null &
+  nohup perl -MPOSIX=setsid -e 'setsid(); exec @ARGV or die "exec: $!\n"' \
+    "$SCRIPT" __run "$1" --prompt-file "$2" >/dev/null 2>&1 </dev/null &
   pid=$!
   sql "UPDATE items SET pid = $pid WHERE key = $(q "$1") AND state = 'running' AND pid = $$;"
 }
