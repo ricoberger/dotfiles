@@ -1,6 +1,6 @@
 ---
 name: ai-reviewer
-model: github-copilot/gpt-6-astra
+model: github-copilot/gemini-4-neon
 thinking: medium
 description:
   Code reviewer of the AI dev team. Reviews a branch against a spec and writes

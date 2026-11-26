@@ -14,16 +14,26 @@
   "theme": "catppuccin-macchiato",
   "compaction": {
     "enabled": true,
-    "keepRecentTokens": 30000,
+    "reserveTokens": 64000,
+    "keepRecentTokens": 40000,
     "modelOverrides": {
+      "github-copilot/claude-haiku-5.5": {
+        "contextWindow": 320000
+      },
       "github-copilot/claude-sonnet-5.5": {
-        "reserveTokens": 750000
+        "contextWindow": 320000
       },
       "github-copilot/claude-opus-5.5": {
-        "reserveTokens": 750000
+        "contextWindow": 320000
       },
-      "github-copilot/claude-fable-5.1": {
-        "reserveTokens": 750000
+      "github-copilot/claude-fable-5.2": {
+        "contextWindow": 320000
+      },
+      "github-copilot/gemini-4-neon": {
+        "contextWindow": 320000
+      },
+      "github-copilot/gpt-6.2-astra": {
+        "contextWindow": 320000
       }
     }
   },

@@ -1,6 +1,6 @@
 ---
 name: ai-product-owner
-model: github-copilot/claude-fable-5.1
+model: github-copilot/claude-fable-5.2
 thinking: medium
 description:
   Requirements engineer of the AI dev team. Compiles a task and codebase context
